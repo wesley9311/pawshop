@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PawShop - Pet Supplies, Delivered Worldwide</title>
+<meta name="description" content="Smart pet supplies: water fountains, automatic feeders, GPS trackers. Free worldwide shipping.">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="config.js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; scroll-behavior: smooth; }
+  .product-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+  @media (min-width: 640px) { .product-grid { grid-template-columns: repeat(3, 1fr); gap: 1.5rem; } }
+  @media (min-width: 1024px) { .product-grid { grid-template-columns: repeat(4, 1fr); } }
+  .drawer { transform: translateX(100%); transition: transform 0.3s ease; }
+  .drawer.open { transform: translateX(0); }
+  .modal { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+  .modal.open { opacity: 1; pointer-events: auto; }
+  .toast { transform: translateY(100px); opacity: 0; transition: all 0.3s; }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  .fade-in { animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .spinner { border: 2px solid #e2e8f0; border-top: 2px solid #0f172a; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="bg-white text-slate-900">
+
+<!-- ===== Top Bar ===== -->
+<div class="bg-slate-900 text-white text-xs py-2 px-4">
+  <div class="max-w-6xl mx-auto flex items-center justify-between">
+    <span>Free worldwide shipping · 30-day returns</span>
+    <select id="currencySelect" onchange="changeCurrency()" class="bg-transparent text-white text-xs border-none cursor-pointer">
+      <option value="USD">USD $</option>
+      <option value="EUR">EUR €</option>
+      <option value="GBP">GBP £</option>
+    </select>
+  </div>
+</div>
+
+<!-- ===== Nav ===== -->
+<nav class="sticky top-0 z-40 bg-white border-b border-slate-100">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6">
+    <div class="flex items-center justify-between h-16">
+      <div class="flex items-center gap-8">
+        <a href="#" class="text-xl font-bold">PawShop</a>
+        <div class="hidden md:flex items-center gap-6">
+          <a href="#products" class="text-sm text-slate-600 hover:text-slate-900">Shop</a>
+          <a href="#about" class="text-sm text-slate-600 hover:text-slate-900">Why PawShop</a>
+          <a href="account.html" class="text-sm text-slate-600 hover:text-slate-900">My Orders</a>
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="hidden sm:block">
+          <input type="text" id="searchInput" placeholder="Search products..." class="w-48 lg:w-64 px-4 py-2 bg-slate-50 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300" oninput="handleSearch()">
+        </div>
+        <a href="account.html" aria-label="My orders" class="hover:opacity-70">
+          <i class="fas fa-circle-user text-slate-700 text-lg"></i>
+        </a>
+        <button onclick="openCart()" class="relative" aria-label="Cart">
+          <i class="fas fa-shopping-bag text-slate-700"></i>
+          <span id="cartCount" class="absolute -top-2 -right-2 w-4 h-4 bg-slate-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">0</span>
+        </button>
+        <button onclick="toggleMobileMenu()" class="md:hidden" aria-label="Menu">
+          <i class="fas fa-bars text-slate-700"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+  <div id="mobileMenu" class="md:hidden hidden border-t border-slate-100">
+    <div class="px-4 py-3 space-y-2">
+      <input type="text" placeholder="Search products..." class="w-full px-4 py-2 bg-slate-50 rounded-lg text-sm" oninput="handleSearch()">
+      <a href="#products" class="block py-2 text-sm" onclick="toggleMobileMenu()">Shop</a>
+      <a href="#about" class="block py-2 text-sm" onclick="toggleMobileMenu()">Why PawShop</a>
+      <a href="account.html" class="block py-2 text-sm font-medium">My Orders</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ===== Hero ===== -->
+<section class="bg-slate-50">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-16 lg:py-24 text-center">
+    <h1 class="text-4xl lg:text-5xl font-bold tracking-tight mb-4">Happier pets, easier days.</h1>
+    <p class="text-lg text-slate-500 mb-8 max-w-xl mx-auto">Comfortable cat beds and scratchers your cat will actually use. Quality-checked, shipped worldwide, free returns.</p>
+    <a href="#products" class="inline-block px-6 py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">Shop bestsellers</a>
+    <div class="mt-4">
+      <button onclick="openWaitlist()" class="text-sm text-slate-500 hover:text-slate-900 underline underline-offset-4">Or reserve yours free - launching soon, no payment needed</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Categories ===== -->
+<section class="border-b border-slate-100 bg-white sticky top-16 z-30">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6">
+    <div class="flex items-center gap-1 py-3 overflow-x-auto" id="categoryBar"></div>
+  </div>
+</section>
+
+<!-- ===== Products ===== -->
+<section id="products" class="py-12">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6">
+    <div class="flex items-center justify-between mb-8">
+      <h2 class="text-2xl font-bold">Bestsellers</h2>
+      <select id="sortSelect" onchange="sortProducts()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm">
+        <option value="popular">Popular</option>
+        <option value="price-low">Price: low to high</option>
+        <option value="price-high">Price: high to low</option>
+      </select>
+    </div>
+
+    <div id="productGrid" class="product-grid"></div>
+
+    <div id="loadMoreContainer" class="text-center mt-12">
+      <button onclick="loadMore()" class="px-6 py-2 border border-slate-200 text-sm rounded-lg hover:bg-slate-50">Load more</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===== About ===== -->
+<section id="about" class="py-16 bg-slate-50">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6">
+    <div class="grid md:grid-cols-3 gap-8">
+      <div class="text-center">
+        <div class="w-14 h-14 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4">
+          <i class="fas fa-truck text-white text-xl"></i>
+        </div>
+        <h3 class="font-bold mb-2">Free worldwide shipping</h3>
+        <p class="text-sm text-slate-500">Shipped from our partner warehouse, 7-15 days delivery</p>
+      </div>
+      <div class="text-center">
+        <div class="w-14 h-14 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4">
+          <i class="fas fa-shield-alt text-white text-xl"></i>
+        </div>
+        <h3 class="font-bold mb-2">Quality checked</h3>
+        <p class="text-sm text-slate-500">Every batch inspected before shipping</p>
+      </div>
+      <div class="text-center">
+        <div class="w-14 h-14 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4">
+          <i class="fas fa-undo text-white text-xl"></i>
+        </div>
+        <h3 class="font-bold mb-2">30-day returns</h3>
+        <p class="text-sm text-slate-500">No questions asked, full refund</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Footer ===== -->
+<footer class="bg-slate-900 text-white py-12">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6">
+    <div class="grid md:grid-cols-3 gap-8">
+      <div>
+        <h3 class="font-bold mb-4">PawShop</h3>
+        <p class="text-sm text-slate-400">Smart pet supplies, delivered worldwide.</p>
+      </div>
+      <div>
+        <h4 class="font-semibold mb-3 text-sm">Support</h4>
+        <ul class="space-y-2 text-sm text-slate-400">
+          <li><a href="#" class="hover:text-white">Shipping policy</a></li>
+          <li><a href="#" class="hover:text-white">Returns &amp; refunds</a></li>
+          <li><a href="account.html" class="hover:text-white">My orders</a></li>
+          <li><a href="track.html" class="hover:text-white">Track your order</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="font-semibold mb-3 text-sm">Contact</h4>
+        <ul class="space-y-2 text-sm text-slate-400">
+          <li>support@pawshop.com</li>
+        </ul>
+      </div>
+    </div>
+    <div class="mt-8 pt-8 border-t border-slate-800 text-center text-sm text-slate-400">
+      &copy; 2026 PawShop. All rights reserved.
+    </div>
+  </div>
+</footer>
+
+<!-- ===== Product Modal ===== -->
+<div id="productModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="grid md:grid-cols-2">
+      <div class="p-6">
+        <div class="aspect-square bg-slate-100 rounded-lg flex items-center justify-center mb-4 overflow-hidden" id="modalVisual"></div>
+      </div>
+      <div class="p-6">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h2 id="productName" class="text-xl font-bold mb-2"></h2>
+            <div class="flex items-center gap-2">
+              <div id="productRating" class="flex items-center gap-0.5"></div>
+              <span id="reviewCount" class="text-xs text-slate-400"></span>
+            </div>
+          </div>
+          <button onclick="closeProductModal()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div class="mb-6">
+          <div class="flex items-end gap-3">
+            <span id="productPrice" class="text-2xl font-bold"></span>
+            <span id="originalPrice" class="text-sm text-slate-400 line-through"></span>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium mb-2">Variant</label>
+          <div id="variantOptions" class="flex flex-wrap gap-2"></div>
+        </div>
+
+        <div class="mb-6">
+          <label class="block text-sm font-medium mb-2">Quantity</label>
+          <div class="flex items-center gap-3">
+            <div class="flex items-center border border-slate-200 rounded">
+              <button onclick="changeQty(-1)" class="w-8 h-8 flex items-center justify-center hover:bg-slate-100">-</button>
+              <input type="number" id="qtyInput" value="1" min="1" class="w-12 h-8 text-center border-0 focus:outline-none">
+              <button onclick="changeQty(1)" class="w-8 h-8 flex items-center justify-center hover:bg-slate-100">+</button>
+            </div>
+            <span id="stockText" class="text-xs text-slate-400"></span>
+          </div>
+        </div>
+
+        <div class="flex gap-2 mb-3">
+          <button onclick="addToCartFromModal()" class="flex-1 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">Add to cart</button>
+          <button onclick="buyNow()" class="flex-1 py-3 border border-slate-900 text-sm font-medium rounded hover:bg-slate-50">Buy now</button>
+        </div>
+        <button onclick="openWaitlist(currentProduct.id)" class="w-full py-2.5 text-xs text-slate-500 hover:text-slate-900 mb-6">
+          <i class="fas fa-bell text-[10px] mr-1"></i>Not ready to pay? Reserve yours free - we'll email you at launch
+        </button>
+
+        <div class="border-t border-slate-100 pt-4 text-sm text-slate-600">
+          <p id="productDesc"></p>
+          <table class="w-full mt-4" id="specsTable"></table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Cart Drawer ===== -->
+<div id="cartDrawer" class="drawer fixed top-0 right-0 bottom-0 w-full max-w-sm bg-white z-50 flex flex-col">
+  <div class="p-4 border-b border-slate-100 flex items-center justify-between">
+    <h3 class="font-bold">Cart <span id="cartItemCount" class="text-sm text-slate-400 font-normal">(0)</span></h3>
+    <button onclick="closeCart()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close cart">
+      <i class="fas fa-times"></i>
+    </button>
+  </div>
+  <div id="cartItems" class="flex-1 overflow-y-auto p-4"></div>
+  <div class="p-4 border-t border-slate-100">
+    <div class="flex justify-between mb-4 text-sm">
+      <span class="text-slate-500">Subtotal</span>
+      <span id="cartSubtotal" class="font-semibold">$0.00</span>
+    </div>
+    <button onclick="checkout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">Checkout</button>
+  </div>
+</div>
+
+<!-- ===== Checkout Modal ===== -->
+<div id="checkoutModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-lg max-w-xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-xl font-bold">Checkout</h2>
+        <button onclick="closeCheckout()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div id="checkoutSummary" class="bg-slate-50 rounded p-4 mb-6 text-sm"></div>
+
+      <!-- Step 1: Address -->
+      <div id="checkoutStep1" class="checkout-step">
+        <div class="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-sm mb-1">Full name</label>
+            <input type="text" id="addrName" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Phone</label>
+            <input type="tel" id="addrPhone" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
+          </div>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm mb-1">Email</label>
+          <input type="email" id="addrEmail" placeholder="you@example.com" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm mb-1">Country</label>
+          <select id="addrCountry" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
+            <option value="US">United States</option>
+            <option value="GB">United Kingdom</option>
+            <option value="DE">Germany</option>
+            <option value="FR">France</option>
+            <option value="AU">Australia</option>
+            <option value="CA">Canada</option>
+          </select>
+        </div>
+        <div class="mb-6">
+          <label class="block text-sm mb-1">Address</label>
+          <textarea id="addrDetail" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded text-sm"></textarea>
+        </div>
+        <button onclick="nextStep()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">Continue to payment</button>
+      </div>
+
+      <!-- Step 2: Payment -->
+      <div id="checkoutStep2" class="checkout-step hidden">
+        <div class="space-y-3 mb-6">
+          <label class="flex items-center gap-3 p-3 border-2 border-slate-900 rounded cursor-pointer">
+            <input type="radio" name="payment" value="stripe" checked class="accent-slate-900">
+            <i class="fas fa-credit-card text-xl"></i>
+            <div>
+              <div class="text-sm font-medium">Credit card</div>
+              <div class="text-xs text-slate-400">Visa / Mastercard / Amex</div>
+            </div>
+          </label>
+          <label class="flex items-center gap-3 p-3 border-2 border-slate-200 rounded cursor-pointer">
+            <input type="radio" name="payment" value="paypal" class="accent-slate-900">
+            <i class="fab fa-paypal text-xl text-blue-500"></i>
+            <div>
+              <div class="text-sm font-medium">PayPal</div>
+              <div class="text-xs text-slate-400">PayPal balance or card</div>
+            </div>
+          </label>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="prevStep()" class="flex-1 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50">Back</button>
+          <button onclick="placeOrder()" id="placeOrderBtn" class="flex-1 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">Place order</button>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-4 text-center">Secure checkout powered by Stripe / PayPal</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Waitlist Modal ===== -->
+<div id="waitlistModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-lg max-w-sm w-full p-8">
+    <div class="w-12 h-12 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4">
+      <i class="fas fa-bell text-white"></i>
+    </div>
+    <h2 class="text-lg font-bold mb-1 text-center">Reserve yours</h2>
+    <p class="text-xs text-slate-500 text-center mb-6">Free, no payment now. We'll email you the moment we launch, with an early-bird discount.</p>
+    <input type="email" id="waitlistEmail" placeholder="you@example.com" class="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm mb-3">
+    <button onclick="submitWaitlist()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2">Notify me at launch</button>
+    <button onclick="document.getElementById('waitlistModal').classList.remove('open')" class="w-full py-2 text-xs text-slate-400 hover:text-slate-600">No thanks</button>
+  </div>
+</div>
+
+<!-- ===== Order Success Modal ===== -->
+<div id="orderSuccessModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-lg max-w-sm w-full p-8 text-center">
+    <div class="w-14 h-14 mx-auto bg-green-50 rounded-full flex items-center justify-center mb-4">
+      <i class="fas fa-check text-green-500 text-2xl"></i>
+    </div>
+    <h2 class="text-xl font-bold mb-2">Order placed!</h2>
+    <p class="text-sm text-slate-500 mb-1">Your order number:</p>
+    <p id="successOrderId" class="font-mono font-bold text-lg mb-4"></p>
+    <p class="text-sm text-slate-500 mb-6">A confirmation email is on its way. You can check the status anytime on the tracking page.</p>
+    <a href="account.html" class="block w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700 mb-2">View my orders</a>
+    <button onclick="closeOrderSuccess()" class="w-full py-3 border border-slate-200 text-sm rounded hover:bg-slate-50">Continue shopping</button>
+  </div>
+</div>
+
+<!-- ===== Toast ===== -->
+<div id="toast" class="toast fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-slate-900 text-white rounded text-sm flex items-center gap-2">
+  <i id="toastIcon" class="fas fa-check"></i>
+  <span id="toastText"></span>
+</div>
+
+<script>
+// ============================================================
+// DATA LAYER - 商品/订单数据来自运营后台 (admin.html)
+// 读取顺序: localStorage(后台保存的数据) → 内置默认商品
+// 后台改商品后刷新本页生效;两个页面同时开着则自动同步。
+// 真实收款: 每个商品的 paymentLink 字段(在后台填写 Stripe
+// Payment Link),配置后"立即购买"跳转真实 Stripe 收银台。
+// ============================================================
+const LS_PRODUCTS = 'pawshop_products';
+const LS_ORDERS = 'pawshop_orders';
+const LS_CART = 'pawshop_cart';
+
+// ===== State =====
+let cart = [];
+let currentProduct = null;
+let currentCategory = 'all';
+let currentSort = 'popular';
+let currency = 'USD';
+let searchQuery = '';
+let displayedProducts = 8;
+let checkoutStep = 1;
+
+const RATES = { USD: 1, EUR: 0.92, GBP: 0.79 };
+const SYMBOLS = { USD: '$', EUR: '€', GBP: '£' };
+
+function fmt(usd) {
+  return SYMBOLS[currency] + (usd * RATES[currency]).toFixed(2);
+}
+
+// ===== Product Data (内置默认;后台 admin.html 保存的数据优先) =====
+const DEFAULT_PRODUCTS = [
+  {
+    id: 1, name: "Elevated Hemp Cat Bed - Standard", category: "beds", price: 19.99, originalPrice: 29.99,
+    rating: 4.8, reviewCount: 1240, stock: 120, icon: "fa-bed",
+    variants: ["Natural"],
+    description: "Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.",
+    specs: [{label:"Size",value:"56.5 × 43 × 25 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}],
+  },
+  {
+    id: 2, name: "Elevated Hemp Cat Bed - Large", category: "beds", price: 24.99, originalPrice: 34.99,
+    rating: 4.7, reviewCount: 860, stock: 80, icon: "fa-bed",
+    variants: ["Natural"],
+    description: "Roomier version for large cats or two sharing. Same breathable hemp mat, 10cm elevation.",
+    specs: [{label:"Size",value:"70 × 45.5 × 31.5 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}],
+  },
+  {
+    id: 3, name: "Corrugated Sofa Lounger", category: "scratchers", price: 29.99, originalPrice: 44.99,
+    rating: 4.8, reviewCount: 2310, stock: 150, icon: "fa-couch",
+    variants: ["Natural / Grey"],
+    description: "Dual-color corrugated cardboard sofa to scratch, lounge and nap on. Raised 5cm to protect floors.",
+    specs: [{label:"Size",value:"55.5 × 40.5 × 23.5 cm"},{label:"Material",value:"Corrugated cardboard"},{label:"Floor gap",value:"5cm"}],
+  },
+  {
+    id: 4, name: "Tall Cat Scratcher Post", category: "scratchers", price: 27.99, originalPrice: 39.99,
+    rating: 4.6, reviewCount: 1540, stock: 90, icon: "fa-tree",
+    variants: ["Round"],
+    description: "Extra-tall vertical scratcher for full-body stretching. Stable dense-board base, replaceable corrugated core.",
+    specs: [{label:"Size",value:"28 × 28 × 60 cm"},{label:"Material",value:"Corrugated + MDF"},{label:"Shape",value:"Round column"}],
+  },
+];
+
+function loadProducts() {
+  try {
+    const raw = localStorage.getItem(LS_PRODUCTS);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed) && parsed.length) return parsed;
+  } catch (e) {}
+  return DEFAULT_PRODUCTS;
+}
+
+let products = loadProducts();
+
+function saveOrder(order) {
+  try {
+    const orders = JSON.parse(localStorage.getItem(LS_ORDERS) || '[]');
+    orders.push(order);
+    localStorage.setItem(LS_ORDERS, JSON.stringify(orders));
+  } catch (e) { console.warn('订单未能写入本地存储', e); }
+}
+
+// ===== Cart persistence:只存 id+qty,恢复时回填最新商品数据 =====
+function saveCart() {
+  try { localStorage.setItem(LS_CART, JSON.stringify(cart.map(i => ({ id: i.id, qty: i.qty })))); } catch (e) {}
+}
+
+function loadCart() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_CART) || '[]');
+    cart = saved
+      .map(i => {
+        const p = products.find(x => x.id === i.id);
+        return p && p.active !== false ? { ...p, qty: Math.max(1, i.qty) } : null;
+      })
+      .filter(Boolean);
+  } catch (e) { cart = []; }
+}
+
+// ===== Render =====
+const CATEGORY_LABELS = { beds: 'Cat Beds', scratchers: 'Scratchers' };
+
+function renderCategoryBar() {
+  const cats = [...new Set(products.map(p => p.category))];
+  document.getElementById('categoryBar').innerHTML =
+    `<button onclick="filterProducts('all', event)" class="category-btn active px-4 py-1.5 bg-slate-900 text-white rounded-full text-sm whitespace-nowrap">All</button>` +
+    cats.map(c =>
+      `<button onclick="filterProducts('${c}', event)" class="category-btn px-4 py-1.5 text-slate-600 rounded-full text-sm whitespace-nowrap hover:bg-slate-100">${CATEGORY_LABELS[c] || c}</button>`
+    ).join('');
+}
+
+function productVisual(p, iconClass, imgClass) {
+  return p.imageUrl
+    ? `<img src="${p.imageUrl}" alt="${p.name}" class="${imgClass}" loading="lazy">`
+    : `<i class="fas ${p.icon || 'fa-box'} ${iconClass}"></i>`;
+}
+function renderProducts() {
+  const grid = document.getElementById('productGrid');
+  const live = products.filter(p => p.active !== false);
+  let filtered = currentCategory === 'all' ? [...live] : live.filter(p => p.category === currentCategory);
+
+  if (searchQuery) {
+    filtered = filtered.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  }
+
+  switch (currentSort) {
+    case 'price-low': filtered.sort((a, b) => a.price - b.price); break;
+    case 'price-high': filtered.sort((a, b) => b.price - a.price); break;
+  }
+
+  const displayed = filtered.slice(0, displayedProducts);
+
+  if (displayed.length === 0) {
+    grid.innerHTML = '<div class="col-span-full text-center py-12 text-slate-400">No products found</div>';
+    document.getElementById('loadMoreContainer').style.display = 'none';
+    return;
+  }
+
+  grid.innerHTML = displayed.map(p => `
+    <div class="bg-white border border-slate-100 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow fade-in" onclick="openProductModal(${p.id})">
+      <div class="relative aspect-square bg-slate-50 flex items-center justify-center overflow-hidden">
+        ${productVisual(p, 'text-5xl text-slate-300', 'absolute inset-0 w-full h-full object-cover')}
+        ${p.originalPrice > p.price ? `<span class="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">-${Math.round((1 - p.price / p.originalPrice) * 100)}%</span>` : ''}
+      </div>
+      <div class="p-3">
+        <div class="flex items-center gap-1 mb-1">
+          <i class="fas fa-star text-yellow-400 text-xs"></i>
+          <span class="text-xs text-slate-400">${p.rating} (${p.reviewCount})</span>
+        </div>
+        <h3 class="text-sm font-medium mb-2 line-clamp-2">${p.name}</h3>
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="font-bold">${fmt(p.price)}</span>
+            <span class="text-xs text-slate-400 line-through ml-1">${fmt(p.originalPrice)}</span>
+          </div>
+          <button onclick="event.stopPropagation(); addToCart(${p.id})" class="w-7 h-7 bg-slate-900 text-white rounded flex items-center justify-center hover:bg-slate-700" aria-label="Add to cart">
+            <i class="fas fa-plus text-xs"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  document.getElementById('loadMoreContainer').style.display =
+    filtered.length > displayedProducts ? 'block' : 'none';
+}
+
+// ===== Search / Filter / Sort =====
+let searchTimer;
+function handleSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    searchQuery = document.getElementById('searchInput').value;
+    displayedProducts = 8;
+    renderProducts();
+  }, 300);
+}
+
+function loadMore() { displayedProducts += 8; renderProducts(); }
+
+function filterProducts(category, ev) {
+  currentCategory = category;
+  displayedProducts = 8;
+  document.querySelectorAll('.category-btn').forEach(b => {
+    b.classList.remove('bg-slate-900', 'text-white');
+    b.classList.add('text-slate-600');
+  });
+  ev.target.classList.add('bg-slate-900', 'text-white');
+  ev.target.classList.remove('text-slate-600');
+  renderProducts();
+}
+
+function sortProducts() {
+  currentSort = document.getElementById('sortSelect').value;
+  renderProducts();
+}
+
+function changeCurrency() {
+  currency = document.getElementById('currencySelect').value;
+  renderProducts();
+  updateCart();
+}
+
+// ===== Product Modal =====
+function openProductModal(id) {
+  const p = products.find(x => x.id === id);
+  if (!p) return;
+  currentProduct = p;
+
+  document.getElementById('modalVisual').innerHTML = currentProduct.imageUrl
+    ? `<img src="${currentProduct.imageUrl}" alt="${currentProduct.name}" class="w-full h-full object-cover">`
+    : `<i class="fas ${currentProduct.icon || 'fa-box'} text-6xl text-slate-300"></i>`;
+  document.getElementById('productName').textContent = p.name;
+  document.getElementById('productRating').innerHTML = Array(5).fill(0).map((_, i) =>
+    `<i class="fas fa-star ${i < Math.floor(p.rating) ? 'text-yellow-400' : 'text-slate-200'} text-xs"></i>`).join('');
+  document.getElementById('reviewCount').textContent = `${p.rating} · ${p.reviewCount} reviews`;
+  document.getElementById('productPrice').textContent = fmt(p.price);
+  document.getElementById('originalPrice').textContent = fmt(p.originalPrice);
+  document.getElementById('stockText').textContent = p.stock < 20 ? `Only ${p.stock} left` : 'In stock';
+  document.getElementById('productDesc').textContent = p.description;
+  document.getElementById('qtyInput').value = 1;
+
+  const variants = p.variants && p.variants.length ? p.variants : ['Standard'];
+  document.getElementById('variantOptions').innerHTML = variants.map((v, i) => `
+    <button onclick="selectVariant(this)" class="px-3 py-1.5 border ${i === 0 ? 'border-slate-900 bg-slate-50' : 'border-slate-200'} rounded text-sm">${v}</button>
+  `).join('');
+
+  document.getElementById('specsTable').innerHTML = (p.specs || []).map(s => `
+    <tr class="border-b border-slate-100">
+      <td class="py-2 text-slate-500 w-32">${s.label}</td>
+      <td class="py-2 font-medium">${s.value}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('productModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeProductModal() {
+  document.getElementById('productModal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function selectVariant(btn) {
+  btn.parentElement.querySelectorAll('button').forEach(b => {
+    b.classList.remove('border-slate-900', 'bg-slate-50');
+    b.classList.add('border-slate-200');
+  });
+  btn.classList.add('border-slate-900', 'bg-slate-50');
+  btn.classList.remove('border-slate-200');
+}
+
+function changeQty(delta) {
+  const input = document.getElementById('qtyInput');
+  let val = parseInt(input.value) + delta;
+  if (val < 1) val = 1;
+  if (val > currentProduct.stock) val = currentProduct.stock;
+  input.value = val;
+}
+
+// ===== Cart =====
+function addToCart(id) {
+  const p = products.find(x => x.id === id);
+  if (!p) return;
+  const existing = cart.find(item => item.id === id);
+  if (existing) existing.qty++;
+  else cart.push({ ...p, qty: 1 });
+  updateCart();
+  showToast('Added to cart');
+}
+
+function addToCartFromModal() {
+  const qty = parseInt(document.getElementById('qtyInput').value);
+  const existing = cart.find(item => item.id === currentProduct.id);
+  if (existing) existing.qty += qty;
+  else cart.push({ ...currentProduct, qty });
+  updateCart();
+  closeProductModal();
+  openCart();
+}
+
+function buyNow() {
+  addToCartFromModal();
+  closeCart();
+  checkout();
+}
+
+function removeFromCart(id) {
+  cart = cart.filter(item => item.id !== id);
+  updateCart();
+}
+
+function updateCartQty(id, delta) {
+  const item = cart.find(i => i.id === id);
+  if (item) {
+    item.qty += delta;
+    if (item.qty < 1) removeFromCart(id);
+    else updateCart();
+  }
+}
+
+function updateCart() {
+  const count = cart.reduce((s, i) => s + i.qty, 0);
+  const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
+
+  document.getElementById('cartCount').textContent = count;
+  document.getElementById('cartItemCount').textContent = `(${count})`;
+  document.getElementById('cartSubtotal').textContent = fmt(total);
+
+  const container = document.getElementById('cartItems');
+  if (cart.length === 0) {
+    container.innerHTML = '<div class="text-center py-12 text-slate-400">Your cart is empty</div>';
+  } else {
+    container.innerHTML = cart.map(item => `
+      <div class="flex gap-3 py-3 border-b border-slate-100 fade-in">
+        <div class="w-16 h-16 bg-slate-50 rounded flex-shrink-0 flex items-center justify-center overflow-hidden">
+          ${productVisual(item, 'text-2xl text-slate-300', 'w-full h-full object-cover')}
+        </div>
+        <div class="flex-1">
+          <h4 class="text-sm font-medium mb-1">${item.name}</h4>
+          <div class="font-bold text-sm mb-2">${fmt(item.price)}</div>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center border border-slate-200 rounded">
+              <button onclick="updateCartQty(${item.id}, -1)" class="w-6 h-6 flex items-center justify-center">-</button>
+              <span class="w-8 text-center text-sm">${item.qty}</span>
+              <button onclick="updateCartQty(${item.id}, 1)" class="w-6 h-6 flex items-center justify-center">+</button>
+            </div>
+            <button onclick="removeFromCart(${item.id})" class="text-slate-400 hover:text-red-500" aria-label="Remove">
+              <i class="fas fa-trash text-xs"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+  saveCart();
+}
+
+function openCart() { document.getElementById('cartDrawer').classList.add('open'); }
+function closeCart() { document.getElementById('cartDrawer').classList.remove('open'); }
+
+// ===== Checkout =====
+function checkout() {
+  if (cart.length === 0) { showToast('Your cart is empty'); return; }
+  checkoutStep = 1;
+  updateCheckoutStep();
+
+  const count = cart.reduce((s, i) => s + i.qty, 0);
+  const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
+  document.getElementById('checkoutSummary').innerHTML = `
+    <div class="flex justify-between mb-1"><span class="text-slate-500">Items</span><span>${count}</span></div>
+    <div class="flex justify-between mb-1"><span class="text-slate-500">Shipping</span><span class="text-green-600">Free</span></div>
+    <div class="flex justify-between font-bold pt-2 border-t border-slate-200 mt-2"><span>Total</span><span>${fmt(total)}</span></div>
+  `;
+
+  document.getElementById('checkoutModal').classList.add('open');
+  closeCart();
+}
+
+function closeCheckout() { document.getElementById('checkoutModal').classList.remove('open'); }
+
+function updateCheckoutStep() {
+  document.querySelectorAll('.checkout-step').forEach(s => s.classList.add('hidden'));
+  document.getElementById(`checkoutStep${checkoutStep}`).classList.remove('hidden');
+}
+
+function nextStep() {
+  const name = document.getElementById('addrName').value.trim();
+  const phone = document.getElementById('addrPhone').value.trim();
+  const email = document.getElementById('addrEmail').value.trim();
+  const addr = document.getElementById('addrDetail').value.trim();
+  if (!name || !phone || !addr) { showToast('Please complete the address form'); return; }
+  if (!email.includes('@')) { showToast('Please enter a valid email'); return; }
+  checkoutStep = 2;
+  updateCheckoutStep();
+}
+
+function prevStep() { checkoutStep = 1; updateCheckoutStep(); }
+
+function placeOrder() {
+  // Real-payment path: if a Stripe Payment Link is configured for
+  // a single-item cart, redirect the customer to live checkout.
+  if (cart.length === 1 && cart[0].paymentLink) {
+    window.location.href = cart[0].paymentLink;
+    return;
+  }
+
+  const order = {
+    id: 'PO' + Date.now(),
+    createdAt: new Date().toISOString(),
+    items: cart.map(i => ({ id: i.id, name: i.name, qty: i.qty, price: i.price })),
+    customer: {
+      name: document.getElementById('addrName').value,
+      email: document.getElementById('addrEmail').value,
+      phone: document.getElementById('addrPhone').value,
+      country: document.getElementById('addrCountry').value,
+      address: document.getElementById('addrDetail').value,
+    },
+    payment: document.querySelector('input[name="payment"]:checked').value,
+    total: +cart.reduce((s, i) => s + i.price * i.qty, 0).toFixed(2),
+    currency: 'USD',
+    status: 'new',
+    history: [{ status: 'new', at: new Date().toISOString() }],
+  };
+  saveOrder(order);
+  decrementStock(cart);
+  localStorage.setItem('pawshop_customer_email', order.customer.email);
+  sendOrderEmail(order);
+  console.log('ORDER SAVED:', order);
+  closeCheckout();
+  cart = [];
+  updateCart();
+  showOrderSuccess(order.id);
+}
+
+function decrementStock(items) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(LS_PRODUCTS) || 'null');
+    if (!stored) return;
+    items.forEach(i => {
+      const p = stored.find(x => x.id === i.id);
+      if (p) p.stock = Math.max(0, (p.stock || 0) - i.qty);
+    });
+    localStorage.setItem(LS_PRODUCTS, JSON.stringify(stored));
+  } catch (e) {}
+}
+
+// 下单确认邮件:后台"数据备份"页配置 EmailJS 后自动发送;未配置则跳过
+function sendOrderEmail(order) {
+  try {
+    const cfg = JSON.parse(localStorage.getItem('pawshop_email_config') || 'null');
+    if (!cfg || !cfg.publicKey || !cfg.serviceId || !cfg.templateId || typeof emailjs === 'undefined') return;
+    emailjs.init(cfg.publicKey);
+    emailjs.send(cfg.serviceId, cfg.templateId, {
+      to_email: order.customer.email,
+      order_id: order.id,
+      items: order.items.map(i => `${i.name} x${i.qty}`).join(', '),
+      total: '$' + order.total.toFixed(2),
+      status: 'received',
+    });
+  } catch (e) {}
+}
+
+function showOrderSuccess(orderId) {
+  document.getElementById('successOrderId').textContent = orderId;
+  document.getElementById('orderSuccessModal').classList.add('open');
+}
+
+// ===== Waitlist(免费预留,零资金验证需求) =====
+const LS_WAITLIST = 'pawshop_waitlist';
+let waitlistProductId = null;
+
+function openWaitlist(productId) {
+  waitlistProductId = productId || null;
+  const saved = localStorage.getItem('pawshop_customer_email');
+  if (saved) document.getElementById('waitlistEmail').value = saved;
+  document.getElementById('waitlistModal').classList.add('open');
+  closeProductModal();
+}
+
+function submitWaitlist() {
+  const email = document.getElementById('waitlistEmail').value.trim();
+  if (!email.includes('@')) { showToast('Please enter a valid email'); return; }
+
+  const p = waitlistProductId ? products.find(x => x.id === waitlistProductId) : null;
+  const productName = p ? p.name : '(site-wide)';
+
+  // 通知站长:config.js 里配置了邮箱则实时转发(FormSubmit,免费免注册)
+  if (typeof WAITLIST_NOTIFY_EMAIL !== 'undefined' && WAITLIST_NOTIFY_EMAIL) {
+    fetch('https://formsubmit.co/ajax/' + WAITLIST_NOTIFY_EMAIL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        _subject: 'New reservation - PawShop',
+        _template: 'table',
+        Customer: email,
+        Product: productName,
+        Time: new Date().toLocaleString(),
+      }),
+    }).catch(() => {});
+  }
+
+  try {
+    const list = JSON.parse(localStorage.getItem(LS_WAITLIST) || '[]');
+    if (!list.some(w => w.email === email && w.productId === waitlistProductId)) {
+      list.push({ email, productId: waitlistProductId, at: new Date().toISOString() });
+      localStorage.setItem(LS_WAITLIST, JSON.stringify(list));
+    }
+  } catch (e) {}
+  document.getElementById('waitlistModal').classList.remove('open');
+  showToast("You're on the list!");
+}
+
+function closeOrderSuccess() { document.getElementById('orderSuccessModal').classList.remove('open'); }
+
+// ===== Utility =====
+function showToast(message) {
+  const toast = document.getElementById('toast');
+  document.getElementById('toastText').textContent = message;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+function toggleMobileMenu() { document.getElementById('mobileMenu').classList.toggle('hidden'); }
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') { closeProductModal(); closeCart(); closeCheckout(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    document.getElementById('searchInput')?.focus();
+  }
+});
+
+document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+  anchor.addEventListener('click', function(e) {
+    const target = document.querySelector(this.getAttribute('href'));
+    if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth' }); }
+  });
+});
+
+// ===== Sync with admin (live when both pages are open in tabs) =====
+window.addEventListener('storage', e => {
+  if (e.key === LS_PRODUCTS) {
+    products = loadProducts();
+    currentCategory = 'all';
+    displayedProducts = 8;
+    loadCart();
+    renderCategoryBar();
+    renderProducts();
+    updateCart();
+  }
+});
+
+// ===== Init =====
+renderCategoryBar();
+renderProducts();
+loadCart();
+updateCart();
+</script>
+
+</body>
+</html>
