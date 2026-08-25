@@ -6,4 +6,4 @@
 // 发一封激活邮件,点一次激活即永久生效,免费,无需注册)。
 // 留空则不发送,登记只存在顾客自己的浏览器里(你收不到)。
 
-const WAITLIST_NOTIFY_EMAIL = "";
+const WAITLIST_NOTIFY_EMAIL = "504533680@qq.com";
