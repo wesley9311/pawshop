@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PawShop - Pet Supplies, Delivered Worldwide</title>
-<meta name="description" content="Smart pet supplies: water fountains, automatic feeders, GPS trackers. Free worldwide shipping.">
+<title>PawShop - Pet Supplies for Cats &amp; Dogs</title>
+<meta name="description" content="Quality pet supplies for cats and dogs. Launching soon - reserve free, no payment now.">
 
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -36,12 +36,18 @@
 <!-- ===== Top Bar ===== -->
 <div class="bg-slate-900 text-white text-xs py-2 px-4">
   <div class="max-w-6xl mx-auto flex items-center justify-between">
-    <span>Free worldwide shipping · 30-day returns</span>
-    <select id="currencySelect" onchange="changeCurrency()" class="bg-transparent text-white text-xs border-none cursor-pointer">
+    <span data-i18n="topbar_note">Free worldwide shipping · 30-day returns</span>
+    <div class="flex items-center gap-3">
+      <select id="langSelect" onchange="setLang(this.value)" class="bg-transparent text-white text-xs border-none cursor-pointer">
+        <option value="en">English</option>
+        <option value="zh">中文</option>
+      </select>
+      <select id="currencySelect" onchange="changeCurrency()" class="bg-transparent text-white text-xs border-none cursor-pointer">
       <option value="USD">USD $</option>
       <option value="EUR">EUR €</option>
       <option value="GBP">GBP £</option>
     </select>
+    </div>
   </div>
 </div>
 
@@ -52,14 +58,13 @@
       <div class="flex items-center gap-8">
         <a href="#" class="text-xl font-bold">PawShop</a>
         <div class="hidden md:flex items-center gap-6">
-          <a href="#products" class="text-sm text-slate-600 hover:text-slate-900">Shop</a>
-          <a href="#about" class="text-sm text-slate-600 hover:text-slate-900">Why PawShop</a>
-          <a href="account.html" class="text-sm text-slate-600 hover:text-slate-900">My Orders</a>
+          <a href="#products" class="text-sm text-slate-600 hover:text-slate-900" data-i18n="nav_shop">Shop</a>
+          <a href="account.html" class="text-sm text-slate-600 hover:text-slate-900" data-i18n="nav_orders">My Orders</a>
         </div>
       </div>
       <div class="flex items-center gap-4">
         <div class="hidden sm:block">
-          <input type="text" id="searchInput" placeholder="Search products..." class="w-48 lg:w-64 px-4 py-2 bg-slate-50 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300" oninput="handleSearch()">
+          <input type="text" id="searchInput" placeholder="Search products..." data-i18n-ph="search_ph" class="w-48 lg:w-64 px-4 py-2 bg-slate-50 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300" oninput="handleSearch()">
         </div>
         <a href="account.html" aria-label="My orders" class="hover:opacity-70">
           <i class="fas fa-circle-user text-slate-700 text-lg"></i>
@@ -76,10 +81,9 @@
   </div>
   <div id="mobileMenu" class="md:hidden hidden border-t border-slate-100">
     <div class="px-4 py-3 space-y-2">
-      <input type="text" placeholder="Search products..." class="w-full px-4 py-2 bg-slate-50 rounded-lg text-sm" oninput="handleSearch()">
-      <a href="#products" class="block py-2 text-sm" onclick="toggleMobileMenu()">Shop</a>
-      <a href="#about" class="block py-2 text-sm" onclick="toggleMobileMenu()">Why PawShop</a>
-      <a href="account.html" class="block py-2 text-sm font-medium">My Orders</a>
+      <input type="text" placeholder="Search products..." data-i18n-ph="search_ph" class="w-full px-4 py-2 bg-slate-50 rounded-lg text-sm" oninput="handleSearch()">
+      <a href="#products" class="block py-2 text-sm" onclick="toggleMobileMenu()" data-i18n="nav_shop">Shop</a>
+      <a href="account.html" class="block py-2 text-sm font-medium" data-i18n="nav_orders">My Orders</a>
     </div>
   </div>
 </nav>
@@ -87,11 +91,11 @@
 <!-- ===== Hero ===== -->
 <section class="bg-slate-50">
   <div class="max-w-6xl mx-auto px-4 sm:px-6 py-16 lg:py-24 text-center">
-    <h1 class="text-4xl lg:text-5xl font-bold tracking-tight mb-4">Happier pets, easier days.</h1>
-    <p class="text-lg text-slate-500 mb-8 max-w-xl mx-auto">Comfortable cat beds and scratchers your cat will actually use. Quality-checked, shipped worldwide, free returns.</p>
-    <a href="#products" class="inline-block px-6 py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors">Shop bestsellers</a>
+    <h1 class="text-4xl lg:text-5xl font-bold tracking-tight mb-4" data-i18n="hero_title">Happier pets, easier days.</h1>
+    <p class="text-lg text-slate-500 mb-8 max-w-xl mx-auto" data-i18n="hero_sub">Comfortable cat beds and scratchers your cat will actually use. Quality-checked, shipped worldwide, free returns.</p>
+    <a href="#products" class="inline-block px-6 py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors" data-i18n="hero_cta">Shop bestsellers</a>
     <div class="mt-4">
-      <button onclick="openWaitlist()" class="text-sm text-slate-500 hover:text-slate-900 underline underline-offset-4">Or reserve yours free - launching soon, no payment needed</button>
+      <button onclick="openWaitlist()" class="text-sm text-slate-500 hover:text-slate-900 underline underline-offset-4" data-i18n="hero_reserve">Or reserve yours free - launching soon, no payment needed</button>
     </div>
   </div>
 </section>
@@ -107,47 +111,18 @@
 <section id="products" class="py-12">
   <div class="max-w-6xl mx-auto px-4 sm:px-6">
     <div class="flex items-center justify-between mb-8">
-      <h2 class="text-2xl font-bold">Bestsellers</h2>
+      <h2 class="text-2xl font-bold" data-i18n="bestsellers">Bestsellers</h2>
       <select id="sortSelect" onchange="sortProducts()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm">
-        <option value="popular">Popular</option>
-        <option value="price-low">Price: low to high</option>
-        <option value="price-high">Price: high to low</option>
+        <option value="popular" data-i18n="sort_popular">Popular</option>
+        <option value="price-low" data-i18n="sort_price_low">Price: low to high</option>
+        <option value="price-high" data-i18n="sort_price_high">Price: high to low</option>
       </select>
     </div>
 
     <div id="productGrid" class="product-grid"></div>
 
     <div id="loadMoreContainer" class="text-center mt-12">
-      <button onclick="loadMore()" class="px-6 py-2 border border-slate-200 text-sm rounded-lg hover:bg-slate-50">Load more</button>
-    </div>
-  </div>
-</section>
-
-<!-- ===== About ===== -->
-<section id="about" class="py-16 bg-slate-50">
-  <div class="max-w-6xl mx-auto px-4 sm:px-6">
-    <div class="grid md:grid-cols-3 gap-8">
-      <div class="text-center">
-        <div class="w-14 h-14 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4">
-          <i class="fas fa-truck text-white text-xl"></i>
-        </div>
-        <h3 class="font-bold mb-2">Free worldwide shipping</h3>
-        <p class="text-sm text-slate-500">Shipped from our partner warehouse, 7-15 days delivery</p>
-      </div>
-      <div class="text-center">
-        <div class="w-14 h-14 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4">
-          <i class="fas fa-shield-alt text-white text-xl"></i>
-        </div>
-        <h3 class="font-bold mb-2">Quality checked</h3>
-        <p class="text-sm text-slate-500">Every batch inspected before shipping</p>
-      </div>
-      <div class="text-center">
-        <div class="w-14 h-14 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4">
-          <i class="fas fa-undo text-white text-xl"></i>
-        </div>
-        <h3 class="font-bold mb-2">30-day returns</h3>
-        <p class="text-sm text-slate-500">No questions asked, full refund</p>
-      </div>
+      <button onclick="loadMore()" class="px-6 py-2 border border-slate-200 text-sm rounded-lg hover:bg-slate-50" data-i18n="load_more">Load more</button>
     </div>
   </div>
 </section>
@@ -158,19 +133,19 @@
     <div class="grid md:grid-cols-3 gap-8">
       <div>
         <h3 class="font-bold mb-4">PawShop</h3>
-        <p class="text-sm text-slate-400">Smart pet supplies, delivered worldwide.</p>
+        <p class="text-sm text-slate-400" data-i18n="footer_tag">Smart pet supplies, delivered worldwide.</p>
       </div>
       <div>
-        <h4 class="font-semibold mb-3 text-sm">Support</h4>
+        <h4 class="font-semibold mb-3 text-sm" data-i18n="footer_support">Support</h4>
         <ul class="space-y-2 text-sm text-slate-400">
-          <li><a href="#" class="hover:text-white">Shipping policy</a></li>
-          <li><a href="#" class="hover:text-white">Returns &amp; refunds</a></li>
-          <li><a href="account.html" class="hover:text-white">My orders</a></li>
-          <li><a href="track.html" class="hover:text-white">Track your order</a></li>
+          <li><a href="#" class="hover:text-white" data-i18n="footer_shipping">Shipping policy</a></li>
+          <li><a href="#" class="hover:text-white" data-i18n="footer_returns">Returns &amp; refunds</a></li>
+          <li><a href="account.html" class="hover:text-white" data-i18n="footer_myorders">My orders</a></li>
+          <li><a href="track.html" class="hover:text-white" data-i18n="footer_track">Track your order</a></li>
         </ul>
       </div>
       <div>
-        <h4 class="font-semibold mb-3 text-sm">Contact</h4>
+        <h4 class="font-semibold mb-3 text-sm" data-i18n="footer_contact">Contact</h4>
         <ul class="space-y-2 text-sm text-slate-400">
           <li>support@pawshop.com</li>
         </ul>
@@ -211,12 +186,12 @@
         </div>
 
         <div class="mb-4">
-          <label class="block text-sm font-medium mb-2">Variant</label>
+          <label class="block text-sm font-medium mb-2" data-i18n="variant">Variant</label>
           <div id="variantOptions" class="flex flex-wrap gap-2"></div>
         </div>
 
         <div class="mb-6">
-          <label class="block text-sm font-medium mb-2">Quantity</label>
+          <label class="block text-sm font-medium mb-2" data-i18n="quantity">Quantity</label>
           <div class="flex items-center gap-3">
             <div class="flex items-center border border-slate-200 rounded">
               <button onclick="changeQty(-1)" class="w-8 h-8 flex items-center justify-center hover:bg-slate-100">-</button>
@@ -228,11 +203,11 @@
         </div>
 
         <div class="flex gap-2 mb-3">
-          <button onclick="addToCartFromModal()" class="flex-1 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">Add to cart</button>
-          <button onclick="buyNow()" class="flex-1 py-3 border border-slate-900 text-sm font-medium rounded hover:bg-slate-50">Buy now</button>
+          <button onclick="addToCartFromModal()" class="flex-1 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="add_to_cart">Add to cart</button>
+          <button onclick="buyNow()" class="flex-1 py-3 border border-slate-900 text-sm font-medium rounded hover:bg-slate-50" data-i18n="buy_now">Buy now</button>
         </div>
         <button onclick="openWaitlist(currentProduct.id)" class="w-full py-2.5 text-xs text-slate-500 hover:text-slate-900 mb-6">
-          <i class="fas fa-bell text-[10px] mr-1"></i>Not ready to pay? Reserve yours free - we'll email you at launch
+          <i class="fas fa-bell text-[10px] mr-1"></i><span data-i18n="reserve_line">Not ready to pay? Reserve yours free - we will email you at launch</span>
         </button>
 
         <div class="border-t border-slate-100 pt-4 text-sm text-slate-600">
@@ -247,7 +222,7 @@
 <!-- ===== Cart Drawer ===== -->
 <div id="cartDrawer" class="drawer fixed top-0 right-0 bottom-0 w-full max-w-sm bg-white z-50 flex flex-col">
   <div class="p-4 border-b border-slate-100 flex items-center justify-between">
-    <h3 class="font-bold">Cart <span id="cartItemCount" class="text-sm text-slate-400 font-normal">(0)</span></h3>
+    <h3 class="font-bold"><span data-i18n="cart">Cart</span> <span id="cartItemCount" class="text-sm text-slate-400 font-normal">(0)</span></h3>
     <button onclick="closeCart()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close cart">
       <i class="fas fa-times"></i>
     </button>
@@ -255,10 +230,10 @@
   <div id="cartItems" class="flex-1 overflow-y-auto p-4"></div>
   <div class="p-4 border-t border-slate-100">
     <div class="flex justify-between mb-4 text-sm">
-      <span class="text-slate-500">Subtotal</span>
+      <span class="text-slate-500" data-i18n="subtotal">Subtotal</span>
       <span id="cartSubtotal" class="font-semibold">$0.00</span>
     </div>
-    <button onclick="checkout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">Checkout</button>
+    <button onclick="checkout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="checkout">Checkout</button>
   </div>
 </div>
 
@@ -267,7 +242,7 @@
   <div class="bg-white rounded-lg max-w-xl w-full max-h-[90vh] overflow-y-auto">
     <div class="p-6">
       <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-bold">Checkout</h2>
+        <h2 class="text-xl font-bold" data-i18n="checkout_title">Checkout</h2>
         <button onclick="closeCheckout()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
           <i class="fas fa-times"></i>
         </button>
@@ -279,20 +254,20 @@
       <div id="checkoutStep1" class="checkout-step">
         <div class="grid grid-cols-2 gap-4 mb-4">
           <div>
-            <label class="block text-sm mb-1">Full name</label>
+            <label class="block text-sm mb-1" data-i18n="full_name">Full name</label>
             <input type="text" id="addrName" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
           </div>
           <div>
-            <label class="block text-sm mb-1">Phone</label>
+            <label class="block text-sm mb-1" data-i18n="phone">Phone</label>
             <input type="tel" id="addrPhone" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
           </div>
         </div>
         <div class="mb-4">
-          <label class="block text-sm mb-1">Email</label>
+          <label class="block text-sm mb-1" data-i18n="email">Email</label>
           <input type="email" id="addrEmail" placeholder="you@example.com" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
         </div>
         <div class="mb-4">
-          <label class="block text-sm mb-1">Country</label>
+          <label class="block text-sm mb-1" data-i18n="country">Country</label>
           <select id="addrCountry" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
             <option value="US">United States</option>
             <option value="GB">United Kingdom</option>
@@ -303,10 +278,10 @@
           </select>
         </div>
         <div class="mb-6">
-          <label class="block text-sm mb-1">Address</label>
+          <label class="block text-sm mb-1" data-i18n="address">Address</label>
           <textarea id="addrDetail" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded text-sm"></textarea>
         </div>
-        <button onclick="nextStep()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">Continue to payment</button>
+        <button onclick="nextStep()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="continue_payment">Continue to payment</button>
       </div>
 
       <!-- Step 2: Payment -->
@@ -316,26 +291,26 @@
             <input type="radio" name="payment" value="stripe" checked class="accent-slate-900">
             <i class="fas fa-credit-card text-xl"></i>
             <div>
-              <div class="text-sm font-medium">Credit card</div>
-              <div class="text-xs text-slate-400">Visa / Mastercard / Amex</div>
+              <div class="text-sm font-medium" data-i18n="payment_card">Credit card</div>
+              <div class="text-xs text-slate-400" data-i18n="payment_card_sub">Visa / Mastercard / Amex</div>
             </div>
           </label>
           <label class="flex items-center gap-3 p-3 border-2 border-slate-200 rounded cursor-pointer">
             <input type="radio" name="payment" value="paypal" class="accent-slate-900">
             <i class="fab fa-paypal text-xl text-blue-500"></i>
             <div>
-              <div class="text-sm font-medium">PayPal</div>
-              <div class="text-xs text-slate-400">PayPal balance or card</div>
+              <div class="text-sm font-medium" data-i18n="payment_paypal">PayPal</div>
+              <div class="text-xs text-slate-400" data-i18n="payment_paypal_sub">PayPal balance or card</div>
             </div>
           </label>
         </div>
         <div class="flex gap-2">
-          <button onclick="prevStep()" class="flex-1 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50">Back</button>
-          <button onclick="placeOrder()" id="placeOrderBtn" class="flex-1 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">Place order</button>
+          <button onclick="prevStep()" class="flex-1 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50" data-i18n="back">Back</button>
+          <button onclick="placeOrder()" id="placeOrderBtn" class="flex-1 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="place_order">Place order</button>
         </div>
       </div>
 
-      <p class="text-xs text-slate-400 mt-4 text-center">Secure checkout powered by Stripe / PayPal</p>
+      <p class="text-xs text-slate-400 mt-4 text-center" data-i18n="secure">Secure checkout powered by Stripe / PayPal</p>
     </div>
   </div>
 </div>
@@ -346,11 +321,11 @@
     <div class="w-12 h-12 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4">
       <i class="fas fa-bell text-white"></i>
     </div>
-    <h2 class="text-lg font-bold mb-1 text-center">Reserve yours</h2>
-    <p class="text-xs text-slate-500 text-center mb-6">Free, no payment now. We'll email you the moment we launch, with an early-bird discount.</p>
-    <input type="email" id="waitlistEmail" placeholder="you@example.com" class="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm mb-3">
-    <button onclick="submitWaitlist()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2">Notify me at launch</button>
-    <button onclick="document.getElementById('waitlistModal').classList.remove('open')" class="w-full py-2 text-xs text-slate-400 hover:text-slate-600">No thanks</button>
+    <h2 class="text-lg font-bold mb-1 text-center" data-i18n="waitlist_title">Reserve yours</h2>
+    <p class="text-xs text-slate-500 text-center mb-6" data-i18n="waitlist_body">Free, no payment now. We will email you the moment we launch, with an early-bird discount.</p>
+    <input type="email" id="waitlistEmail" placeholder="you@example.com" data-i18n-ph="search_ph_email" class="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm mb-3">
+    <button onclick="submitWaitlist()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2" data-i18n="waitlist_cta">Notify me at launch</button>
+    <button onclick="document.getElementById('waitlistModal').classList.remove('open')" class="w-full py-2 text-xs text-slate-400 hover:text-slate-600" data-i18n="waitlist_no">No thanks</button>
   </div>
 </div>
 
@@ -360,12 +335,12 @@
     <div class="w-14 h-14 mx-auto bg-green-50 rounded-full flex items-center justify-center mb-4">
       <i class="fas fa-check text-green-500 text-2xl"></i>
     </div>
-    <h2 class="text-xl font-bold mb-2">Order placed!</h2>
-    <p class="text-sm text-slate-500 mb-1">Your order number:</p>
+    <h2 class="text-xl font-bold mb-2" data-i18n="success_title">Order placed!</h2>
+    <p class="text-sm text-slate-500 mb-1" data-i18n="success_number">Your order number:</p>
     <p id="successOrderId" class="font-mono font-bold text-lg mb-4"></p>
-    <p class="text-sm text-slate-500 mb-6">A confirmation email is on its way. You can check the status anytime on the tracking page.</p>
-    <a href="account.html" class="block w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700 mb-2">View my orders</a>
-    <button onclick="closeOrderSuccess()" class="w-full py-3 border border-slate-200 text-sm rounded hover:bg-slate-50">Continue shopping</button>
+    <p class="text-sm text-slate-500 mb-6" data-i18n="success_body">A confirmation email is on its way. You can check the status anytime on the tracking page.</p>
+    <a href="account.html" class="block w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700 mb-2" data-i18n="success_view">View my orders</a>
+    <button onclick="closeOrderSuccess()" class="w-full py-3 border border-slate-200 text-sm rounded hover:bg-slate-50" data-i18n="success_continue">Continue shopping</button>
   </div>
 </div>
 
@@ -386,6 +361,101 @@
 const LS_PRODUCTS = 'pawshop_products';
 const LS_ORDERS = 'pawshop_orders';
 const LS_CART = 'pawshop_cart';
+
+// ===== i18n:界面双语(商品名/描述暂为英文,后台加中文字段是后续迭代) =====
+const I18N = {
+  en: {
+    topbar_note: 'New store launching - reserve free, no payment now',
+    nav_shop: 'Shop', nav_orders: 'My Orders',
+    search_ph: 'Search products...',
+    hero_title: 'Happier pets, easier days.',
+    hero_sub: 'Carefully selected supplies for cats and dogs. Launching soon - reserve free, no payment now.',
+    hero_cta: 'Shop bestsellers',
+    hero_reserve: 'Or reserve yours free - launching soon, no payment needed',
+    cat_all: 'All',
+    bestsellers: 'Bestsellers',
+    sort_popular: 'Popular', sort_price_low: 'Price: low to high', sort_price_high: 'Price: high to low',
+    load_more: 'Load more', no_products: 'No products found',
+    reviews_label: 'reviews',
+    variant: 'Variant', quantity: 'Quantity',
+    in_stock: 'In stock',
+    add_to_cart: 'Add to cart', buy_now: 'Buy now',
+    reserve_line: 'Not ready to pay? Reserve yours free - we will email you at launch',
+    footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
+    footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds',
+    footer_myorders: 'My orders', footer_track: 'Track your order', footer_contact: 'Contact',
+    cart: 'Cart', subtotal: 'Subtotal', checkout: 'Checkout', cart_empty: 'Your cart is empty',
+    checkout_title: 'Checkout', items: 'Items', shipping: 'Shipping', free: 'Free', total: 'Total',
+    full_name: 'Full name', phone: 'Phone', email: 'Email', country: 'Country', address: 'Address',
+    continue_payment: 'Continue to payment',
+    payment_card: 'Credit card', payment_card_sub: 'Visa / Mastercard / Amex',
+    payment_paypal: 'PayPal', payment_paypal_sub: 'PayPal balance or card',
+    back: 'Back', place_order: 'Place order',
+    secure: 'Secure checkout powered by Stripe / PayPal',
+    toast_addr: 'Please complete the address form', toast_email: 'Please enter a valid email',
+    toast_added: 'Added to cart', toast_list: "You're on the list!",
+    success_title: 'Order placed!', success_number: 'Your order number:',
+    success_body: 'A confirmation email is on its way. You can check the status anytime on the tracking page.',
+    success_view: 'View my orders', success_continue: 'Continue shopping',
+    waitlist_title: 'Reserve yours',
+    waitlist_body: 'Free, no payment now. We will email you the moment we launch, with an early-bird discount.',
+    waitlist_cta: 'Notify me at launch', waitlist_no: 'No thanks',
+    nav_continue: 'Continue shopping',
+  },
+  zh: {
+    topbar_note: '新店上线中——免费预留，无需付款',
+    nav_shop: '商品', nav_orders: '我的订单',
+    search_ph: '搜索商品...',
+    hero_title: '让毛孩子更幸福，让生活更轻松',
+    hero_sub: '为猫狗精选的好物，舒适耐用。新店上线中——免费预留，无需付款。',
+    hero_cta: '浏览热卖',
+    hero_reserve: '或免费预留——即将上线，无需付款',
+    cat_all: '全部',
+    bestsellers: '热卖榜单',
+    sort_popular: '人气', sort_price_low: '价格从低到高', sort_price_high: '价格从高到低',
+    load_more: '加载更多', no_products: '没有找到商品',
+    reviews_label: '条评价',
+    variant: '款式', quantity: '数量',
+    in_stock: '有货',
+    add_to_cart: '加入购物车', buy_now: '立即购买',
+    reserve_line: '暂不付款？免费预留，上线时邮件通知你',
+    footer_tag: '精选犬猫好物。',
+    footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款',
+    footer_myorders: '我的订单', footer_track: '查询订单', footer_contact: '联系我们',
+    cart: '购物车', subtotal: '小计', checkout: '去结算', cart_empty: '购物车是空的',
+    checkout_title: '结算', items: '商品', shipping: '运费', free: '免费', total: '合计',
+    full_name: '姓名', phone: '电话', email: '邮箱', country: '国家', address: '地址',
+    continue_payment: '继续去支付',
+    payment_card: '信用卡', payment_card_sub: '维萨 / 万事达 / 美国运通',
+    payment_paypal: 'PayPal', payment_paypal_sub: 'PayPal 余额或银行卡',
+    back: '上一步', place_order: '提交订单',
+    secure: '由 Stripe / PayPal 提供安全结算',
+    toast_addr: '请填写完整收货信息', toast_email: '请输入有效的邮箱',
+    toast_added: '已加入购物车', toast_list: '预留成功！',
+    success_title: '下单成功！', success_number: '你的订单号：',
+    success_body: '确认邮件已发出。你可以随时在查询页查看订单状态。',
+    success_view: '查看我的订单', success_continue: '继续购物',
+    waitlist_title: '免费预留',
+    waitlist_body: '免费，现在无需付款。上线第一时间邮件通知你，并附早鸟优惠。',
+    waitlist_cta: '上线时通知我', waitlist_no: '不用了',
+    nav_continue: '继续购物',
+  },
+};
+
+let lang = localStorage.getItem('pawshop_lang') || 'en';
+function t(key) { return (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key; }
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+}
+function setLang(l) {
+  lang = l;
+  localStorage.setItem('pawshop_lang', l);
+  applyI18n();
+  renderCategoryBar();
+  renderProducts();
+  updateCart();
+}
 
 // ===== State =====
 let cart = [];
@@ -473,14 +543,23 @@ function loadCart() {
 }
 
 // ===== Render =====
-const CATEGORY_LABELS = { beds: 'Cat Beds', scratchers: 'Scratchers' };
+const CATEGORY_LABELS = {
+  beds: { en: 'Beds', zh: '宠物床' },
+  scratchers: { en: 'Scratchers', zh: '猫抓板' },
+  dogs: { en: 'Dogs', zh: '狗狗用品' },
+};
 
 function renderCategoryBar() {
   const cats = [...new Set(products.map(p => p.category))];
+  const label = c => {
+    const l = CATEGORY_LABELS[c];
+    if (!l) return c;
+    return typeof l === 'string' ? l : (l[lang] || l.en);
+  };
   document.getElementById('categoryBar').innerHTML =
-    `<button onclick="filterProducts('all', event)" class="category-btn active px-4 py-1.5 bg-slate-900 text-white rounded-full text-sm whitespace-nowrap">All</button>` +
+    `<button onclick="filterProducts('all', event)" class="category-btn active px-4 py-1.5 bg-slate-900 text-white rounded-full text-sm whitespace-nowrap">${t('cat_all')}</button>` +
     cats.map(c =>
-      `<button onclick="filterProducts('${c}', event)" class="category-btn px-4 py-1.5 text-slate-600 rounded-full text-sm whitespace-nowrap hover:bg-slate-100">${CATEGORY_LABELS[c] || c}</button>`
+      `<button onclick="filterProducts('${c}', event)" class="category-btn px-4 py-1.5 text-slate-600 rounded-full text-sm whitespace-nowrap hover:bg-slate-100">${label(c)}</button>`
     ).join('');
 }
 
@@ -506,7 +585,7 @@ function renderProducts() {
   const displayed = filtered.slice(0, displayedProducts);
 
   if (displayed.length === 0) {
-    grid.innerHTML = '<div class="col-span-full text-center py-12 text-slate-400">No products found</div>';
+    grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-400">${t('no_products')}</div>`;
     document.getElementById('loadMoreContainer').style.display = 'none';
     return;
   }
@@ -588,10 +667,12 @@ function openProductModal(id) {
   document.getElementById('productName').textContent = p.name;
   document.getElementById('productRating').innerHTML = Array(5).fill(0).map((_, i) =>
     `<i class="fas fa-star ${i < Math.floor(p.rating) ? 'text-yellow-400' : 'text-slate-200'} text-xs"></i>`).join('');
-  document.getElementById('reviewCount').textContent = `${p.rating} · ${p.reviewCount} reviews`;
+  document.getElementById('reviewCount').textContent = `${p.rating} · ${p.reviewCount} ${t('reviews_label')}`;
   document.getElementById('productPrice').textContent = fmt(p.price);
   document.getElementById('originalPrice').textContent = fmt(p.originalPrice);
-  document.getElementById('stockText').textContent = p.stock < 20 ? `Only ${p.stock} left` : 'In stock';
+  document.getElementById('stockText').textContent = p.stock < 20
+    ? (lang === 'zh' ? `仅剩 ${p.stock} 件` : `Only ${p.stock} left`)
+    : t('in_stock');
   document.getElementById('productDesc').textContent = p.description;
   document.getElementById('qtyInput').value = 1;
 
@@ -641,7 +722,7 @@ function addToCart(id) {
   if (existing) existing.qty++;
   else cart.push({ ...p, qty: 1 });
   updateCart();
-  showToast('Added to cart');
+  showToast(t('toast_added'));
 }
 
 function addToCartFromModal() {
@@ -684,7 +765,7 @@ function updateCart() {
 
   const container = document.getElementById('cartItems');
   if (cart.length === 0) {
-    container.innerHTML = '<div class="text-center py-12 text-slate-400">Your cart is empty</div>';
+    container.innerHTML = `<div class="text-center py-12 text-slate-400">${t('cart_empty')}</div>`;
   } else {
     container.innerHTML = cart.map(item => `
       <div class="flex gap-3 py-3 border-b border-slate-100 fade-in">
@@ -716,16 +797,16 @@ function closeCart() { document.getElementById('cartDrawer').classList.remove('o
 
 // ===== Checkout =====
 function checkout() {
-  if (cart.length === 0) { showToast('Your cart is empty'); return; }
+  if (cart.length === 0) { showToast(t('cart_empty')); return; }
   checkoutStep = 1;
   updateCheckoutStep();
 
   const count = cart.reduce((s, i) => s + i.qty, 0);
   const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
   document.getElementById('checkoutSummary').innerHTML = `
-    <div class="flex justify-between mb-1"><span class="text-slate-500">Items</span><span>${count}</span></div>
-    <div class="flex justify-between mb-1"><span class="text-slate-500">Shipping</span><span class="text-green-600">Free</span></div>
-    <div class="flex justify-between font-bold pt-2 border-t border-slate-200 mt-2"><span>Total</span><span>${fmt(total)}</span></div>
+    <div class="flex justify-between mb-1"><span class="text-slate-500">${t('items')}</span><span>${count}</span></div>
+    <div class="flex justify-between mb-1"><span class="text-slate-500">${t('shipping')}</span><span class="text-green-600">${t('free')}</span></div>
+    <div class="flex justify-between font-bold pt-2 border-t border-slate-200 mt-2"><span>${t('total')}</span><span>${fmt(total)}</span></div>
   `;
 
   document.getElementById('checkoutModal').classList.add('open');
@@ -744,8 +825,8 @@ function nextStep() {
   const phone = document.getElementById('addrPhone').value.trim();
   const email = document.getElementById('addrEmail').value.trim();
   const addr = document.getElementById('addrDetail').value.trim();
-  if (!name || !phone || !addr) { showToast('Please complete the address form'); return; }
-  if (!email.includes('@')) { showToast('Please enter a valid email'); return; }
+  if (!email.includes('@')) { showToast(t('toast_email')); return; }
+  if (!name || !phone || !addr) { showToast(t('toast_addr')); return; }
   checkoutStep = 2;
   updateCheckoutStep();
 }
@@ -835,7 +916,7 @@ function openWaitlist(productId) {
 
 function submitWaitlist() {
   const email = document.getElementById('waitlistEmail').value.trim();
-  if (!email.includes('@')) { showToast('Please enter a valid email'); return; }
+  if (!email.includes('@')) { showToast(t('toast_email')); return; }
 
   const p = waitlistProductId ? products.find(x => x.id === waitlistProductId) : null;
   const productName = p ? p.name : '(site-wide)';
@@ -863,7 +944,7 @@ function submitWaitlist() {
     }
   } catch (e) {}
   document.getElementById('waitlistModal').classList.remove('open');
-  showToast("You're on the list!");
+  showToast(t('toast_list'));
 }
 
 function closeOrderSuccess() { document.getElementById('orderSuccessModal').classList.remove('open'); }
@@ -907,6 +988,8 @@ window.addEventListener('storage', e => {
 });
 
 // ===== Init =====
+document.getElementById('langSelect').value = lang;
+applyI18n();
 renderCategoryBar();
 renderProducts();
 loadCart();
