@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Orders - PawShop</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .fade-in { animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
+
+<nav class="sticky top-0 z-40 bg-white border-b border-slate-100">
+  <div class="max-w-3xl mx-auto px-4 h-16 flex items-center justify-between">
+    <a href="PawShop.html" class="text-xl font-bold">PawShop</a>
+    <a href="PawShop.html" class="text-sm text-slate-500 hover:text-slate-900">Continue shopping <i class="fas fa-arrow-right text-xs ml-1"></i></a>
+  </div>
+</nav>
+
+<main class="flex-1 max-w-3xl w-full mx-auto px-4 py-12">
+  <h1 class="text-2xl font-bold mb-2" id="pageTitle">My orders</h1>
+  <p class="text-sm text-slate-500 mb-8" id="pageSub">Enter your email to see all your orders and live delivery status.</p>
+
+  <div class="flex gap-2 mb-10">
+    <input type="email" id="emailInput" placeholder="you@example.com" class="flex-1 px-4 py-3 border border-slate-200 rounded-lg text-sm bg-white" onkeydown="if(event.key==='Enter')loadOrders()">
+    <button onclick="loadOrders()" id="viewBtn" class="px-6 py-3 bg-slate-900 text-white text-sm rounded-lg hover:bg-slate-700">View orders</button>
+  </div>
+
+  <div id="orderList" class="space-y-4"></div>
+</main>
+
+<footer class="bg-slate-900 text-white py-6 text-center text-sm text-slate-400">
+  &copy; 2026 PawShop. All rights reserved.
+</footer>
+
+<script>
+const LS_ORDERS = 'pawshop_orders';
+const LS_EMAIL = 'pawshop_customer_email';
+
+const lang = localStorage.getItem('pawshop_lang') || 'en';
+const L = {
+  en: { title: 'My orders', sub: 'Enter your email to see all your orders and live delivery status.', view: 'View orders', invalid: 'Please enter a valid email.', none: 'No orders found for this email yet.', shop: 'Start shopping', total: 'Total', shippedVia: 'Shipped via', progress: 'Progress', statuses: { new: 'Order received', processing: 'Being prepared', shipped: 'Shipped', done: 'Delivered' } },
+  zh: { title: '我的订单', sub: '输入你的邮箱，查看全部订单和实时物流状态。', view: '查看订单', invalid: '请输入有效的邮箱', none: '该邮箱还没有订单。', shop: '去逛逛', total: '合计', shippedVia: '承运', progress: '进度', statuses: { new: '已下单', processing: '备货中', shipped: '已发货', done: '已送达' } },
+};
+const T = L[lang] || L.en;
+
+const STATUS_LABELS = T.statuses;
+const STATUS_STEPS = ['new', 'processing', 'shipped', 'done'];
+const STATUS_STYLE = {
+  new: 'bg-blue-50 text-blue-600',
+  processing: 'bg-amber-50 text-amber-600',
+  shipped: 'bg-indigo-50 text-indigo-600',
+  done: 'bg-green-50 text-green-600',
+};
+
+function getOrders() {
+  try { return JSON.parse(localStorage.getItem(LS_ORDERS) || '[]'); } catch (e) { return []; }
+}
+
+function timelineHTML(order) {
+  const idx = STATUS_STEPS.indexOf(order.status || 'new');
+  const history = order.history || [{ status: order.status || 'new', at: order.createdAt }];
+  const events = STATUS_STEPS.slice(0, Math.max(idx + 1, 1)).map(s => {
+    const h = history.find(x => x.status === s);
+    return h ? `<div class="flex items-start gap-2 py-1"><span class="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${s === order.status ? 'bg-slate-900' : 'bg-green-500'}"></span><div><div class="text-xs font-medium">${STATUS_LABELS[s]}</div><div class="text-[11px] text-slate-400">${new Date(h.at).toLocaleString('en-US')}</div></div></div>` : '';
+  }).join('');
+  return events;
+}
+
+function orderCard(o) {
+  return `
+  <div class="bg-white border border-slate-100 rounded-lg overflow-hidden fade-in">
+    <div class="px-5 py-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-50">
+      <div>
+        <div class="font-mono font-bold text-sm">${o.id}</div>
+        <div class="text-xs text-slate-400">${new Date(o.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+      </div>
+      <span class="px-2.5 py-1 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || STATUS_STYLE.new}">${STATUS_LABELS[o.status] || o.status}</span>
+    </div>
+    <div class="px-5 py-4 grid md:grid-cols-2 gap-6">
+      <div>
+        <div class="text-sm space-y-2">
+          ${(o.items || []).map(i => `<div class="flex justify-between"><span class="text-slate-600">${i.name} ×${i.qty}</span><span>$${(i.price * i.qty).toFixed(2)}</span></div>`).join('')}
+          <div class="flex justify-between font-bold pt-2 border-t border-slate-100"><span>${T.total}</span><span>$${(o.total || 0).toFixed(2)}</span></div>
+        </div>
+        ${o.tracking ? `
+        <div class="mt-4 bg-slate-50 rounded p-3 text-xs">
+          <div class="text-slate-400 mb-1">${T.shippedVia}</div>
+          <div>${o.tracking.carrier}</div>
+          <div class="font-mono mt-1">${o.tracking.number}</div>
+        </div>` : ''}
+      </div>
+      <div>
+        <div class="text-xs text-slate-400 mb-2">${T.progress}</div>
+        ${timelineHTML(o)}
+      </div>
+    </div>
+  </div>`;
+}
+
+function loadOrders() {
+  const email = document.getElementById('emailInput').value.trim().toLowerCase();
+  const box = document.getElementById('orderList');
+  if (!email.includes('@')) { box.innerHTML = `<p class="text-sm text-slate-400">${T.invalid}</p>`; return; }
+  localStorage.setItem(LS_EMAIL, email);
+
+  const mine = getOrders().filter(o => (o.customer?.email || '').toLowerCase() === email).reverse();
+
+  box.innerHTML = mine.length
+    ? mine.map(orderCard).join('')
+    : `<div class="bg-white border border-slate-100 rounded-lg p-8 text-center">
+        <i class="fas fa-box-open text-3xl text-slate-200 mb-3"></i>
+        <p class="text-sm text-slate-500">${T.none}</p>
+        <a href="PawShop.html" class="inline-block mt-4 px-5 py-2.5 bg-slate-900 text-white text-sm rounded-lg">${T.shop}</a>
+      </div>`;
+}
+
+// 界面文案
+document.getElementById('pageTitle').textContent = T.title;
+document.getElementById('pageSub').textContent = T.sub;
+document.getElementById('viewBtn').textContent = T.view;
+
+// 回头客:本浏览器下过单的,直接带出邮箱
+const saved = localStorage.getItem(LS_EMAIL);
+if (saved) {
+  document.getElementById('emailInput').value = saved;
+  loadOrders();
+}
+
+// 后台改状态/录单号时,本页开着就实时刷新
+window.addEventListener('storage', e => { if (e.key === LS_ORDERS) loadOrders(); });
+</script>
+
+</body>
+</html>

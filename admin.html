@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PawShop 运营后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', sans-serif; }
+  .tab-btn.active { color: #0f172a; border-bottom: 2px solid #0f172a; font-weight: 600; }
+  .modal { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+  .modal.open { opacity: 1; pointer-events: auto; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+
+<!-- ===== 登录 ===== -->
+<div id="loginScreen" class="fixed inset-0 bg-slate-100 flex items-center justify-center z-50">
+  <div class="bg-white rounded-lg p-8 w-80 shadow">
+    <h1 class="text-xl font-bold mb-1">PawShop 运营后台</h1>
+    <p class="text-xs text-slate-400 mb-6">演示级密码保护,生产环境需换成服务端登录</p>
+    <label class="block text-sm mb-1">密码</label>
+    <input type="password" id="pwInput" class="w-full px-3 py-2 border border-slate-200 rounded text-sm mb-4" onkeydown="if(event.key==='Enter')login()">
+    <button onclick="login()" class="w-full py-2.5 bg-slate-900 text-white text-sm rounded hover:bg-slate-700">登录</button>
+    <p class="text-xs text-slate-400 mt-4 text-center">初始密码 pawshop2026</p>
+  </div>
+</div>
+
+<!-- ===== 主界面 ===== -->
+<div id="app" class="hidden max-w-6xl mx-auto px-4 sm:px-6 pb-16">
+  <header class="flex items-center justify-between py-4 border-b border-slate-200">
+    <div class="flex items-center gap-3">
+      <span class="text-lg font-bold">PawShop 运营后台</span>
+      <span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">演示级</span>
+    </div>
+    <div class="flex items-center gap-3 text-sm">
+      <button onclick="changePassword()" class="text-slate-500 hover:text-slate-900">改密码</button>
+      <button onclick="logout()" class="text-slate-500 hover:text-slate-900">退出</button>
+    </div>
+  </header>
+
+  <nav class="flex gap-6 py-3 border-b border-slate-100">
+    <button onclick="switchTab('dash')" class="tab-btn active text-sm text-slate-500 pb-2">概览</button>
+    <button onclick="switchTab('products')" class="tab-btn text-sm text-slate-500 pb-2">商品管理</button>
+    <button onclick="switchTab('orders')" class="tab-btn text-sm text-slate-500 pb-2">订单管理</button>
+    <button onclick="switchTab('waitlist')" class="tab-btn text-sm text-slate-500 pb-2">预售登记</button>
+    <button onclick="switchTab('data')" class="tab-btn text-sm text-slate-500 pb-2">数据备份</button>
+  </nav>
+
+  <!-- 概览 -->
+  <section id="tab-dash" class="tab-pane pt-8">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div class="bg-white border border-slate-100 rounded-lg p-5">
+        <div class="text-xs text-slate-400 mb-1">在售商品</div>
+        <div id="statProducts" class="text-2xl font-bold">0</div>
+      </div>
+      <div class="bg-white border border-slate-100 rounded-lg p-5">
+        <div class="text-xs text-slate-400 mb-1">总订单</div>
+        <div id="statOrders" class="text-2xl font-bold">0</div>
+      </div>
+      <div class="bg-white border border-slate-100 rounded-lg p-5">
+        <div class="text-xs text-slate-400 mb-1">待处理订单</div>
+        <div id="statPending" class="text-2xl font-bold text-amber-600">0</div>
+      </div>
+      <div class="bg-white border border-slate-100 rounded-lg p-5">
+        <div class="text-xs text-slate-400 mb-1">销售额(USD)</div>
+        <div id="statRevenue" class="text-2xl font-bold">$0.00</div>
+      </div>
+      <div class="bg-white border border-slate-100 rounded-lg p-5">
+        <div class="text-xs text-slate-400 mb-1">估算毛利(USD)</div>
+        <div id="statMargin" class="text-2xl font-bold text-green-600">$0.00</div>
+      </div>
+    </div>
+    <p class="text-xs text-slate-400 mt-2">毛利 = 订单金额 − 商品成本(按 7.15 汇率折算),未含运费/手续费/佣金,商品成本在"商品管理"里录入。</p>
+    <div class="bg-white border border-slate-100 rounded-lg p-5 mt-4 text-sm text-slate-500">
+      闭环说明:后台改商品 → 前台刷新即生效;前台顾客下单 → 这里订单管理立刻可见。两边通过浏览器 localStorage 共享数据。
+    </div>
+  </section>
+
+  <!-- 商品管理 -->
+  <section id="tab-products" class="tab-pane hidden pt-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-bold">商品列表</h2>
+      <button onclick="openProductForm()" class="px-4 py-2 bg-slate-900 text-white text-sm rounded hover:bg-slate-700"><i class="fas fa-plus text-xs mr-1"></i>添加商品</button>
+    </div>
+    <div class="bg-white border border-slate-100 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-500 text-xs">
+          <tr>
+            <th class="text-left py-3 px-4">商品</th>
+            <th class="text-left py-3 px-4">分类</th>
+            <th class="text-left py-3 px-4">价格</th>
+            <th class="text-left py-3 px-4">成本(¥)</th>
+            <th class="text-left py-3 px-4">库存</th>
+            <th class="text-left py-3 px-4">状态</th>
+            <th class="text-left py-3 px-4">收款链接</th>
+            <th class="text-right py-3 px-4">操作</th>
+          </tr>
+        </thead>
+        <tbody id="productTable"></tbody>
+      </table>
+    </div>
+    <p class="text-xs text-slate-400 mt-3">保存后请刷新前台页面(或开着前台标签页会自动更新)。分类需用英文小写,如 beds / scratchers,前台分类栏自动跟随。</p>
+  </section>
+
+  <!-- 订单管理 -->
+  <section id="tab-orders" class="tab-pane hidden pt-6">
+    <h2 class="font-bold mb-4">订单列表</h2>
+    <div class="bg-white border border-slate-100 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-500 text-xs">
+          <tr>
+            <th class="text-left py-3 px-4">订单号</th>
+            <th class="text-left py-3 px-4">时间</th>
+            <th class="text-left py-3 px-4">顾客</th>
+            <th class="text-left py-3 px-4">商品</th>
+            <th class="text-left py-3 px-4">金额</th>
+            <th class="text-left py-3 px-4">状态</th>
+            <th class="text-right py-3 px-4">操作</th>
+          </tr>
+        </thead>
+        <tbody id="orderTable"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 预售登记 -->
+  <section id="tab-waitlist" class="tab-pane hidden pt-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-bold">预售登记名单 <span id="waitlistCount" class="text-sm text-slate-400 font-normal"></span></h2>
+      <div class="flex gap-2">
+        <button onclick="exportJSON('pawshop_waitlist','pawshop_waitlist.json')" class="px-4 py-2 border border-slate-200 bg-white rounded text-sm hover:bg-slate-50">导出</button>
+        <button onclick="clearWaitlist()" class="px-4 py-2 border border-red-200 bg-red-50 text-red-600 rounded text-sm hover:bg-red-100">清空(需确认)</button>
+      </div>
+    </div>
+    <div class="bg-white border border-slate-100 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-500 text-xs">
+          <tr>
+            <th class="text-left py-3 px-4">Email</th>
+            <th class="text-left py-3 px-4">预留商品</th>
+            <th class="text-left py-3 px-4">时间</th>
+          </tr>
+        </thead>
+        <tbody id="waitlistTable"></tbody>
+      </table>
+    </div>
+    <p class="text-xs text-slate-400 mt-3">这是零资金验证需求的核心数据:登记数 = 真实需求证明,也是开业时第一批发优惠邮件的名单。目标建议:单商品 ≥20 个登记再考虑进货。</p>
+  </section>
+
+  <!-- 数据备份 -->
+  <section id="tab-data" class="tab-pane hidden pt-6">
+    <h2 class="font-bold mb-4">数据备份与恢复</h2>
+    <div class="space-y-3 max-w-lg">
+      <button onclick="exportJSON('pawshop_products','pawshop_products.json')" class="w-full py-3 border border-slate-200 bg-white rounded text-sm hover:bg-slate-50">导出商品数据 JSON</button>
+      <button onclick="exportJSON('pawshop_orders','pawshop_orders.json')" class="w-full py-3 border border-slate-200 bg-white rounded text-sm hover:bg-slate-50">导出订单数据 JSON</button>
+      <label class="block w-full py-3 border border-slate-200 bg-white rounded text-sm hover:bg-slate-50 text-center cursor-pointer">
+        导入商品数据 JSON<input type="file" accept=".json" class="hidden" onchange="importProducts(event)">
+      </label>
+      <button onclick="restoreDefaults()" class="w-full py-3 border border-amber-200 bg-amber-50 text-amber-700 rounded text-sm hover:bg-amber-100">恢复内置 4 个商品(覆盖现有商品,需确认)</button>
+      <button onclick="clearOrders()" class="w-full py-3 border border-red-200 bg-red-50 text-red-600 rounded text-sm hover:bg-red-100">清空全部测试订单(需确认)</button>
+    </div>
+    <div class="mt-8 max-w-lg">
+      <h3 class="font-bold mb-1">邮件通知配置(EmailJS,可选)</h3>
+      <p class="text-xs text-slate-400 mb-4">配置后:顾客下单自动发确认邮件、你录物流单号自动发发货通知。注册 emailjs.com(免费 200 封/月)拿三个 ID,模板变量:{{to_email}} {{order_id}} {{items}} {{total}} {{status}} {{carrier}} {{tracking}}。不配置则不发送,页面其他功能不受影响。</p>
+      <div class="space-y-2 text-sm bg-white border border-slate-100 rounded-lg p-4">
+        <div><label class="block text-xs text-slate-500 mb-1">Public Key</label><input id="cfgPublicKey" class="w-full px-3 py-2 border border-slate-200 rounded font-mono text-xs"></div>
+        <div><label class="block text-xs text-slate-500 mb-1">Service ID</label><input id="cfgServiceId" class="w-full px-3 py-2 border border-slate-200 rounded font-mono text-xs"></div>
+        <div class="grid grid-cols-2 gap-2">
+          <div><label class="block text-xs text-slate-500 mb-1">下单确认模板 ID</label><input id="cfgTemplateId" class="w-full px-3 py-2 border border-slate-200 rounded font-mono text-xs"></div>
+          <div><label class="block text-xs text-slate-500 mb-1">发货通知模板 ID</label><input id="cfgShipTemplateId" class="w-full px-3 py-2 border border-slate-200 rounded font-mono text-xs"></div>
+        </div>
+        <button onclick="saveEmailConfig()" class="w-full py-2 bg-slate-900 text-white rounded text-sm hover:bg-slate-700">保存邮件配置</button>
+      </div>
+    </div>
+    <p class="text-xs text-slate-400 mt-4">数据存在本机浏览器 localStorage。换浏览器/换电脑不会带走数据,重要操作后记得导出 JSON 备份。</p>
+  </section>
+</div>
+
+<!-- ===== 订单详情 ===== -->
+<div id="orderDetailModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="orderDetailId" class="font-bold font-mono"></h3>
+      <button onclick="document.getElementById('orderDetailModal').classList.remove('open')" class="p-2 hover:bg-slate-100 rounded"><i class="fas fa-times"></i></button>
+    </div>
+    <div id="orderDetailBody"></div>
+  </div>
+</div>
+
+<!-- ===== 商品表单 ===== -->
+<div id="productModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
+    <div class="flex items-center justify-between mb-5">
+      <h3 id="formTitle" class="font-bold">添加商品</h3>
+      <button onclick="closeProductForm()" class="p-2 hover:bg-slate-100 rounded"><i class="fas fa-times"></i></button>
+    </div>
+    <input type="hidden" id="fId">
+    <div class="space-y-3 text-sm">
+      <div><label class="block mb-1">商品名(英文)*</label><input id="fName" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block mb-1">分类(英文小写)*</label><input id="fCategory" placeholder="beds / scratchers" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block mb-1">售价 USD*</label><input id="fPrice" type="number" step="0.01" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+        <div><label class="block mb-1">采购成本 ¥(1688 拿货价,算毛利用)</label><input id="fCost" type="number" step="0.01" placeholder="如 15.5" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block mb-1">原价 USD(划线价)</label><input id="fOriginal" type="number" step="0.01" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+        <div><label class="block mb-1">库存</label><input id="fStock" type="number" value="100" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block mb-1">评分(0-5)</label><input id="fRating" type="number" step="0.1" value="4.8" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+        <div><label class="block mb-1">评论数</label><input id="fReviews" type="number" value="100" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+      </div>
+      <div><label class="block mb-1">商品图 URL(实拍图,优先)</label><input id="fImageUrl" placeholder="https://..." class="w-full px-3 py-2 border border-slate-200 rounded" oninput="previewImage()"></div>
+      <div><label class="block mb-1">图标(FontAwesome 类名,无图时用)</label><input id="fIcon" value="fa-box" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+      <div id="imgPreview" class="h-28 bg-slate-50 rounded flex items-center justify-center overflow-hidden">
+        <i id="previewIcon" class="fas fa-box text-3xl text-slate-300"></i>
+      </div>
+      <div><label class="block mb-1">款式(逗号分隔)</label><input id="fVariants" placeholder="Natural / Large" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+      <div><label class="block mb-1">描述(英文)</label><textarea id="fDescription" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded"></textarea></div>
+      <div><label class="block mb-1">参数(每行一项,格式:标签|值)</label><textarea id="fSpecs" rows="3" placeholder="Size|56 × 43 × 25 cm&#10;Material|Hemp + wood frame" class="w-full px-3 py-2 border border-slate-200 rounded"></textarea></div>
+      <div><label class="block mb-1">Stripe Payment Link(真实收款用,可空)</label><input id="fPaymentLink" placeholder="https://buy.stripe.com/..." class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+    </div>
+    <div class="flex gap-2 mt-6">
+      <button onclick="closeProductForm()" class="flex-1 py-2.5 border border-slate-200 rounded text-sm hover:bg-slate-50">取消</button>
+      <button onclick="saveProduct()" class="flex-1 py-2.5 bg-slate-900 text-white rounded text-sm hover:bg-slate-700">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== 存储 =====
+const LS_PRODUCTS = 'pawshop_products';
+const LS_ORDERS = 'pawshop_orders';
+const LS_PW = 'pawshop_admin_pw';
+const DEFAULT_PASSWORD = 'pawshop2026';
+
+const DEFAULT_PRODUCTS = [
+  { id:1, name:"Elevated Hemp Cat Bed - Standard", category:"beds", price:19.99, originalPrice:29.99, rating:4.8, reviewCount:1240, stock:120, icon:"fa-bed", imageUrl:"", variants:["Natural"], description:"Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.", specs:[{label:"Size",value:"56.5 × 43 × 25 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}], paymentLink:"" },
+  { id:2, name:"Elevated Hemp Cat Bed - Large", category:"beds", price:24.99, originalPrice:34.99, rating:4.7, reviewCount:860, stock:80, icon:"fa-bed", imageUrl:"", variants:["Natural"], description:"Roomier version for large cats or two sharing. Same breathable hemp mat, 10cm elevation.", specs:[{label:"Size",value:"70 × 45.5 × 31.5 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}], paymentLink:"" },
+  { id:3, name:"Corrugated Sofa Lounger", category:"scratchers", price:29.99, originalPrice:44.99, rating:4.8, reviewCount:2310, stock:150, icon:"fa-couch", imageUrl:"", variants:["Natural / Grey"], description:"Dual-color corrugated cardboard sofa to scratch, lounge and nap on. Raised 5cm to protect floors.", specs:[{label:"Size",value:"55.5 × 40.5 × 23.5 cm"},{label:"Material",value:"Corrugated cardboard"},{label:"Floor gap",value:"5cm"}], paymentLink:"" },
+  { id:4, name:"Tall Cat Scratcher Post", category:"scratchers", price:27.99, originalPrice:39.99, rating:4.6, reviewCount:1540, stock:90, icon:"fa-tree", imageUrl:"", variants:["Round"], description:"Extra-tall vertical scratcher for full-body stretching. Stable dense-board base, replaceable corrugated core.", specs:[{label:"Size",value:"28 × 28 × 60 cm"},{label:"Material",value:"Corrugated + MDF"},{label:"Shape",value:"Round column"}], paymentLink:"" },
+];
+
+function readLS(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed || fallback;
+  } catch (e) { return fallback; }
+}
+function writeLS(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { alert('写入失败:浏览器存储不可用'); }
+}
+function getProducts() {
+  const p = readLS(LS_PRODUCTS, null);
+  return p || DEFAULT_PRODUCTS;
+}
+function getOrders() { return readLS(LS_ORDERS, []); }
+
+// ===== 登录 =====
+function login() {
+  const pw = document.getElementById('pwInput').value;
+  const stored = localStorage.getItem(LS_PW) || DEFAULT_PASSWORD;
+  if (pw === stored) {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').classList.remove('hidden');
+    renderAll();
+  } else { alert('密码错误'); }
+}
+function logout() {
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('loginScreen').style.display = '';
+  document.getElementById('pwInput').value = '';
+}
+function changePassword() {
+  const cur = prompt('输入当前密码');
+  if (cur === null) return;
+  const stored = localStorage.getItem(LS_PW) || DEFAULT_PASSWORD;
+  if (cur !== stored) { alert('当前密码不对'); return; }
+  const np = prompt('输入新密码(至少6位)');
+  if (!np || np.length < 6) { alert('密码太短,未修改'); return; }
+  writeLS(LS_PW, np);
+  alert('已修改');
+}
+
+// ===== 标签页 =====
+function switchTab(tab) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
+  document.getElementById(`tab-${tab}`).classList.remove('hidden');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+// ===== 概览 =====
+const FX_RATE = 7.15;
+
+function renderDash() {
+  const products = getProducts();
+  const orders = getOrders();
+  const live = products.filter(p => p.active !== false);
+  document.getElementById('statProducts').textContent = live.length;
+  document.getElementById('statOrders').textContent = orders.length;
+  document.getElementById('statPending').textContent = orders.filter(o => o.status === 'new' || o.status === 'processing').length;
+  document.getElementById('statRevenue').textContent = '$' + orders.reduce((s, o) => s + (o.total || 0), 0).toFixed(2);
+  const margin = orders.reduce((s, o) => {
+    const cost = (o.items || []).reduce((c, i) => {
+      const p = products.find(x => x.id === i.id);
+      return c + ((p && p.costCNY ? p.costCNY : 0) / FX_RATE) * i.qty;
+    }, 0);
+    return s + (o.total || 0) - cost;
+  }, 0);
+  document.getElementById('statMargin').textContent = '$' + margin.toFixed(2);
+}
+
+// ===== 商品管理 =====
+const CATEGORY_LABELS = { beds: '猫床', scratchers: '猫抓板' };
+
+function renderProducts() {
+  const products = getProducts();
+  document.getElementById('productTable').innerHTML = products.map(p => `
+    <tr class="border-t border-slate-100">
+      <td class="py-3 px-4">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-slate-50 rounded flex items-center justify-center overflow-hidden flex-shrink-0">
+            ${p.imageUrl ? `<img src="${p.imageUrl}" class="w-full h-full object-cover">` : `<i class="fas ${p.icon || 'fa-box'} text-slate-300"></i>`}
+          </div>
+          <span class="font-medium">${p.name}</span>
+        </div>
+      </td>
+      <td class="py-3 px-4 text-slate-500">${CATEGORY_LABELS[p.category] || p.category}</td>
+      <td class="py-3 px-4">$${p.price}</td>
+      <td class="py-3 px-4 text-slate-500">${p.costCNY ? '¥' + p.costCNY : '—'}</td>
+      <td class="py-3 px-4 ${p.stock < 20 ? 'text-red-500 font-medium' : ''}">${p.stock}</td>
+      <td class="py-3 px-4">
+        <button onclick="toggleActive(${p.id})" class="px-2 py-0.5 rounded text-xs ${p.active === false ? 'bg-slate-100 text-slate-400' : 'bg-green-50 text-green-600'}">${p.active === false ? '已下架' : '在售'}</button>
+      </td>
+      <td class="py-3 px-4">${p.paymentLink ? '<i class="fas fa-check text-green-500"></i>' : '<span class="text-slate-300">未配置</span>'}</td>
+      <td class="py-3 px-4 text-right whitespace-nowrap">
+        <button onclick="openProductForm(${p.id})" class="text-slate-500 hover:text-slate-900 mr-3">编辑</button>
+        <button onclick="deleteProduct(${p.id})" class="text-slate-400 hover:text-red-500">删除</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="py-8 text-center text-slate-400">暂无商品</td></tr>';
+}
+
+function nextId(products) {
+  return products.length ? Math.max(...products.map(p => p.id)) + 1 : 1;
+}
+
+function openProductForm(id) {
+  const products = getProducts();
+  const p = id ? products.find(x => x.id === id) : null;
+  document.getElementById('formTitle').textContent = p ? '编辑商品' : '添加商品';
+  document.getElementById('fId').value = p ? p.id : '';
+  document.getElementById('fName').value = p ? p.name : '';
+  document.getElementById('fCategory').value = p ? p.category : 'beds';
+  document.getElementById('fStock').value = p ? p.stock : 100;
+  document.getElementById('fPrice').value = p ? p.price : '';
+  document.getElementById('fCost').value = p ? p.costCNY || '' : '';
+  document.getElementById('fOriginal').value = p ? p.originalPrice || '' : '';
+  document.getElementById('fRating').value = p ? p.rating : 4.8;
+  document.getElementById('fReviews').value = p ? p.reviewCount : 100;
+  document.getElementById('fImageUrl').value = p ? p.imageUrl || '' : '';
+  document.getElementById('fIcon').value = p ? p.icon || 'fa-box' : 'fa-box';
+  document.getElementById('fVariants').value = p ? (p.variants || []).join(', ') : '';
+  document.getElementById('fDescription').value = p ? p.description || '' : '';
+  document.getElementById('fSpecs').value = p ? (p.specs || []).map(s => `${s.label}|${s.value}`).join('\n') : '';
+  document.getElementById('fPaymentLink').value = p ? p.paymentLink || '' : '';
+  previewImage();
+  document.getElementById('productModal').classList.add('open');
+}
+
+function previewImage() {
+  const url = document.getElementById('fImageUrl').value.trim();
+  const icon = document.getElementById('fIcon').value.trim() || 'fa-box';
+  document.getElementById('imgPreview').innerHTML = url
+    ? `<img src="${url}" class="w-full h-full object-cover" onerror="this.remove()">`
+    : `<i class="fas ${icon} text-3xl text-slate-300"></i>`;
+}
+
+function closeProductForm() { document.getElementById('productModal').classList.remove('open'); }
+
+function saveProduct() {
+  const name = document.getElementById('fName').value.trim();
+  const category = document.getElementById('fCategory').value.trim().toLowerCase();
+  const price = parseFloat(document.getElementById('fPrice').value);
+  if (!name || !category || !price) { alert('商品名、分类、售价必填'); return; }
+
+  const specs = document.getElementById('fSpecs').value.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const [label, ...rest] = l.split('|');
+    return { label: label.trim(), value: rest.join('|').trim() };
+  }).filter(s => s.label && s.value);
+
+  const variants = document.getElementById('fVariants').value.split(',').map(v => v.trim()).filter(Boolean);
+
+  const record = {
+    id: document.getElementById('fId').value ? parseInt(document.getElementById('fId').value) : null,
+    name,
+    category,
+    price,
+    costCNY: parseFloat(document.getElementById('fCost').value) || null,
+    originalPrice: parseFloat(document.getElementById('fOriginal').value) || null,
+    rating: parseFloat(document.getElementById('fRating').value) || 4.5,
+    reviewCount: parseInt(document.getElementById('fReviews').value) || 0,
+    stock: parseInt(document.getElementById('fStock').value) || 0,
+    icon: document.getElementById('fIcon').value.trim() || 'fa-box',
+    imageUrl: document.getElementById('fImageUrl').value.trim(),
+    variants: variants.length ? variants : ['Standard'],
+    description: document.getElementById('fDescription').value.trim(),
+    specs,
+    paymentLink: document.getElementById('fPaymentLink').value.trim(),
+  };
+
+  const products = getProducts();
+  if (record.id) {
+    const idx = products.findIndex(p => p.id === record.id);
+    products[idx] = { ...products[idx], ...record };
+  } else {
+    record.id = nextId(products);
+    record.active = true;
+    products.push(record);
+  }
+  writeLS(LS_PRODUCTS, products);
+  closeProductForm();
+  renderAll();
+}
+
+function toggleActive(id) {
+  const products = getProducts();
+  const p = products.find(x => x.id === id);
+  if (p) { p.active = p.active === false ? true : false; writeLS(LS_PRODUCTS, products); renderAll(); }
+}
+
+function deleteProduct(id) {
+  const products = getProducts();
+  const p = products.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`确定删除「${p.name}」?此操作不可撤销,建议先在"数据备份"导出。`)) return;
+  writeLS(LS_PRODUCTS, products.filter(x => x.id !== id));
+  renderAll();
+}
+
+// ===== 订单管理 =====
+const STATUS_LABELS = { new: '新订单', processing: '处理中', shipped: '已发货', done: '已完成' };
+
+function renderOrders() {
+  const orders = getOrders().slice().reverse();
+  document.getElementById('orderTable').innerHTML = orders.map(o => `
+    <tr class="border-t border-slate-100">
+      <td class="py-3 px-4 font-mono text-xs">${o.id}</td>
+      <td class="py-3 px-4 text-xs text-slate-500">${new Date(o.createdAt).toLocaleString('zh-CN')}</td>
+      <td class="py-3 px-4">
+        <div class="text-sm">${o.customer?.name || '-'}</div>
+        <div class="text-xs text-slate-400">${o.customer?.country || ''}</div>
+      </td>
+      <td class="py-3 px-4 text-xs text-slate-600">${(o.items || []).map(i => `${i.name} ×${i.qty}`).join('<br>')}</td>
+      <td class="py-3 px-4 font-medium">$${(o.total || 0).toFixed(2)}</td>
+      <td class="py-3 px-4">
+        <select onchange="updateOrderStatus('${o.id}', this.value)" class="border border-slate-200 rounded text-xs px-2 py-1">
+          ${Object.entries(STATUS_LABELS).map(([v, l]) => `<option value="${v}" ${o.status === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </td>
+      <td class="py-3 px-4 text-right">
+        <button onclick="openOrderDetail('${o.id}')" class="text-slate-500 hover:text-slate-900">详情</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="py-8 text-center text-slate-400">暂无订单。在前台下单后这里会显示。</td></tr>';
+}
+
+function updateOrderStatus(id, status) {
+  const orders = getOrders();
+  const o = orders.find(x => x.id === id);
+  if (o) {
+    o.status = status;
+    o.history = o.history || [];
+    if (!o.history.some(h => h.status === status)) o.history.push({ status, at: new Date().toISOString() });
+    writeLS(LS_ORDERS, orders);
+    renderDash();
+    renderOrders();
+  }
+}
+
+// ===== 订单详情 =====
+const CARRIERS = ['1688 官方集运', '云途 YunExpress', '4PX', '燕文 Yanwen', '其他'];
+const STATUS_STEPS = ['new', 'processing', 'shipped', 'done'];
+
+function openOrderDetail(id) {
+  const orders = getOrders();
+  const o = orders.find(x => x.id === id);
+  if (!o) return;
+  currentOrderId = id;
+  document.getElementById('orderDetailId').textContent = o.id;
+
+  const timeline = (o.history || [{ status: o.status || 'new', at: o.createdAt }]).map(h => `
+    <div class="flex items-start gap-3 pb-4">
+      <div class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${STATUS_STEPS.indexOf(o.status) >= STATUS_STEPS.indexOf(h.status) ? 'bg-green-500' : 'bg-slate-300'}"></div>
+      <div>
+        <div class="text-sm font-medium">${STATUS_LABELS[h.status] || h.status}</div>
+        <div class="text-xs text-slate-400">${new Date(h.at).toLocaleString('zh-CN')}</div>
+      </div>
+    </div>
+  `).join('');
+
+  const trackingBlock = o.tracking
+    ? `<div class="text-sm"><span class="text-slate-400">物流:</span> ${o.tracking.carrier} · <span class="font-mono">${o.tracking.number}</span></div>`
+    : `<div class="space-y-2">
+        <select id="trkCarrier" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">${CARRIERS.map(c => `<option>${c}</option>`).join('')}</select>
+        <input id="trkNumber" placeholder="物流单号" class="w-full px-3 py-2 border border-slate-200 rounded text-sm font-mono">
+        <button onclick="saveTracking()" class="w-full py-2 bg-slate-900 text-white rounded text-sm hover:bg-slate-700">保存并标记为已发货</button>
+       </div>`;
+
+  document.getElementById('orderDetailBody').innerHTML = `
+    <div class="text-xs text-slate-400 mb-4">${new Date(o.createdAt).toLocaleString('zh-CN')} · 支付方式:${o.payment || '-'}</div>
+    <div class="grid md:grid-cols-2 gap-6">
+      <div>
+        <h4 class="text-sm font-semibold mb-2">顾客信息</h4>
+        <div class="text-sm text-slate-600 space-y-1 mb-6">
+          <div>${o.customer?.name || '-'}</div>
+          <div>${o.customer?.email || '-'}</div>
+          <div>${o.customer?.phone || '-'}</div>
+          <div>${o.customer?.country || '-'} ${o.customer?.address || ''}</div>
+        </div>
+        <h4 class="text-sm font-semibold mb-2">状态时间线</h4>
+        ${timeline}
+      </div>
+      <div>
+        <h4 class="text-sm font-semibold mb-2">商品</h4>
+        <div class="text-sm text-slate-600 space-y-2 mb-4">
+          ${(o.items || []).map(i => `<div class="flex justify-between"><span>${i.name} ×${i.qty}</span><span>$${(i.price * i.qty).toFixed(2)}</span></div>`).join('')}
+          <div class="flex justify-between font-bold pt-2 border-t border-slate-100"><span>合计</span><span>$${(o.total || 0).toFixed(2)}</span></div>
+        </div>
+        <h4 class="text-sm font-semibold mb-2">物流</h4>
+        <div class="mb-6">${trackingBlock}</div>
+        <button onclick="copyPurchaseList()" class="w-full py-2 border border-slate-200 rounded text-sm hover:bg-slate-50"><i class="fas fa-copy text-xs mr-1"></i>复制采购清单(发 1688 供应商)</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('orderDetailModal').classList.add('open');
+}
+
+let currentOrderId = null;
+
+function saveTracking() {
+  const number = document.getElementById('trkNumber').value.trim();
+  if (!number) { alert('请填物流单号'); return; }
+  const orders = getOrders();
+  const o = orders.find(x => x.id === currentOrderId);
+  if (!o) return;
+  o.tracking = { carrier: document.getElementById('trkCarrier').value, number };
+  o.status = 'shipped';
+  o.history = o.history || [];
+  if (!o.history.some(h => h.status === 'shipped')) o.history.push({ status: 'shipped', at: new Date().toISOString() });
+  writeLS(LS_ORDERS, orders);
+  sendShipEmail(o);
+  openOrderDetail(currentOrderId);
+  renderOrders();
+  renderDash();
+}
+
+function sendShipEmail(order) {
+  try {
+    const cfg = JSON.parse(localStorage.getItem('pawshop_email_config') || 'null');
+    if (!cfg || !cfg.publicKey || !cfg.serviceId || !cfg.shipTemplateId || typeof emailjs === 'undefined') return;
+    emailjs.init(cfg.publicKey);
+    emailjs.send(cfg.serviceId, cfg.shipTemplateId, {
+      to_email: order.customer?.email || '',
+      order_id: order.id,
+      items: (order.items || []).map(i => `${i.name} x${i.qty}`).join(', '),
+      total: '$' + (order.total || 0).toFixed(2),
+      status: 'shipped',
+      carrier: order.tracking.carrier,
+      tracking: order.tracking.number,
+    });
+  } catch (e) {}
+}
+
+const LS_EMAILCFG = 'pawshop_email_config';
+
+function loadEmailConfig() {
+  const cfg = readLS(LS_EMAILCFG, {});
+  document.getElementById('cfgPublicKey').value = cfg.publicKey || '';
+  document.getElementById('cfgServiceId').value = cfg.serviceId || '';
+  document.getElementById('cfgTemplateId').value = cfg.templateId || '';
+  document.getElementById('cfgShipTemplateId').value = cfg.shipTemplateId || '';
+}
+
+function saveEmailConfig() {
+  writeLS(LS_EMAILCFG, {
+    publicKey: document.getElementById('cfgPublicKey').value.trim(),
+    serviceId: document.getElementById('cfgServiceId').value.trim(),
+    templateId: document.getElementById('cfgTemplateId').value.trim(),
+    shipTemplateId: document.getElementById('cfgShipTemplateId').value.trim(),
+  });
+  alert('已保存。已配置项生效;清空则停用邮件。');
+}
+
+function copyPurchaseList() {
+  const o = getOrders().find(x => x.id === currentOrderId);
+  if (!o) return;
+  const lines = [
+    '【代发下单】',
+    ...(o.items || []).map(i => `商品:${i.name} ×${i.qty}`),
+    '',
+    '收件人:' + (o.customer?.name || ''),
+    '电话:' + (o.customer?.phone || ''),
+    '国家:' + (o.customer?.country || ''),
+    '地址:' + (o.customer?.address || ''),
+  ];
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text).then(
+    () => alert('已复制,去 1688 下单时粘贴给供应商'),
+    () => prompt('复制失败,手动复制:', text)
+  );
+}
+
+// ===== 数据备份 =====
+function exportJSON(key, filename) {
+  const data = localStorage.getItem(key);
+  if (!data) { alert('没有数据可导出'); return; }
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+function importProducts(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!Array.isArray(data) || !data.every(p => p.id && p.name && p.price)) throw new Error('格式不对');
+      if (!confirm(`将导入 ${data.length} 个商品并覆盖现有商品,确定?`)) return;
+      writeLS(LS_PRODUCTS, data);
+      renderAll();
+      alert('导入成功');
+    } catch (e) { alert('导入失败:文件不是合法的商品 JSON'); }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function restoreDefaults() {
+  if (!confirm('恢复内置 4 个商品并覆盖现有全部商品数据,确定?')) return;
+  writeLS(LS_PRODUCTS, JSON.parse(JSON.stringify(DEFAULT_PRODUCTS)));
+  renderAll();
+}
+
+function clearOrders() {
+  if (!confirm('清空全部订单数据?此操作不可撤销,建议先导出。')) return;
+  writeLS(LS_ORDERS, []);
+  renderAll();
+}
+
+// ===== 其他页面改动时自动刷新(和前台开着不同标签页时) =====
+window.addEventListener('storage', e => {
+  if (e.key === LS_PRODUCTS || e.key === LS_ORDERS) renderAll();
+});
+
+// ===== 预售登记 =====
+function getWaitlist() { return readLS('pawshop_waitlist', []); }
+
+function renderWaitlist() {
+  const list = getWaitlist().slice().reverse();
+  const products = getProducts();
+  document.getElementById('waitlistCount').textContent = `(${list.length})`;
+  document.getElementById('waitlistTable').innerHTML = list.map(w => {
+    const p = products.find(x => x.id === w.productId);
+    return `
+    <tr class="border-t border-slate-100">
+      <td class="py-3 px-4">${w.email}</td>
+      <td class="py-3 px-4 text-slate-500">${p ? p.name : '全站通用'}</td>
+      <td class="py-3 px-4 text-xs text-slate-400">${new Date(w.at).toLocaleString('zh-CN')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="3" class="py-8 text-center text-slate-400">暂无登记。前台"Reserve yours free"提交后会出现在这里。</td></tr>';
+}
+
+function clearWaitlist() {
+  if (!confirm('清空全部预售登记?建议先导出备份。')) return;
+  writeLS('pawshop_waitlist', []);
+  renderWaitlist();
+}
+
+function renderAll() {
+  renderDash();
+  renderProducts();
+  renderOrders();
+  renderWaitlist();
+  loadEmailConfig();
+}
+</script>
+
+</body>
+</html>
