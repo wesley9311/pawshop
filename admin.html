@@ -214,17 +214,12 @@
         <div><label class="block mb-1">原价 USD(划线价)</label><input id="fOriginal" type="number" step="0.01" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
         <div><label class="block mb-1">库存</label><input id="fStock" type="number" value="100" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
       </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div><label class="block mb-1">评分(0-5)</label><input id="fRating" type="number" step="0.1" value="4.8" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
-        <div><label class="block mb-1">评论数</label><input id="fReviews" type="number" value="100" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
-      </div>
-      <div><label class="block mb-1">商品图 URL(实拍图,优先)</label><input id="fImageUrl" placeholder="https://..." class="w-full px-3 py-2 border border-slate-200 rounded" oninput="previewImage()"></div>
-      <div><label class="block mb-1">图标(FontAwesome 类名,无图时用)</label><input id="fIcon" value="fa-box" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
+      <div><label class="block mb-1">商品图 URL(可填多张,英文逗号分隔,第一张为主图)</label><input id="fImageUrl" placeholder="https://图1.jpg, https://图2.jpg" class="w-full px-3 py-2 border border-slate-200 rounded text-xs font-mono" oninput="previewImage()"></div>
+      <div><label class="block mb-1">占位图标(没有图时显示,FontAwesome 类名,选填)</label><input id="fIcon" value="fa-box" class="w-full px-3 py-2 border border-slate-200 rounded font-mono text-xs"></div>
       <div id="imgPreview" class="h-28 bg-slate-50 rounded flex items-center justify-center overflow-hidden">
         <i id="previewIcon" class="fas fa-box text-3xl text-slate-300"></i>
       </div>
       <div><label class="block mb-1">款式(逗号分隔)</label><input id="fVariants" placeholder="Natural / Large" class="w-full px-3 py-2 border border-slate-200 rounded"></div>
-      <div><label class="block mb-1">描述(英文)</label><textarea id="fDescription" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded"></textarea></div>
       <div><label class="block mb-1">参数(每行一项,格式:标签|值)</label><textarea id="fSpecs" rows="3" placeholder="Size|56 × 43 × 25 cm&#10;Material|Hemp + wood frame" class="w-full px-3 py-2 border border-slate-200 rounded"></textarea></div>
       <div><label class="block mb-1">Stripe Payment Link(真实收款用,可空)</label><input id="fPaymentLink" placeholder="https://buy.stripe.com/..." class="w-full px-3 py-2 border border-slate-200 rounded"></div>
     </div>
@@ -243,10 +238,10 @@ const LS_PW = 'pawshop_admin_pw';
 const DEFAULT_PASSWORD = 'pawshop2026';
 
 const DEFAULT_PRODUCTS = [
-  { id:1, name:"Elevated Hemp Cat Bed - Standard", category:"beds", price:19.99, originalPrice:29.99, rating:4.8, reviewCount:1240, stock:120, icon:"fa-bed", imageUrl:"", variants:["Natural"], description:"Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.", specs:[{label:"Size",value:"56.5 × 43 × 25 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}], paymentLink:"" },
-  { id:2, name:"Elevated Hemp Cat Bed - Large", category:"beds", price:24.99, originalPrice:34.99, rating:4.7, reviewCount:860, stock:80, icon:"fa-bed", imageUrl:"", variants:["Natural"], description:"Roomier version for large cats or two sharing. Same breathable hemp mat, 10cm elevation.", specs:[{label:"Size",value:"70 × 45.5 × 31.5 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}], paymentLink:"" },
-  { id:3, name:"Corrugated Sofa Lounger", category:"scratchers", price:29.99, originalPrice:44.99, rating:4.8, reviewCount:2310, stock:150, icon:"fa-couch", imageUrl:"", variants:["Natural / Grey"], description:"Dual-color corrugated cardboard sofa to scratch, lounge and nap on. Raised 5cm to protect floors.", specs:[{label:"Size",value:"55.5 × 40.5 × 23.5 cm"},{label:"Material",value:"Corrugated cardboard"},{label:"Floor gap",value:"5cm"}], paymentLink:"" },
-  { id:4, name:"Tall Cat Scratcher Post", category:"scratchers", price:27.99, originalPrice:39.99, rating:4.6, reviewCount:1540, stock:90, icon:"fa-tree", imageUrl:"", variants:["Round"], description:"Extra-tall vertical scratcher for full-body stretching. Stable dense-board base, replaceable corrugated core.", specs:[{label:"Size",value:"28 × 28 × 60 cm"},{label:"Material",value:"Corrugated + MDF"},{label:"Shape",value:"Round column"}], paymentLink:"" },
+  { id:1, name:"Elevated Hemp Cat Bed - Standard", category:"beds", price:19.99, originalPrice:29.99, stock:120, icon:"fa-bed", imageUrl:"", variants:["Natural"], description:"Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.", specs:[{label:"Size",value:"56.5 × 43 × 25 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}], paymentLink:"" },
+  { id:2, name:"Elevated Hemp Cat Bed - Large", category:"beds", price:24.99, originalPrice:34.99, stock:80, icon:"fa-bed", imageUrl:"", variants:["Natural"], description:"Roomier version for large cats or two sharing. Same breathable hemp mat, 10cm elevation.", specs:[{label:"Size",value:"70 × 45.5 × 31.5 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}], paymentLink:"" },
+  { id:3, name:"Corrugated Sofa Lounger", category:"scratchers", price:29.99, originalPrice:44.99, stock:150, icon:"fa-couch", imageUrl:"", variants:["Natural / Grey"], description:"Dual-color corrugated cardboard sofa to scratch, lounge and nap on. Raised 5cm to protect floors.", specs:[{label:"Size",value:"55.5 × 40.5 × 23.5 cm"},{label:"Material",value:"Corrugated cardboard"},{label:"Floor gap",value:"5cm"}], paymentLink:"" },
+  { id:4, name:"Tall Cat Scratcher Post", category:"scratchers", price:27.99, originalPrice:39.99, stock:90, icon:"fa-tree", imageUrl:"", variants:["Round"], description:"Extra-tall vertical scratcher for full-body stretching. Stable dense-board base, replaceable corrugated core.", specs:[{label:"Size",value:"28 × 28 × 60 cm"},{label:"Material",value:"Corrugated + MDF"},{label:"Shape",value:"Round column"}], paymentLink:"" },
 ];
 
 function readLS(key, fallback) {
@@ -367,9 +362,7 @@ function openProductForm(id) {
   document.getElementById('fPrice').value = p ? p.price : '';
   document.getElementById('fCost').value = p ? p.costCNY || '' : '';
   document.getElementById('fOriginal').value = p ? p.originalPrice || '' : '';
-  document.getElementById('fRating').value = p ? p.rating : 4.8;
-  document.getElementById('fReviews').value = p ? p.reviewCount : 100;
-  document.getElementById('fImageUrl').value = p ? p.imageUrl || '' : '';
+  document.getElementById('fImageUrl').value = p ? (p.images && p.images.length ? p.images.join(', ') : p.imageUrl || '') : '';
   document.getElementById('fIcon').value = p ? p.icon || 'fa-box' : 'fa-box';
   document.getElementById('fVariants').value = p ? (p.variants || []).join(', ') : '';
   document.getElementById('fDescription').value = p ? p.description || '' : '';
@@ -409,11 +402,10 @@ function saveProduct() {
     price,
     costCNY: parseFloat(document.getElementById('fCost').value) || null,
     originalPrice: parseFloat(document.getElementById('fOriginal').value) || null,
-    rating: parseFloat(document.getElementById('fRating').value) || 4.5,
-    reviewCount: parseInt(document.getElementById('fReviews').value) || 0,
     stock: parseInt(document.getElementById('fStock').value) || 0,
     icon: document.getElementById('fIcon').value.trim() || 'fa-box',
-    imageUrl: document.getElementById('fImageUrl').value.trim(),
+    images: document.getElementById('fImageUrl').value.split(',').map(u => u.trim()).filter(Boolean),
+    imageUrl: '',
     variants: variants.length ? variants : ['Standard'],
     description: document.getElementById('fDescription').value.trim(),
     specs,

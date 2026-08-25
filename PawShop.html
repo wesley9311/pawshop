@@ -162,16 +162,13 @@
   <div class="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
     <div class="grid md:grid-cols-2">
       <div class="p-6">
-        <div class="aspect-square bg-slate-100 rounded-lg flex items-center justify-center mb-4 overflow-hidden" id="modalVisual"></div>
+        <div class="aspect-square bg-slate-100 rounded-lg flex items-center justify-center mb-3 overflow-hidden" id="modalVisual"></div>
+        <div id="modalThumbs" class="grid grid-cols-4 gap-2"></div>
       </div>
       <div class="p-6">
         <div class="flex items-start justify-between mb-4">
           <div>
-            <h2 id="productName" class="text-xl font-bold mb-2"></h2>
-            <div class="flex items-center gap-2">
-              <div id="productRating" class="flex items-center gap-0.5"></div>
-              <span id="reviewCount" class="text-xs text-slate-400"></span>
-            </div>
+            <h2 id="productName" class="text-xl font-bold"></h2>
           </div>
           <button onclick="closeProductModal()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
             <i class="fas fa-times"></i>
@@ -376,7 +373,6 @@ const I18N = {
     bestsellers: 'Bestsellers',
     sort_popular: 'Popular', sort_price_low: 'Price: low to high', sort_price_high: 'Price: high to low',
     load_more: 'Load more', no_products: 'No products found',
-    reviews_label: 'reviews',
     variant: 'Variant', quantity: 'Quantity',
     in_stock: 'In stock',
     add_to_cart: 'Add to cart', buy_now: 'Buy now',
@@ -414,7 +410,6 @@ const I18N = {
     bestsellers: '热卖榜单',
     sort_popular: '人气', sort_price_low: '价格从低到高', sort_price_high: '价格从高到低',
     load_more: '加载更多', no_products: '没有找到商品',
-    reviews_label: '条评价',
     variant: '款式', quantity: '数量',
     in_stock: '有货',
     add_to_cart: '加入购物车', buy_now: '立即购买',
@@ -477,29 +472,25 @@ function fmt(usd) {
 // ===== Product Data (内置默认;后台 admin.html 保存的数据优先) =====
 const DEFAULT_PRODUCTS = [
   {
-    id: 1, name: "Elevated Hemp Cat Bed - Standard", category: "beds", price: 19.99, originalPrice: 29.99,
-    rating: 4.8, reviewCount: 1240, stock: 120, icon: "fa-bed",
+    id: 1, name: "Elevated Hemp Cat Bed - Standard", category: "beds", price: 19.99, originalPrice: 29.99, stock: 120, icon: "fa-bed",
     variants: ["Natural"],
     description: "Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.",
     specs: [{label:"Size",value:"56.5 × 43 × 25 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}],
   },
   {
-    id: 2, name: "Elevated Hemp Cat Bed - Large", category: "beds", price: 24.99, originalPrice: 34.99,
-    rating: 4.7, reviewCount: 860, stock: 80, icon: "fa-bed",
+    id: 2, name: "Elevated Hemp Cat Bed - Large", category: "beds", price: 24.99, originalPrice: 34.99, stock: 80, icon: "fa-bed",
     variants: ["Natural"],
     description: "Roomier version for large cats or two sharing. Same breathable hemp mat, 10cm elevation.",
     specs: [{label:"Size",value:"70 × 45.5 × 31.5 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}],
   },
   {
-    id: 3, name: "Corrugated Sofa Lounger", category: "scratchers", price: 29.99, originalPrice: 44.99,
-    rating: 4.8, reviewCount: 2310, stock: 150, icon: "fa-couch",
+    id: 3, name: "Corrugated Sofa Lounger", category: "scratchers", price: 29.99, originalPrice: 44.99, stock: 150, icon: "fa-couch",
     variants: ["Natural / Grey"],
     description: "Dual-color corrugated cardboard sofa to scratch, lounge and nap on. Raised 5cm to protect floors.",
     specs: [{label:"Size",value:"55.5 × 40.5 × 23.5 cm"},{label:"Material",value:"Corrugated cardboard"},{label:"Floor gap",value:"5cm"}],
   },
   {
-    id: 4, name: "Tall Cat Scratcher Post", category: "scratchers", price: 27.99, originalPrice: 39.99,
-    rating: 4.6, reviewCount: 1540, stock: 90, icon: "fa-tree",
+    id: 4, name: "Tall Cat Scratcher Post", category: "scratchers", price: 27.99, originalPrice: 39.99, stock: 90, icon: "fa-tree",
     variants: ["Round"],
     description: "Extra-tall vertical scratcher for full-body stretching. Stable dense-board base, replaceable corrugated core.",
     specs: [{label:"Size",value:"28 × 28 × 60 cm"},{label:"Material",value:"Corrugated + MDF"},{label:"Shape",value:"Round column"}],
@@ -563,9 +554,16 @@ function renderCategoryBar() {
     ).join('');
 }
 
+function productImages(p) {
+  if (Array.isArray(p.images) && p.images.length) return p.images.filter(Boolean);
+  if (p.imageUrl) return [p.imageUrl];
+  return [];
+}
+
 function productVisual(p, iconClass, imgClass) {
-  return p.imageUrl
-    ? `<img src="${p.imageUrl}" alt="${p.name}" class="${imgClass}" loading="lazy">`
+  const imgs = productImages(p);
+  return imgs.length
+    ? `<img src="${imgs[0]}" alt="${p.name}" class="${imgClass}" loading="lazy">`
     : `<i class="fas ${p.icon || 'fa-box'} ${iconClass}"></i>`;
 }
 function renderProducts() {
@@ -597,10 +595,6 @@ function renderProducts() {
         ${p.originalPrice > p.price ? `<span class="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">-${Math.round((1 - p.price / p.originalPrice) * 100)}%</span>` : ''}
       </div>
       <div class="p-3">
-        <div class="flex items-center gap-1 mb-1">
-          <i class="fas fa-star text-yellow-400 text-xs"></i>
-          <span class="text-xs text-slate-400">${p.rating} (${p.reviewCount})</span>
-        </div>
         <h3 class="text-sm font-medium mb-2 line-clamp-2">${p.name}</h3>
         <div class="flex items-center justify-between">
           <div>
@@ -661,13 +655,17 @@ function openProductModal(id) {
   if (!p) return;
   currentProduct = p;
 
-  document.getElementById('modalVisual').innerHTML = currentProduct.imageUrl
-    ? `<img src="${currentProduct.imageUrl}" alt="${currentProduct.name}" class="w-full h-full object-cover">`
-    : `<i class="fas ${currentProduct.icon || 'fa-box'} text-6xl text-slate-300"></i>`;
+  const imgs = productImages(p);
+  document.getElementById('modalVisual').innerHTML = imgs.length
+    ? `<img src="${imgs[0]}" alt="${p.name}" class="w-full h-full object-cover">`
+    : `<i class="fas ${p.icon || 'fa-box'} text-6xl text-slate-300"></i>`;
+  document.getElementById('modalThumbs').innerHTML = imgs.length > 1
+    ? imgs.map((u, i) => `
+      <div class="aspect-square bg-slate-100 rounded cursor-pointer border-2 overflow-hidden ${i === 0 ? 'border-slate-900' : 'border-transparent'}" onclick="changeModalImage(${i})">
+        <img src="${u}" class="w-full h-full object-cover" loading="lazy">
+      </div>`).join('')
+    : '';
   document.getElementById('productName').textContent = p.name;
-  document.getElementById('productRating').innerHTML = Array(5).fill(0).map((_, i) =>
-    `<i class="fas fa-star ${i < Math.floor(p.rating) ? 'text-yellow-400' : 'text-slate-200'} text-xs"></i>`).join('');
-  document.getElementById('reviewCount').textContent = `${p.rating} · ${p.reviewCount} ${t('reviews_label')}`;
   document.getElementById('productPrice').textContent = fmt(p.price);
   document.getElementById('originalPrice').textContent = fmt(p.originalPrice);
   document.getElementById('stockText').textContent = p.stock < 20
@@ -695,6 +693,16 @@ function openProductModal(id) {
 function closeProductModal() {
   document.getElementById('productModal').classList.remove('open');
   document.body.style.overflow = '';
+}
+
+function changeModalImage(index) {
+  const imgs = productImages(currentProduct);
+  if (!imgs.length) return;
+  document.getElementById('modalVisual').innerHTML = `<img src="${imgs[index]}" alt="${currentProduct.name}" class="w-full h-full object-cover">`;
+  document.querySelectorAll('#modalThumbs > div').forEach((el, i) => {
+    el.className = el.className.replace(/border-(slate-900|transparent)/g, '').trim();
+    el.classList.add(i === index ? 'border-slate-900' : 'border-transparent');
+  });
 }
 
 function selectVariant(btn) {
