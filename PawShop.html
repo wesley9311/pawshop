@@ -841,12 +841,19 @@ function nextStep() {
 
 function prevStep() { checkoutStep = 1; updateCheckoutStep(); }
 
+function buildPayLink(link, total) {
+  if (!link) return null;
+  if (link.includes('{amount}')) return link.replace('{amount}', total.toFixed(2));
+  if (/^https:\/\/www\.paypal\.me\/[^\/]+\/?$/.test(link)) return link.replace(/\/$/, '') + '/' + total.toFixed(2) + 'USD';
+  return link;
+}
+
 function placeOrder() {
-  // Real-payment path: if a Stripe Payment Link is configured for
-  // a single-item cart, redirect the customer to live checkout.
+  // Real-payment path: single-item cart with a configured link
+  // (Stripe Payment Link / PayPal.me with auto amount / {amount} placeholder).
   if (cart.length === 1 && cart[0].paymentLink) {
-    window.location.href = cart[0].paymentLink;
-    return;
+    const link = buildPayLink(cart[0].paymentLink, cart[0].price * cart[0].qty);
+    if (link) { window.location.href = link; return; }
   }
 
   const order = {
