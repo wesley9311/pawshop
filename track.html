@@ -15,7 +15,12 @@
 <nav class="border-b border-slate-100">
   <div class="max-w-xl mx-auto px-4 h-16 flex items-center justify-between">
     <a href="PawShop.html" class="text-xl font-bold">PawShop</a>
-    <a href="PawShop.html" class="text-sm text-slate-500 hover:text-slate-900">Continue shopping <i class="fas fa-arrow-right text-xs ml-1"></i></a>
+    <div class="flex items-center gap-4">
+      <button onclick="openSupport()" aria-label="Customer support" title="Customer service" class="hover:opacity-70">
+        <i class="fas fa-headset text-slate-700 text-lg"></i>
+      </button>
+      <a href="PawShop.html" class="text-sm text-slate-500 hover:text-slate-900">Continue shopping <i class="fas fa-arrow-right text-xs ml-1"></i></a>
+    </div>
   </div>
 </nav>
 
@@ -35,6 +40,8 @@
   &copy; 2026 PawShop. All rights reserved.
 </footer>
 
+<script src="config.js"></script>
+<script src="support.js"></script>
 <script>
 const lang = localStorage.getItem('pawshop_lang') || 'en';
 const L = {

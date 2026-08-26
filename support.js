@@ -45,9 +45,11 @@
     if (orderNo) document.getElementById('supOrder').value = orderNo;
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
+    setTimeout(() => document.getElementById('supEmail').focus(), 50);
   };
   const close = () => { modal.style.display = 'none'; document.body.style.overflow = ''; };
   document.getElementById('supCancel').onclick = close;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal.style.display === 'flex') close(); });
   modal.onclick = e => { if (e.target === modal) close(); };
 
   document.getElementById('supSend').onclick = function () {
