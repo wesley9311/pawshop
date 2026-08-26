@@ -929,7 +929,7 @@ function submitWaitlist() {
   const p = waitlistProductId ? products.find(x => x.id === waitlistProductId) : null;
   const productName = p ? p.name : '(site-wide)';
 
-  // 通知站长:config.js 里配置了邮箱则实时转发(FormSubmit,免费免注册)
+  // 通知站长·通道一:邮箱(FormSubmit,海外网络通畅)
   if (typeof WAITLIST_NOTIFY_EMAIL !== 'undefined' && WAITLIST_NOTIFY_EMAIL) {
     fetch('https://formsubmit.co/ajax/' + WAITLIST_NOTIFY_EMAIL, {
       method: 'POST',
@@ -941,6 +941,16 @@ function submitWaitlist() {
         Product: productName,
         Time: new Date().toLocaleString(),
       }),
+    }).catch(() => {});
+  }
+
+  // 通知站长·通道二:Server酱微信推送(大陆网络通畅)
+  if (typeof SERVERCHAN_SEND_KEY !== 'undefined' && SERVERCHAN_SEND_KEY) {
+    fetch('https://sctapi.ftqq.com/' + SERVERCHAN_SEND_KEY + '.send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'title=' + encodeURIComponent('PawShop 新预留') +
+        '&desp=' + encodeURIComponent(`顾客邮箱: ${email}\n\n商品: ${productName}\n\n时间: ${new Date().toLocaleString()}`),
     }).catch(() => {});
   }
 

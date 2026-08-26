@@ -7,3 +7,10 @@
 // 留空则不发送,登记只存在顾客自己的浏览器里(你收不到)。
 
 const WAITLIST_NOTIFY_EMAIL = "";
+
+// SERVERCHAN_SEND_KEY:Server酱推送密钥(大陆访客的通知通道,推送到微信)。
+// 获取:手机/电脑打开 sct.ftqq.com → 微信扫码登录 → 复制 SendKey 填到这里。
+// 每次顾客预留,你的微信会立刻收到推送(免费版每天5条,验证期够用)。
+// 海外访客走上面的邮箱通道,两边互为备份。
+
+const SERVERCHAN_SEND_KEY = "";
