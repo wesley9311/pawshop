@@ -325,7 +325,7 @@
     </div>
     <h2 class="text-lg font-bold mb-1 text-center" data-i18n="waitlist_title">Reserve yours</h2>
     <p class="text-xs text-slate-500 text-center mb-6" data-i18n="waitlist_body">Free, no payment now. We will email you the moment we launch, with an early-bird discount.</p>
-    <input type="email" id="waitlistEmail" placeholder="you@example.com" data-i18n-ph="search_ph_email" class="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm mb-3">
+    <input type="email" id="waitlistEmail" placeholder="you@example.com" data-i18n-ph="waitlist_ph" class="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm mb-3">
     <button onclick="submitWaitlist()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2" data-i18n="waitlist_cta">Notify me at launch</button>
     <button onclick="document.getElementById('waitlistModal').classList.remove('open')" class="w-full py-2 text-xs text-slate-400 hover:text-slate-600" data-i18n="waitlist_no">No thanks</button>
   </div>
@@ -400,7 +400,7 @@ const I18N = {
     success_view: 'View my orders', success_continue: 'Continue shopping',
     waitlist_title: 'Reserve yours',
     waitlist_body: 'Free, no payment now. We will email you the moment we launch, with an early-bird discount.',
-    waitlist_cta: 'Notify me at launch', waitlist_no: 'No thanks',
+    waitlist_ph: 'you@example.com', waitlist_cta: 'Notify me at launch', waitlist_no: 'No thanks',
     nav_continue: 'Continue shopping',
   },
   zh: {
@@ -437,7 +437,7 @@ const I18N = {
     success_view: '查看我的订单', success_continue: '继续购物',
     waitlist_title: '免费预留',
     waitlist_body: '免费，现在无需付款。上线第一时间邮件通知你，并附早鸟优惠。',
-    waitlist_cta: '上线时通知我', waitlist_no: '不用了',
+    waitlist_ph: '你的邮箱', waitlist_cta: '上线时通知我', waitlist_no: '不用了',
     nav_continue: '继续购物',
   },
 };
