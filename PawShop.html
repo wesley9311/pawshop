@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="config.js"></script>
+<script src="support.js"></script>
 
 <style>
   * { box-sizing: border-box; }
@@ -142,6 +143,7 @@
           <li><a href="#" class="hover:text-white" data-i18n="footer_returns">Returns &amp; refunds</a></li>
           <li><a href="account.html" class="hover:text-white" data-i18n="footer_myorders">My orders</a></li>
           <li><a href="track.html" class="hover:text-white" data-i18n="footer_track">Track your order</a></li>
+          <li><a href="javascript:void(0)" onclick="openSupport()" class="hover:text-white" data-i18n="footer_service">Customer service</a></li>
         </ul>
       </div>
       <div>
@@ -378,7 +380,7 @@ const I18N = {
     add_to_cart: 'Add to cart', buy_now: 'Buy now',
     reserve_line: 'Not ready to pay? Reserve yours free - we will email you at launch',
     footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
-    footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds',
+    footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds', footer_service: 'Customer service',
     footer_myorders: 'My orders', footer_track: 'Track your order', footer_contact: 'Contact',
     cart: 'Cart', subtotal: 'Subtotal', checkout: 'Checkout', cart_empty: 'Your cart is empty',
     checkout_title: 'Checkout', items: 'Items', shipping: 'Shipping', free: 'Free', total: 'Total',
@@ -415,7 +417,7 @@ const I18N = {
     add_to_cart: '加入购物车', buy_now: '立即购买',
     reserve_line: '暂不付款？免费预留，上线时邮件通知你',
     footer_tag: '精选犬猫好物。',
-    footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款',
+    footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款', footer_service: '联系客服',
     footer_myorders: '我的订单', footer_track: '查询订单', footer_contact: '联系我们',
     cart: '购物车', subtotal: '小计', checkout: '去结算', cart_empty: '购物车是空的',
     checkout_title: '结算', items: '商品', shipping: '运费', free: '免费', total: '合计',

@@ -29,6 +29,9 @@
     <input type="email" id="emailInput" placeholder="you@example.com" class="flex-1 px-4 py-3 border border-slate-200 rounded-lg text-sm bg-white" onkeydown="if(event.key==='Enter')loadOrders()">
     <button onclick="loadOrders()" id="viewBtn" class="px-6 py-3 bg-slate-900 text-white text-sm rounded-lg hover:bg-slate-700">View orders</button>
   </div>
+  <div class="mb-10 -mt-4">
+    <button onclick="openSupport()" class="text-xs text-slate-400 hover:text-slate-700"><i class="fas fa-headset text-[10px] mr-1"></i>Need help with an order?</button>
+  </div>
 
   <div id="orderList" class="space-y-4"></div>
 </main>
@@ -37,6 +40,8 @@
   &copy; 2026 PawShop. All rights reserved.
 </footer>
 
+<script src="config.js"></script>
+<script src="support.js"></script>
 <script>
 const LS_ORDERS = 'pawshop_orders';
 const LS_EMAIL = 'pawshop_customer_email';

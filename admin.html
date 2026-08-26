@@ -478,7 +478,7 @@ function deleteProduct(id) {
 }
 
 // ===== 订单 =====
-const STATUS_LABELS = { new: '新订单', processing: '处理中', shipped: '已发货', done: '已完成' };
+const STATUS_LABELS = { new: '新订单', processing: '处理中', shipped: '已发货', done: '已完成', refunded: '已退款', closed: '已关闭' };
 
 function renderOrders() {
   const orders = getOrders().slice().reverse();
@@ -531,7 +531,7 @@ function openOrderDetail(id) {
 
   const timeline = (o.history || [{ status: o.status || 'new', at: o.createdAt }]).map(h => `
     <div class="flex items-start gap-3 pb-4">
-      <div class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${STATUS_STEPS.indexOf(o.status) >= STATUS_STEPS.indexOf(h.status) ? 'bg-green-500' : 'bg-slate-300'}"></div>
+      <div class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${STATUS_STEPS.indexOf(o.status) >= STATUS_STEPS.indexOf(h.status) || h.status === o.status ? 'bg-green-500' : 'bg-slate-300'}"></div>
       <div>
         <div class="text-sm font-medium">${STATUS_LABELS[h.status] || h.status}</div>
         <div class="text-xs text-slate-400">${new Date(h.at).toLocaleString('zh-CN')}</div>
@@ -569,7 +569,11 @@ function openOrderDetail(id) {
         </div>
         <h4 class="text-sm font-semibold mb-2">物流</h4>
         <div class="mb-4">${trackingBlock}</div>
-        <button onclick="copyPurchaseList()" class="w-full py-2.5 border border-slate-200 rounded-lg text-sm hover:bg-slate-50"><i class="fas fa-copy text-xs mr-1.5"></i>复制采购清单(发 1688)</button>
+        <button onclick="copyPurchaseList()" class="w-full py-2.5 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 mb-4"><i class="fas fa-copy text-xs mr-1.5"></i>复制采购清单(发 1688)</button>
+        <h4 class="text-sm font-semibold mb-2">售后备注</h4>
+        ${o.note ? `<div class="text-sm text-slate-600 bg-amber-50 border border-amber-100 rounded-lg p-3 mb-2 whitespace-pre-wrap">${o.note}</div>` : ''}
+        <textarea id="orderNote" rows="2" placeholder="退款原因/沟通记录/处理结果..." class="field-input mb-2">${o.note || ''}</textarea>
+        <button onclick="saveOrderNote()" class="w-full py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">保存备注</button>
       </div>
     </div>
   `;
@@ -608,6 +612,15 @@ function sendShipEmail(order) {
       tracking: order.tracking.number,
     });
   } catch (e) {}
+}
+
+function saveOrderNote() {
+  const orders = getOrders();
+  const o = orders.find(x => x.id === currentOrderId);
+  if (!o) return;
+  o.note = document.getElementById('orderNote').value.trim();
+  writeLS(LS_ORDERS, orders);
+  showToast('备注已保存');
 }
 
 function copyPurchaseList() {
