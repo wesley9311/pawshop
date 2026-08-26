@@ -1,6 +1,10 @@
 // PawShop 客服工单弹窗:注入到任何引入本文件的页面
 // 顾客提交 → 站长邮箱(FormSubmit) + 微信推送(Server酱)双通道
 (function () {
+  if (window.__psSupportLoaded) return;
+  window.__psSupportLoaded = true;
+
+  function init() {
   if (document.getElementById('psSupportModal')) return;
 
   const zh = (localStorage.getItem('pawshop_lang') || 'en') === 'zh';
@@ -82,5 +86,12 @@
 
     close();
     alert(T.ok);
-  };
+  });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();
