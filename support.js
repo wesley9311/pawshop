@@ -86,7 +86,7 @@
 
     close();
     alert(T.ok);
-  });
+  };
   }
 
   if (document.readyState === 'loading') {
