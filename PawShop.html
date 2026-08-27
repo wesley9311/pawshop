@@ -248,7 +248,6 @@
         </div>
       </div>
 
-      <p class="text-xs text-slate-400 mt-4 text-center" data-i18n="secure">Secure checkout powered by Stripe / PayPal</p>
     </div>
   </div>
 </div>
@@ -328,7 +327,7 @@ const I18N = {
     payment_card: 'Credit card', payment_card_sub: 'Visa / Mastercard / Amex',
     payment_paypal: 'PayPal', payment_paypal_sub: 'PayPal balance or card',
     back: 'Back', place_order: 'Place order',
-    secure: 'Secure checkout powered by Stripe / PayPal',
+
     toast_addr: 'Please complete the address form', toast_email: 'Please enter a valid email',
     toast_added: 'Added to cart', toast_list: "You're on the list!",
     success_title: 'Order placed!', success_number: 'Your order number:',
@@ -365,7 +364,7 @@ const I18N = {
     payment_card: '信用卡', payment_card_sub: '维萨 / 万事达 / 美国运通',
     payment_paypal: 'PayPal', payment_paypal_sub: 'PayPal 余额或银行卡',
     back: '上一步', place_order: '提交订单',
-    secure: '由 Stripe / PayPal 提供安全结算',
+
     toast_addr: '请填写完整收货信息', toast_email: '请输入有效的邮箱',
     toast_added: '已加入购物车', toast_list: '预留成功！',
     success_title: '下单成功！', success_number: '你的订单号：',
@@ -395,7 +394,6 @@ function setLang(l) {
 
 // ===== State =====
 let cart = [];
-let currentProduct = null;
 let currentCategory = 'all';
 let currentSort = 'popular';
 let currency = 'USD';
@@ -595,13 +593,6 @@ function changeCurrency() {
 
 
 
-function changeQty(delta) {
-  const input = document.getElementById('qtyInput');
-  let val = parseInt(input.value) + delta;
-  if (val < 1) val = 1;
-  if (val > currentProduct.stock) val = currentProduct.stock;
-  input.value = val;
-}
 
 // ===== Cart =====
 function addToCart(id) {
@@ -614,21 +605,7 @@ function addToCart(id) {
   showToast(t('toast_added'));
 }
 
-function addToCartFromModal() {
-  const qty = parseInt(document.getElementById('qtyInput').value);
-  const existing = cart.find(item => item.id === currentProduct.id);
-  if (existing) existing.qty += qty;
-  else cart.push({ ...currentProduct, qty });
-  updateCart();
-  closeProductModal();
-  openCart();
-}
 
-function buyNow() {
-  addToCartFromModal();
-  closeCart();
-  checkout();
-}
 
 function removeFromCart(id) {
   cart = cart.filter(item => item.id !== id);
@@ -865,7 +842,7 @@ function showToast(message) {
 function toggleMobileMenu() { document.getElementById('mobileMenu').classList.toggle('hidden'); }
 
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') { closeProductModal(); closeCart(); closeCheckout(); }
+  if (e.key === 'Escape') { closeCart(); closeCheckout(); }
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault();
     document.getElementById('searchInput')?.focus();
