@@ -186,6 +186,15 @@
         </div>
         <button onclick="saveEmailConfig()" class="mt-4 px-5 py-2.5 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700">保存</button>
       </div>
+
+      <h2 class="font-bold mt-8 mb-4">图床配置 <span class="text-xs text-slate-400 font-normal">imgbb·商品图片上传用</span></h2>
+      <div class="card p-5">
+        <p class="text-xs text-slate-400 mb-4 leading-relaxed">imgbb.com 免费注册(邮箱即可) → 头像菜单 API → 复制 API Key 填到这里。Key 只存在你本机浏览器,不进公开仓库。之后商品编辑页"从电脑上传"即可自动生成图片链接(永久有效,全球可访问)。</p>
+        <div class="grid md:grid-cols-2 gap-3">
+          <div><label class="field-label">imgbb API Key</label><input id="cfgImgbKey" class="field-input font-mono text-xs" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"></div>
+        </div>
+        <button onclick="saveImgbKey()" class="mt-4 px-5 py-2.5 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700">保存</button>
+      </div>
     </section>
   </div>
 
@@ -215,8 +224,13 @@
 
       <div class="card p-5">
         <h3 class="text-sm font-semibold mb-4"><span class="text-slate-300 mr-1.5">02</span>图片</h3>
-        <label class="field-label">图片直链 URL(多张用英文逗号分隔,第一张为主图)</label>
-        <textarea id="fImageUrl" rows="3" class="field-input font-mono text-xs" placeholder="https://wesley9311.github.io/pawshop/images/bed1.jpg, .../bed2.jpg" oninput="previewImages()"></textarea>
+        <label class="field-label">图片(从电脑上传,或多张直链逗号分隔,第一张为主图)</label>
+        <div class="flex items-center gap-2 mb-2">
+          <label id="uploadBtn" class="px-3 py-2 border border-slate-200 bg-white rounded-lg text-xs cursor-pointer hover:bg-slate-50 flex-shrink-0"><i class="fas fa-upload mr-1"></i>从电脑上传</label>
+          <span class="text-[11px] text-slate-400">jpg/png/webp/gif · ≤10MB · 需先在"数据"页配置图床</span>
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden" onchange="uploadImage(this)">
+        </div>
+        <textarea id="fImageUrl" rows="3" class="field-input font-mono text-xs" placeholder="https://i.ibb.co/xxx/bed1.jpg, https://.../bed2.jpg" oninput="previewImages()"></textarea>
         <div class="text-[11px] text-slate-400 leading-relaxed mt-2 bg-slate-50 rounded-lg p-3">
           必须是 <b>http 开头、.jpg/.png/.webp 结尾</b>的图片直链。本地文件、1688 详情页链接都会显示失败。推荐图床:GitHub 仓库 images/ 目录(免费)。
         </div>
@@ -706,6 +720,48 @@ function clearOrders() {
   renderAll();
 }
 
+// ===== 图床上传(imgbb,Key 存本机 localStorage) =====
+const LS_IMGBB = 'pawshop_imgbb_key';
+
+function loadImgbKey() {
+  document.getElementById('cfgImgbKey').value = localStorage.getItem(LS_IMGBB) || '';
+}
+function saveImgbKey() {
+  localStorage.setItem(LS_IMGBB, document.getElementById('cfgImgbKey').value.trim());
+  showToast('图床配置已保存');
+}
+
+function uploadImage(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) { showToast('仅支持 jpg/png/webp/gif', 'err'); return; }
+  if (file.size > 10 * 1024 * 1024) { showToast('图片超过 10MB', 'err'); return; }
+  const key = localStorage.getItem(LS_IMGBB);
+  if (!key) { showToast('请先到"数据"页配置 imgbb API Key', 'err'); return; }
+
+  const btn = document.getElementById('uploadBtn');
+  const original = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>上传中...';
+  const fd = new FormData();
+  fd.append('image', file);
+  fetch('https://api.imgbb.com/1/upload?key=' + encodeURIComponent(key), { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(j => {
+      btn.innerHTML = original;
+      if (j && j.data && j.data.url) {
+        const ta = document.getElementById('fImageUrl');
+        const cur = ta.value.trim().replace(/,\s*$/, '');
+        ta.value = cur ? cur + ', ' + j.data.url : j.data.url;
+        previewImages();
+        showToast('上传成功,链接已填入');
+      } else {
+        showToast('上传失败:' + ((j && j.error && j.error.message) || 'Key 无效或网络问题'), 'err');
+      }
+    })
+    .catch(() => { btn.innerHTML = original; showToast('上传失败:检查网络/代理', 'err'); });
+}
+
 // ===== 邮件配置 =====
 const LS_EMAILCFG = 'pawshop_email_config';
 
@@ -738,6 +794,7 @@ function renderAll() {
   renderOrders();
   renderWaitlist();
   loadEmailConfig();
+  loadImgbKey();
 }
 </script>
 
