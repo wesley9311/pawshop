@@ -438,7 +438,14 @@ function saveProduct() {
   const name = document.getElementById('fName').value.trim();
   const category = document.getElementById('fCategory').value.trim().toLowerCase();
   const price = parseFloat(document.getElementById('fPrice').value);
-  if (!name || !category || !price) { alert('商品名、分类、售价必填'); return; }
+  let firstBad = null;
+  [['fName', name], ['fCategory', category], ['fPrice', price]].forEach(([id, v]) => {
+    const el = document.getElementById(id);
+    const bad = !v;
+    el.style.borderColor = bad ? '#ef4444' : '';
+    if (bad && !firstBad) firstBad = el;
+  });
+  if (firstBad) { showToast('请补全红框必填项', 'err'); firstBad.focus(); return; }
 
   const specs = document.getElementById('fSpecs').value.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
     const [label, ...rest] = l.split('|');

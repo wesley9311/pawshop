@@ -157,65 +157,6 @@
 <script src="config.js"></script>
 <script src="support.js"></script>
 
-<!-- ===== Product Modal ===== -->
-<div id="productModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-  <div class="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-    <div class="grid md:grid-cols-2">
-      <div class="p-6">
-        <div class="aspect-square bg-slate-100 rounded-lg flex items-center justify-center mb-3 overflow-hidden" id="modalVisual"></div>
-        <div id="modalThumbs" class="grid grid-cols-4 gap-2"></div>
-      </div>
-      <div class="p-6">
-        <div class="flex items-start justify-between mb-4">
-          <div>
-            <h2 id="productName" class="text-xl font-bold"></h2>
-          </div>
-          <button onclick="closeProductModal()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
-            <i class="fas fa-times"></i>
-          </button>
-        </div>
-
-        <div class="mb-6">
-          <div class="flex items-end gap-3">
-            <span id="productPrice" class="text-2xl font-bold"></span>
-            <span id="originalPrice" class="text-sm text-slate-400 line-through"></span>
-          </div>
-        </div>
-
-        <div class="mb-4">
-          <label class="block text-sm font-medium mb-2" data-i18n="variant">Variant</label>
-          <div id="variantOptions" class="flex flex-wrap gap-2"></div>
-        </div>
-
-        <div class="mb-6">
-          <label class="block text-sm font-medium mb-2" data-i18n="quantity">Quantity</label>
-          <div class="flex items-center gap-3">
-            <div class="flex items-center border border-slate-200 rounded">
-              <button onclick="changeQty(-1)" class="w-8 h-8 flex items-center justify-center hover:bg-slate-100">-</button>
-              <input type="number" id="qtyInput" value="1" min="1" class="w-12 h-8 text-center border-0 focus:outline-none">
-              <button onclick="changeQty(1)" class="w-8 h-8 flex items-center justify-center hover:bg-slate-100">+</button>
-            </div>
-            <span id="stockText" class="text-xs text-slate-400"></span>
-          </div>
-        </div>
-
-        <div class="flex gap-2 mb-3">
-          <button onclick="addToCartFromModal()" class="flex-1 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="add_to_cart">Add to cart</button>
-          <button onclick="buyNow()" class="flex-1 py-3 border border-slate-900 text-sm font-medium rounded hover:bg-slate-50" data-i18n="buy_now">Buy now</button>
-        </div>
-        <button onclick="openWaitlist(currentProduct.id)" class="w-full py-2.5 text-xs text-slate-500 hover:text-slate-900 mb-6">
-          <i class="fas fa-bell text-[10px] mr-1"></i><span data-i18n="reserve_line">Not ready to pay? Reserve yours free - we will email you at launch</span>
-        </button>
-
-        <div class="border-t border-slate-100 pt-4 text-sm text-slate-600">
-          <p id="productDesc"></p>
-          <table class="w-full mt-4" id="specsTable"></table>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- ===== Cart Drawer ===== -->
 <div id="cartDrawer" class="drawer fixed top-0 right-0 bottom-0 w-full max-w-sm bg-white z-50 flex flex-col">
   <div class="p-4 border-b border-slate-100 flex items-center justify-between">
@@ -589,7 +530,7 @@ function renderProducts() {
   }
 
   grid.innerHTML = displayed.map(p => `
-    <div class="bg-white border border-slate-100 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow fade-in" onclick="openProductModal(${p.id})">
+    <div class="bg-white border border-slate-100 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow fade-in" onclick="location.href='product.html?id=${p.id}'">
       <div class="relative aspect-square bg-slate-50 flex items-center justify-center overflow-hidden">
         ${productVisual(p, 'text-5xl text-slate-300', 'absolute inset-0 w-full h-full object-cover')}
         ${p.originalPrice > p.price ? `<span class="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">-${Math.round((1 - p.price / p.originalPrice) * 100)}%</span>` : ''}
@@ -650,69 +591,9 @@ function changeCurrency() {
 }
 
 // ===== Product Modal =====
-function openProductModal(id) {
-  const p = products.find(x => x.id === id);
-  if (!p) return;
-  currentProduct = p;
 
-  const imgs = productImages(p);
-  document.getElementById('modalVisual').innerHTML = imgs.length
-    ? `<img src="${imgs[0]}" alt="${p.name}" class="w-full h-full object-cover">`
-    : `<i class="fas ${p.icon || 'fa-box'} text-6xl text-slate-300"></i>`;
-  document.getElementById('modalThumbs').innerHTML = imgs.length > 1
-    ? imgs.map((u, i) => `
-      <div class="aspect-square bg-slate-100 rounded cursor-pointer border-2 overflow-hidden ${i === 0 ? 'border-slate-900' : 'border-transparent'}" onclick="changeModalImage(${i})">
-        <img src="${u}" class="w-full h-full object-cover" loading="lazy">
-      </div>`).join('')
-    : '';
-  document.getElementById('productName').textContent = p.name;
-  document.getElementById('productPrice').textContent = fmt(p.price);
-  document.getElementById('originalPrice').textContent = fmt(p.originalPrice);
-  document.getElementById('stockText').textContent = p.stock < 20
-    ? (lang === 'zh' ? `仅剩 ${p.stock} 件` : `Only ${p.stock} left`)
-    : t('in_stock');
-  document.getElementById('productDesc').textContent = p.description;
-  document.getElementById('qtyInput').value = 1;
 
-  const variants = p.variants && p.variants.length ? p.variants : ['Standard'];
-  document.getElementById('variantOptions').innerHTML = variants.map((v, i) => `
-    <button onclick="selectVariant(this)" class="px-3 py-1.5 border ${i === 0 ? 'border-slate-900 bg-slate-50' : 'border-slate-200'} rounded text-sm">${v}</button>
-  `).join('');
 
-  document.getElementById('specsTable').innerHTML = (p.specs || []).map(s => `
-    <tr class="border-b border-slate-100">
-      <td class="py-2 text-slate-500 w-32">${s.label}</td>
-      <td class="py-2 font-medium">${s.value}</td>
-    </tr>
-  `).join('');
-
-  document.getElementById('productModal').classList.add('open');
-  document.body.style.overflow = 'hidden';
-}
-
-function closeProductModal() {
-  document.getElementById('productModal').classList.remove('open');
-  document.body.style.overflow = '';
-}
-
-function changeModalImage(index) {
-  const imgs = productImages(currentProduct);
-  if (!imgs.length) return;
-  document.getElementById('modalVisual').innerHTML = `<img src="${imgs[index]}" alt="${currentProduct.name}" class="w-full h-full object-cover">`;
-  document.querySelectorAll('#modalThumbs > div').forEach((el, i) => {
-    el.className = el.className.replace(/border-(slate-900|transparent)/g, '').trim();
-    el.classList.add(i === index ? 'border-slate-900' : 'border-transparent');
-  });
-}
-
-function selectVariant(btn) {
-  btn.parentElement.querySelectorAll('button').forEach(b => {
-    b.classList.remove('border-slate-900', 'bg-slate-50');
-    b.classList.add('border-slate-200');
-  });
-  btn.classList.add('border-slate-900', 'bg-slate-50');
-  btn.classList.remove('border-slate-200');
-}
 
 function changeQty(delta) {
   const input = document.getElementById('qtyInput');
@@ -926,7 +807,6 @@ function openWaitlist(productId) {
   const saved = localStorage.getItem('pawshop_customer_email');
   if (saved) document.getElementById('waitlistEmail').value = saved;
   document.getElementById('waitlistModal').classList.add('open');
-  closeProductModal();
 }
 
 function submitWaitlist() {
@@ -1011,6 +891,9 @@ window.addEventListener('storage', e => {
     updateCart();
   }
 });
+
+// ===== 从详情页跳转:直接开结算 =====
+if (location.hash === '#checkout') setTimeout(() => checkout(), 300);
 
 // ===== Init =====
 document.getElementById('langSelect').value = lang;
