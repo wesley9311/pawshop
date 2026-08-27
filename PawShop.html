@@ -322,7 +322,7 @@ const I18N = {
     footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds', footer_service: 'Customer service',
     footer_myorders: 'My orders', footer_track: 'Track your order',
     cart: 'Cart', subtotal: 'Subtotal', checkout: 'Checkout', cart_empty: 'Your cart is empty',
-    checkout_title: 'Checkout', items: 'Items', shipping: 'Shipping', free: 'Free', total: 'Total',
+    checkout_title: 'Checkout', items: 'Items', shipping: 'Shipping', shipping_tbd: 'Calculated when we launch', total: 'Total',
     full_name: 'Full name', phone: 'Phone', email: 'Email', country: 'Country', address: 'Address',
     continue_payment: 'Continue to payment',
     payment_card: 'Credit card', payment_card_sub: 'Visa / Mastercard / Amex',
@@ -359,7 +359,7 @@ const I18N = {
     footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款', footer_service: '联系客服',
     footer_myorders: '我的订单', footer_track: '查询订单',
     cart: '购物车', subtotal: '小计', checkout: '去结算', cart_empty: '购物车是空的',
-    checkout_title: '结算', items: '商品', shipping: '运费', free: '免费', total: '合计',
+    checkout_title: '结算', items: '商品', shipping: '运费', shipping_tbd: '上线时按实际计算', total: '合计',
     full_name: '姓名', phone: '电话', email: '邮箱', country: '国家', address: '地址',
     continue_payment: '继续去支付',
     payment_card: '信用卡', payment_card_sub: '维萨 / 万事达 / 美国运通',
@@ -694,7 +694,7 @@ function checkout() {
   const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
   document.getElementById('checkoutSummary').innerHTML = `
     <div class="flex justify-between mb-1"><span class="text-slate-500">${t('items')}</span><span>${count}</span></div>
-    <div class="flex justify-between mb-1"><span class="text-slate-500">${t('shipping')}</span><span class="text-green-600">${t('free')}</span></div>
+    <div class="flex justify-between mb-1"><span class="text-slate-500">${t('shipping')}</span><span class="text-slate-400 text-xs">${t('shipping_tbd')}</span></div>
     <div class="flex justify-between font-bold pt-2 border-t border-slate-200 mt-2"><span>${t('total')}</span><span>${fmt(total)}</span></div>
   `;
 
