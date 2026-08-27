@@ -41,11 +41,6 @@
         <option value="en">English</option>
         <option value="zh">中文</option>
       </select>
-      <select id="currencySelect" onchange="changeCurrency()" class="bg-transparent text-white text-xs border-none cursor-pointer">
-      <option value="USD">USD $</option>
-      <option value="EUR">EUR €</option>
-      <option value="GBP">GBP £</option>
-    </select>
     </div>
   </div>
 </div>
@@ -143,7 +138,6 @@
           <li><a href="#" class="hover:text-white" data-i18n="footer_shipping">Shipping policy</a></li>
           <li><a href="#" class="hover:text-white" data-i18n="footer_returns">Returns &amp; refunds</a></li>
           <li><a href="account.html" class="hover:text-white" data-i18n="footer_myorders">My orders</a></li>
-          <li><a href="track.html" class="hover:text-white" data-i18n="footer_track">Track your order</a></li>
           <li><a href="javascript:void(0)" onclick="openSupport()" class="hover:text-white" data-i18n="footer_service">Customer service</a></li>
         </ul>
       </div>
@@ -275,7 +269,7 @@
     <h2 class="text-xl font-bold mb-2" data-i18n="success_title">Order placed!</h2>
     <p class="text-sm text-slate-500 mb-1" data-i18n="success_number">Your order number:</p>
     <p id="successOrderId" class="font-mono font-bold text-lg mb-4"></p>
-    <p class="text-sm text-slate-500 mb-6" data-i18n="success_body">A confirmation email is on its way. You can check the status anytime on the tracking page.</p>
+    <p class="text-sm text-slate-500 mb-6" data-i18n="success_body">We have received your order. Check its status anytime under My Orders.</p>
     <a href="account.html" class="block w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700 mb-2" data-i18n="success_view">View my orders</a>
     <button onclick="closeOrderSuccess()" class="w-full py-3 border border-slate-200 text-sm rounded hover:bg-slate-50" data-i18n="success_continue">Continue shopping</button>
   </div>
@@ -319,7 +313,7 @@ const I18N = {
     reserve_line: 'Not ready to pay? Reserve yours free - we will email you at launch',
     footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
     footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds', footer_service: 'Customer service',
-    footer_myorders: 'My orders', footer_track: 'Track your order',
+    footer_myorders: 'My orders',
     cart: 'Cart', subtotal: 'Subtotal', checkout: 'Checkout', cart_empty: 'Your cart is empty',
     checkout_title: 'Checkout', items: 'Items', shipping: 'Shipping', shipping_tbd: 'Calculated when we launch', total: 'Total',
     full_name: 'Full name', phone: 'Phone', email: 'Email', country: 'Country', address: 'Address',
@@ -331,7 +325,7 @@ const I18N = {
     toast_addr: 'Please complete the address form', toast_email: 'Please enter a valid email',
     toast_added: 'Added to cart', toast_list: "You're on the list!",
     success_title: 'Order placed!', success_number: 'Your order number:',
-    success_body: 'A confirmation email is on its way. You can check the status anytime on the tracking page.',
+    success_body: 'We have received your order. Check its status anytime under My Orders.',
     success_view: 'View my orders', success_continue: 'Continue shopping',
     waitlist_title: 'Reserve yours',
     waitlist_body: 'Free, no payment now. We will email you the moment we launch, with an early-bird discount.',
@@ -356,7 +350,7 @@ const I18N = {
     reserve_line: '暂不付款？免费预留，上线时邮件通知你',
     footer_tag: '精选犬猫好物。',
     footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款', footer_service: '联系客服',
-    footer_myorders: '我的订单', footer_track: '查询订单',
+    footer_myorders: '我的订单',
     cart: '购物车', subtotal: '小计', checkout: '去结算', cart_empty: '购物车是空的',
     checkout_title: '结算', items: '商品', shipping: '运费', shipping_tbd: '上线时按实际计算', total: '合计',
     full_name: '姓名', phone: '电话', email: '邮箱', country: '国家', address: '地址',
@@ -368,7 +362,7 @@ const I18N = {
     toast_addr: '请填写完整收货信息', toast_email: '请输入有效的邮箱',
     toast_added: '已加入购物车', toast_list: '预留成功！',
     success_title: '下单成功！', success_number: '你的订单号：',
-    success_body: '确认邮件已发出。你可以随时在查询页查看订单状态。',
+    success_body: '订单已收到。随时在「我的订单」查看进度。',
     success_view: '查看我的订单', success_continue: '继续购物',
     waitlist_title: '免费预留',
     waitlist_body: '免费，现在无需付款。上线第一时间邮件通知你，并附早鸟优惠。',
@@ -396,17 +390,11 @@ function setLang(l) {
 let cart = [];
 let currentCategory = 'all';
 let currentSort = 'popular';
-let currency = 'USD';
 let searchQuery = '';
 let displayedProducts = 8;
 let checkoutStep = 1;
 
-const RATES = { USD: 1, EUR: 0.92, GBP: 0.79 };
-const SYMBOLS = { USD: '$', EUR: '€', GBP: '£' };
-
-function fmt(usd) {
-  return SYMBOLS[currency] + (usd * RATES[currency]).toFixed(2);
-}
+const fmt = u => '$' + u.toFixed(2);
 
 // ===== Product Data (内置默认;后台 admin.html 保存的数据优先) =====
 const DEFAULT_PRODUCTS = [
@@ -582,11 +570,6 @@ function sortProducts() {
   renderProducts();
 }
 
-function changeCurrency() {
-  currency = document.getElementById('currencySelect').value;
-  renderProducts();
-  updateCart();
-}
 
 // ===== Product Modal =====
 
