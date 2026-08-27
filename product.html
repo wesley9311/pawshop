@@ -14,8 +14,8 @@
   .gallery-main > div { scroll-snap-align: center; }
   .drawer { transform: translateX(100%); transition: transform 0.3s ease; }
   .drawer.open { transform: translateX(0); }
-  .toast { transform: translateY(100px); opacity: 0; transition: all 0.3s; }
-  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+  .toast.show { opacity: 1; }
   .variant-sel { border-color: #0f172a !important; background: #f8fafc; }
   .fade-in { animation: fadeIn 0.3s ease; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -85,7 +85,7 @@
 </div>
 
 <!-- Toast -->
-<div id="toast" class="toast fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-slate-900 text-white rounded text-sm"><span id="toastText"></span></div>
+<div id="toast" class="toast fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 px-5 py-3 bg-slate-900/95 text-white rounded-xl text-sm shadow-xl"><span id="toastText"></span></div>
 
 <script src="config.js"></script>
 <script src="support.js"></script>

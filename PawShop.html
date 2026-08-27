@@ -20,8 +20,8 @@
   .drawer.open { transform: translateX(0); }
   .modal { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
   .modal.open { opacity: 1; pointer-events: auto; }
-  .toast { transform: translateY(100px); opacity: 0; transition: all 0.3s; }
-  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+  .toast.show { opacity: 1; }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
   .fade-in { animation: fadeIn 0.3s ease; }
@@ -283,7 +283,7 @@
 </div>
 
 <!-- ===== Toast ===== -->
-<div id="toast" class="toast fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-slate-900 text-white rounded text-sm flex items-center gap-2">
+<div id="toast" class="toast fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 px-5 py-3 bg-slate-900/95 text-white rounded-xl text-sm shadow-xl flex items-center gap-2">
   <i id="toastIcon" class="fas fa-check"></i>
   <span id="toastText"></span>
 </div>
