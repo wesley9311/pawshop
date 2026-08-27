@@ -109,12 +109,10 @@ const L = {
     addToCart: 'Add to cart', buyNow: 'Buy now', reserve: 'Reserve free - no payment now',
     quantity: 'Quantity', variant: 'Choose an option', off: n => `-${n}% OFF`,
     soldOut: 'Sold out', details: 'Details', specs: 'Specifications', reviews: 'Reviews',
-    related: 'You may also like', finalCta: 'Ready to get it for your pet?',
-    secure: 'Secure checkout via PayPal', points: [
+    related: 'You may also like',
+    points: [
       ['fa-box-open', 'Free to reserve', 'No payment now - decide at launch'],
       ['fa-tag', 'Early-bird price', 'Reserved customers get the best launch deal'],
-      ['fa-ruler-combined', 'Full specs shown', 'Sizes and materials, nothing hidden'],
-      ['fa-envelope', 'No spam', 'One email at launch, that is it'],
     ],
     reviewCount: n => `${n} review${n > 1 ? 's' : ''}`, subtotal: 'Subtotal', checkout: 'Checkout',
     cartEmpty: 'Your cart is empty', viewCart: 'View cart', wlOk: "You're on the list!", wlInvalid: 'Please enter a valid email',
@@ -125,12 +123,10 @@ const L = {
     addToCart: '加入购物车', buyNow: '立即购买', reserve: '免费预留——现在不用付款',
     quantity: '数量', variant: '选择款式', off: n => `省 ${n}%`,
     soldOut: '已售罄', details: '商品详情', specs: '规格参数', reviews: '用户评价',
-    related: '猜你喜欢', finalCta: '准备好给毛孩子安排上了吗？',
-    secure: 'PayPal 安全支付', points: [
+    related: '猜你喜欢',
+    points: [
       ['fa-box-open', '免费预留', '现在不用付款，上线再决定'],
       ['fa-tag', '早鸟优惠', '预留顾客享受上线最优价'],
-      ['fa-ruler-combined', '参数透明', '尺寸材质全公开，不藏信息'],
-      ['fa-envelope', '不打扰', '只在上线时发一封邮件'],
     ],
     reviewCount: n => `${n} 条评价`, subtotal: '小计', checkout: '去结算',
     cartEmpty: '购物车是空的', viewCart: '查看购物车', wlOk: '预留成功！', wlInvalid: '请输入有效的邮箱',
@@ -234,7 +230,6 @@ function render() {
 
       <div class="border-t border-slate-100 pt-5 space-y-3">
         ${T.points.map(([ic, h, d]) => `<div class="flex items-start gap-3"><i class="fas ${ic} text-slate-700 mt-0.5 w-5 text-center"></i><div><span class="text-sm font-medium">${h}</span> <span class="text-xs text-slate-400">· ${d}</span></div></div>`).join('')}
-        <div class="flex items-center gap-2 pt-2 text-xs text-slate-500"><i class="fab fa-paypal text-blue-500 text-base"></i><i class="fas fa-credit-card text-base"></i><i class="fab fa-cc-visa text-blue-800 text-base"></i><i class="fab fa-cc-mastercard text-slate-700 text-base"></i><span>${T.secure}</span></div>
       </div>
     </div>
   </div>
@@ -268,16 +263,7 @@ function render() {
       </div>`).join('')}</div>
   </section>` : ''}
 
-  ${relatedHtml(products, p)}
-
-  <section class="mt-14 bg-slate-50 rounded-2xl p-8 text-center">
-    <h2 class="text-lg font-bold mb-2">${T.finalCta}</h2>
-    <p class="text-2xl font-bold mb-5">${fmt(p.price)}</p>
-    <div class="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
-      <button onclick="addToCart()" ${soldOut ? 'disabled' : ''} class="flex-1 py-3.5 bg-slate-900 text-white font-semibold rounded-xl hover:bg-slate-700 disabled:opacity-40">${T.addToCart}</button>
-      <button onclick="buyNow()" ${soldOut ? 'disabled' : ''} class="flex-1 py-3.5 border-2 border-slate-900 font-semibold rounded-xl hover:bg-white disabled:opacity-40">${T.buyNow}</button>
-    </div>
-  </section>`;
+  ${relatedHtml(products, p)}`;
 
   // 移动端吸底栏
   document.getElementById('stickyBar').innerHTML = `
