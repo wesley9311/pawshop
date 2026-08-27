@@ -226,9 +226,8 @@
         <h3 class="text-sm font-semibold mb-4"><span class="text-slate-300 mr-1.5">02</span>图片</h3>
         <label class="field-label">图片(从电脑上传,或多张直链逗号分隔,第一张为主图)</label>
         <div class="flex items-center gap-2 mb-2">
-          <label id="uploadBtn" class="px-3 py-2 border border-slate-200 bg-white rounded-lg text-xs cursor-pointer hover:bg-slate-50 flex-shrink-0"><i class="fas fa-upload mr-1"></i>从电脑上传</label>
+          <label id="uploadBtn" class="px-3 py-2 border border-slate-200 bg-white rounded-lg text-xs cursor-pointer hover:bg-slate-50 flex-shrink-0"><i class="fas fa-upload mr-1"></i>从电脑上传<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden" onchange="uploadImage(this)"></label>
           <span class="text-[11px] text-slate-400">jpg/png/webp/gif · ≤10MB · 需先在"数据"页配置图床</span>
-          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden" onchange="uploadImage(this)">
         </div>
         <textarea id="fImageUrl" rows="3" class="field-input font-mono text-xs" placeholder="https://i.ibb.co/xxx/bed1.jpg, https://.../bed2.jpg" oninput="previewImages()"></textarea>
         <div class="text-[11px] text-slate-400 leading-relaxed mt-2 bg-slate-50 rounded-lg p-3">
