@@ -368,12 +368,14 @@ function login() {
   const pw = document.getElementById('pwInput').value;
   const stored = localStorage.getItem(LS_PW) || DEFAULT_PASSWORD;
   if (pw === stored) {
+    localStorage.setItem('pawshop_admin_session', '1');
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').classList.remove('hidden');
     renderAll();
   } else { showToast('密码错误', 'err'); }
 }
 function logout() {
+  localStorage.removeItem('pawshop_admin_session');
   document.getElementById('app').classList.add('hidden');
   document.getElementById('loginScreen').style.display = '';
   document.getElementById('pwInput').value = '';
@@ -1118,6 +1120,13 @@ function saveEmailConfig() {
 window.addEventListener('storage', e => {
   if (e.key === LS_PRODUCTS || e.key === LS_ORDERS || e.key === 'pawshop_waitlist') renderAll();
 });
+
+// 已登录过的浏览器直接进后台(退出会清除)
+if (localStorage.getItem('pawshop_admin_session') === '1') {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('app').classList.remove('hidden');
+  renderAll();
+}
 
 function renderAll() {
   renderDash();
