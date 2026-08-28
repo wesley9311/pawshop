@@ -122,7 +122,7 @@ const L = {
     shop: 'Shop', breadcrumb: 'Shop', inStock: 'In stock', onlyLeft: n => `Only ${n} left`,
     addToCart: 'Add to cart', buyNow: 'Buy now', reserve: 'Reserve free - no payment now',
     quantity: 'Quantity', variant: 'Choose an option', off: n => `-${n}% OFF`,
-    soldOut: 'Sold out', unavailable: 'Unavailable', stockLabel: 'Stock', taxIncluded: v => `Tax included (${v} each)`, details: 'Details', specs: 'Specifications', reviews: 'Reviews',
+    soldOut: 'Sold out', unavailable: 'Unavailable', stockLabel: 'Stock', taxIncluded: v => `Tax included (${v} each)`, details: 'Product Details', specs: 'Specifications', galleryTitle: 'Gallery', reviews: 'Reviews',
     related: 'You may also like',
     points: [
       ['fa-box-open', 'Free to reserve', 'No payment now - decide at launch'],
@@ -136,7 +136,7 @@ const L = {
     shop: '商品', breadcrumb: '商品', inStock: '有货', onlyLeft: n => `仅剩 ${n} 件`,
     addToCart: '加入购物车', buyNow: '立即购买', reserve: '免费预留——现在不用付款',
     quantity: '数量', variant: '选择款式', off: n => `省 ${n}%`,
-    soldOut: '无货', unavailable: '已下架', stockLabel: '库存', taxIncluded: v => `含税 ${v}/个`, details: '商品详情', specs: '规格参数', reviews: '用户评价',
+    soldOut: '无货', unavailable: '已下架', stockLabel: '库存', taxIncluded: v => `含税 ${v}/个`, details: '商品详情', galleryTitle: '图片详情', specs: '规格参数', reviews: '用户评价',
     related: '猜你喜欢',
     points: [
       ['fa-box-open', '免费预留', '现在不用付款，上线再决定'],
@@ -270,19 +270,27 @@ function render() {
     </div>
   </div>
 
-  ${p.description || (p.specs || []).length ? `
-  <section class="mt-14">
-    <h2 class="text-lg font-bold mb-5">${T.details}</h2>
-    <p class="text-sm text-slate-600 leading-relaxed mb-8 max-w-3xl">${p.description || ''}</p>
-    ${(p.specs || []).length ? `
-    <div class="grid md:grid-cols-2 gap-8 mb-8">
-      <div>
-        <h3 class="font-semibold text-sm mb-3">${T.specs}</h3>
-        <table class="w-full text-sm">${p.specs.map(sp => `<tr class="border-b border-slate-100"><td class="py-2.5 text-slate-400 w-36">${sp.label}</td><td class="py-2.5 font-medium">${sp.value}</td></tr>`).join('')}</table>
-      </div>
-      <div>${imgs.length > 1 ? `<img src="${imgs[1]}" class="w-full rounded-xl bg-slate-50">` : ''}</div>
+  ${(p.description || (p.specs || []).length || imgs.length > 1) ? `
+  <section class="mt-14 space-y-12">
+    ${p.description ? `
+    <div>
+      <h2 class="text-lg font-bold mb-4 pb-2 border-b border-slate-100">${T.details}</h2>
+      <p class="text-sm text-slate-600 leading-relaxed max-w-3xl">${p.description}</p>
     </div>` : ''}
-    ${imgs.length > 2 ? `<div class="grid sm:grid-cols-2 gap-4">${imgs.slice(2).map(u => `<img src="${u}" class="w-full rounded-xl bg-slate-50">`).join('')}</div>` : ''}
+    ${(p.specs || []).length ? `
+    <div>
+      <h2 class="text-lg font-bold mb-4 pb-2 border-b border-slate-100">${T.specs}</h2>
+      <div class="border border-slate-100 rounded-xl overflow-hidden max-w-2xl">
+        <table class="w-full text-sm">
+          ${(p.specs || []).map(sp => `<tr class="border-b border-slate-50 last:border-0"><td class="py-3 px-5 text-slate-400 w-40 bg-slate-50/50">${sp.label}</td><td class="py-3 px-5 font-medium">${sp.value}</td></tr>`).join('')}
+        </table>
+      </div>
+    </div>` : ''}
+    ${imgs.length > 1 ? `
+    <div>
+      <h2 class="text-lg font-bold mb-4 pb-2 border-b border-slate-100">${T.galleryTitle}</h2>
+      <div class="grid sm:grid-cols-2 gap-4">${imgs.slice(1).map(u => `<img src="${u}" class="w-full rounded-xl bg-slate-50">`).join('')}</div>
+    </div>` : ''}
   </section>` : ''}
 
   ${realReviews.length ? `

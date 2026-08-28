@@ -272,7 +272,11 @@
         <h3 class="text-sm font-semibold mb-4"><span class="text-slate-300 mr-1.5">04</span>规格与收款</h3>
         <div class="space-y-3">
           <div><label class="field-label">款式(逗号分隔)</label><input id="fVariants" class="field-input" placeholder="Natural, Grey, Large"></div>
-          <div><label class="field-label">参数(每行一项,格式 标签|值)</label><textarea id="fSpecs" rows="3" class="field-input font-mono text-xs" placeholder="Size|56 × 43 × 25 cm&#10;Material|Hemp + wood"></textarea></div>
+          <div><label class="field-label">参数(每行一项,格式 标签|值)</label>
+            <div class="flex flex-wrap gap-1.5 mb-2">
+              ${['尺寸','材质','适用品种','推荐用途','承重','清洁保养'].map(l => `<button type="button" onclick="addSpecLabel('${l}')" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-xs">${l}</button>`).join('')}
+            </div>
+            <textarea id="fSpecs" rows="4" class="field-input font-mono text-xs" placeholder="尺寸|55 × 40 × 5 cm&#10;适用品种|适合大部分成猫与大型猫&#10;推荐用途|磨爪·休息·玩耍"></textarea></div>
           <div><label class="field-label">收款链接(三种格式任选)</label><input id="fPaymentLink" class="field-input font-mono text-xs" placeholder="https://paypal.me/你的用户名 或 https://buy.stripe.com/... 或含{amount}的链接"></div>
         <div class="text-[11px] text-slate-400 mt-1.5">PayPal.me 自动带购物车金额;Stripe Payment Link 用商品后台生成的固定链接;{amount} 会被替换成订单总额。</div>
         </div>
@@ -452,6 +456,15 @@ function previewImages() {
   document.getElementById('imgPreview').innerHTML = urls.length
     ? urls.map(u => `<div class="aspect-square bg-slate-50 rounded-lg overflow-hidden border border-slate-100"><img src="${u}" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<i class=\\'fas fa-triangle-exclamation text-red-400 p-3\\'></i>'"></div>`).join('')
     : `<div class="aspect-square bg-slate-50 rounded-lg flex items-center justify-center border border-slate-100 col-span-4"><i class="fas ${icon} text-2xl text-slate-300"></i></div>`;
+}
+
+function addSpecLabel(label) {
+  const ta = document.getElementById('fSpecs');
+  const enMap = { '尺寸': 'Size', '材质': 'Material', '适用品种': 'Suitable For', '推荐用途': 'Recommended Use', '承重': 'Weight Capacity', '清洁保养': 'Care' };
+  const key = enMap[label] || label;
+  if (ta.value.includes(key + '|')) return;
+  ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + key + '|';
+  ta.focus();
 }
 
 function saveProduct() {
