@@ -1,110 +1,36 @@
 [
   {
     "id": 1,
-    "name": "Elevated Hemp Cat Bed - Standard",
-    "category": "beds",
-    "price": 19.99,
-    "originalPrice": 29.99,
-    "stock": 120,
-    "icon": "fa-bed",
-    "variants": [
-      "Natural"
+    "name": "Large High-Density Corrugated Cardboard Cat Scratcher Bed – Cat Sofa and Lounger for All Seasons",
+    "category": "cat lounger",
+    "price": 29.9,
+    "images": [
+      "https://i.ibb.co/KjzP1cPd/01-Hero-1x1.png",
+      "https://i.ibb.co/Df83RchW/02-Product-Dimensions-1x1.png",
+      "https://i.ibb.co/qYZVHWm7/03-Spacious-Surface-1x1.png",
+      "https://i.ibb.co/SDqgGYbz/04-Ground-Clearance-1x1.png",
+      "https://i.ibb.co/whLFnBS8/05-Catnip-Ball-1x1.png",
+      "https://i.ibb.co/VW9PHyg0/06-A4-Hand-Size-Comparison-1x1.png",
+      "https://i.ibb.co/YB0xK2ht/07-Multi-Angle-View-1x1-v5.png",
+      "https://i.ibb.co/3yVg3cS4/08-Replaceable-Corrugated-Board-1x1-v6.png",
+      "https://i.ibb.co/ZpjvZkPv/09-Feature-Overview-English-1x1.png"
     ],
-    "description": "Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.",
+    "imageUrl": "",
+    "icon": "Lounger",
+    "originalPrice": 39.9,
+    "costCNY": 23,
+    "stock": 100,
+    "variants": [
+      "Multifunctional Mid-Century Modern Corrugated Cardboard Cat Lounger"
+    ],
+    "description": "Designed for cats of all ages and sizes. The low-profile design makes it easier for short-legged and senior cats to get on and off, reducing the need to jump and providing a comfortable place to rest.",
     "specs": [
       {
-        "label": "Size",
-        "value": "56.5 × 43 × 25 cm"
-      },
-      {
         "label": "Material",
-        "value": "Hemp + wood frame"
-      },
-      {
-        "label": "Height",
-        "value": "10cm off ground"
+        "value": "High-Density Corrugated Cardboard"
       }
-    ]
-  },
-  {
-    "id": 2,
-    "name": "Elevated Hemp Cat Bed - Large",
-    "category": "beds",
-    "price": 24.99,
-    "originalPrice": 34.99,
-    "stock": 80,
-    "icon": "fa-bed",
-    "variants": [
-      "Natural"
     ],
-    "description": "Roomier version for large cats or two sharing. Same breathable hemp mat, 10cm elevation.",
-    "specs": [
-      {
-        "label": "Size",
-        "value": "70 × 45.5 × 31.5 cm"
-      },
-      {
-        "label": "Material",
-        "value": "Hemp + wood frame"
-      },
-      {
-        "label": "Height",
-        "value": "10cm off ground"
-      }
-    ]
-  },
-  {
-    "id": 3,
-    "name": "Corrugated Sofa Lounger",
-    "category": "scratchers",
-    "price": 29.99,
-    "originalPrice": 44.99,
-    "stock": 150,
-    "icon": "fa-couch",
-    "variants": [
-      "Natural / Grey"
-    ],
-    "description": "Dual-color corrugated cardboard sofa to scratch, lounge and nap on. Raised 5cm to protect floors.",
-    "specs": [
-      {
-        "label": "Size",
-        "value": "55.5 × 40.5 × 23.5 cm"
-      },
-      {
-        "label": "Material",
-        "value": "Corrugated cardboard"
-      },
-      {
-        "label": "Floor gap",
-        "value": "5cm"
-      }
-    ]
-  },
-  {
-    "id": 4,
-    "name": "Tall Cat Scratcher Post",
-    "category": "scratchers",
-    "price": 27.99,
-    "originalPrice": 39.99,
-    "stock": 90,
-    "icon": "fa-tree",
-    "variants": [
-      "Round"
-    ],
-    "description": "Extra-tall vertical scratcher for full-body stretching. Stable dense-board base, replaceable corrugated core.",
-    "specs": [
-      {
-        "label": "Size",
-        "value": "28 × 28 × 60 cm"
-      },
-      {
-        "label": "Material",
-        "value": "Corrugated + MDF"
-      },
-      {
-        "label": "Shape",
-        "value": "Round column"
-      }
-    ]
+    "paymentLink": "",
+    "active": true
   }
 ]
