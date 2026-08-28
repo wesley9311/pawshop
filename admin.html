@@ -89,6 +89,13 @@
 
     <!-- 商品列表 -->
     <section id="tab-products" class="tab-pane hidden pt-6">
+      <div id="catalogDiffBar" class="hidden mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+        <span class="text-sm text-amber-800">线上目录与本机不同(可能本机是新编辑,也可能是另一台设备更新了线上)。</span>
+        <div class="flex gap-2">
+          <button onclick="adoptCatalog()" class="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs">采用线上版本</button>
+          <button onclick="keepLocalCatalog()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-white">保留本机版本</button>
+        </div>
+      </div>
       <div class="flex items-center justify-between mb-4">
         <div>
           <h2 class="font-bold">商品列表</h2>
@@ -171,6 +178,7 @@
         <button onclick="exportJSON('pawshop_products','pawshop_products.json')" class="card py-3 text-sm hover:bg-slate-50"><i class="fas fa-download text-xs mr-1.5"></i>导出商品 JSON</button>
         <button onclick="exportJSON('pawshop_orders','pawshop_orders.json')" class="card py-3 text-sm hover:bg-slate-50"><i class="fas fa-download text-xs mr-1.5"></i>导出订单 JSON</button>
         <label class="card py-3 text-sm hover:bg-slate-50 text-center cursor-pointer"><i class="fas fa-upload text-xs mr-1.5"></i>导入商品 JSON<input type="file" accept=".json" class="hidden" onchange="importProducts(event)"></label>
+        <button onclick="restoreBackup()" class="card py-3 text-sm hover:bg-slate-50"><i class="fas fa-clock-rotate-left text-xs mr-1.5"></i>恢复上一版商品(误删找回)</button>
         <button onclick="restoreDefaults()" class="py-3 border border-amber-200 bg-amber-50 text-amber-700 rounded-xl text-sm hover:bg-amber-100">恢复内置商品(覆盖,需确认)</button>
         <button onclick="clearOrders()" class="py-3 border border-red-200 bg-red-50 text-red-600 rounded-xl text-sm hover:bg-red-100 md:col-span-2">清空测试订单(需确认)</button>
       </div>
@@ -490,7 +498,7 @@ function saveProduct() {
     record.active = true;
     products.push(record);
   }
-  writeLS(LS_PRODUCTS, products);
+  commitProducts(products);
   syncCatalog();
   closeProductForm();
   renderAll();
@@ -499,7 +507,7 @@ function saveProduct() {
 function toggleActive(id) {
   const products = getProducts();
   const p = products.find(x => x.id === id);
-  if (p) { p.active = p.active === false ? true : false; writeLS(LS_PRODUCTS, products); syncCatalog(); renderAll(); }
+  if (p) { p.active = p.active === false ? true : false; commitProducts(products); syncCatalog(); renderAll(); }
 }
 
 function deleteProduct(id) {
@@ -507,7 +515,7 @@ function deleteProduct(id) {
   const p = products.find(x => x.id === id);
   if (!p) return;
   if (!confirm(`确定删除「${p.name}」?不可撤销,建议先在"数据"页导出备份。`)) return;
-  writeLS(LS_PRODUCTS, products.filter(x => x.id !== id));
+  commitProducts(products.filter(x => x.id !== id));
   syncCatalog();
   renderAll();
 }
@@ -720,7 +728,7 @@ function importProducts(event) {
       const data = JSON.parse(reader.result);
       if (!Array.isArray(data) || !data.every(p => p.id && p.name && p.price)) throw new Error('格式不对');
       if (!confirm(`将导入 ${data.length} 个商品并覆盖现有商品,确定?`)) return;
-      writeLS(LS_PRODUCTS, data);
+      commitProducts(data);
       syncCatalog();
       renderAll();
       showToast('导入成功');
@@ -730,9 +738,19 @@ function importProducts(event) {
   event.target.value = '';
 }
 
+function restoreBackup() {
+  const bak = readLS('pawshop_products_backup', null);
+  if (!bak || !bak.length) { showToast('没有更早的备份', 'err'); return; }
+  if (!confirm('恢复到上一次保存前的版本?当前商品会被覆盖。')) return;
+  commitProducts(bak);
+  syncCatalog();
+  renderAll();
+  showToast('已恢复上一版');
+}
+
 function restoreDefaults() {
   if (!confirm('恢复内置 4 个商品并覆盖现有全部商品数据,确定?')) return;
-  writeLS(LS_PRODUCTS, JSON.parse(JSON.stringify(DEFAULT_PRODUCTS)));
+  commitProducts(JSON.parse(JSON.stringify(DEFAULT_PRODUCTS)));
   syncCatalog();
   renderAll();
 }
@@ -741,6 +759,11 @@ function clearOrders() {
   if (!confirm('清空全部订单?不可撤销,建议先导出。')) return;
   writeLS(LS_ORDERS, []);
   renderAll();
+}
+
+function commitProducts(next) {
+  writeLS('pawshop_products_backup', getProducts());
+  writeLS(LS_PRODUCTS, next);
 }
 
 // ===== 线上同步(catalog.json 真相源) =====
@@ -784,11 +807,24 @@ async function syncCatalog(manual) {
   }
 }
 
-// 打开后台时拉取线上真相,若比本机新则采纳
+// 打开后台时对比线上目录:不同只提示,绝不自动覆盖
+function adoptCatalog() {
+  fetch('catalog.json?v=' + Date.now()).then(r => r.json()).then(j => {
+    if (Array.isArray(j) && j.length) {
+      commitProducts(j);
+      renderAll();
+      document.getElementById('catalogDiffBar').classList.add('hidden');
+      showToast('已采用线上版本');
+    }
+  }).catch(() => showToast('拉取失败', 'err'));
+}
+function keepLocalCatalog() {
+  document.getElementById('catalogDiffBar').classList.add('hidden');
+  showToast('已保留本机版本,记得配置 Token 同步');
+}
 fetch('catalog.json?v=' + Date.now()).then(r => r.ok ? r.json() : null).then(j => {
   if (Array.isArray(j) && j.length && JSON.stringify(j) !== localStorage.getItem(LS_PRODUCTS)) {
-    writeLS(LS_PRODUCTS, j);
-    renderAll();
+    document.getElementById('catalogDiffBar').classList.remove('hidden');
   }
 }).catch(() => {});
 
