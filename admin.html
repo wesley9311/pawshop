@@ -187,6 +187,19 @@
         <button onclick="saveEmailConfig()" class="mt-4 px-5 py-2.5 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700">保存</button>
       </div>
 
+      <h2 class="font-bold mt-8 mb-4">线上同步 <span class="text-xs text-slate-400 font-normal">GitHub·商品目录全设备实时</span></h2>
+      <div class="card p-5">
+        <p class="text-xs text-slate-400 mb-4 leading-relaxed">配置后,商品改动自动写回线上仓库的 catalog.json,所有设备(含手机)1 分钟内同步。Token 创建:GitHub → Settings → Developer settings → Fine-grained tokens → Generate → Repository access 选 Only pawshop → Permissions 里 Contents 设 Read and write → 复制。Token 只存你本机浏览器。</p>
+        <div class="grid md:grid-cols-2 gap-3">
+          <div><label class="field-label">GitHub Fine-grained Token</label><input id="cfgGitToken" type="password" class="field-input font-mono text-xs" placeholder="github_pat_..."></div>
+          <div class="flex items-end gap-2">
+            <button onclick="saveGitToken()" class="px-4 py-2.5 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700">保存</button>
+            <button onclick="syncCatalog(true)" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">立即同步</button>
+          </div>
+        </div>
+        <p id="syncStatus" class="text-xs text-slate-400 mt-3"></p>
+      </div>
+
       <h2 class="font-bold mt-8 mb-4">图床配置 <span class="text-xs text-slate-400 font-normal">imgbb·商品图片上传用</span></h2>
       <div class="card p-5">
         <p class="text-xs text-slate-400 mb-4 leading-relaxed">imgbb.com 免费注册(邮箱即可) → 头像菜单 API → 复制 API Key 填到这里。Key 只存在你本机浏览器,不进公开仓库。之后商品编辑页"从电脑上传"即可自动生成图片链接(永久有效,全球可访问)。</p>
@@ -478,6 +491,7 @@ function saveProduct() {
     products.push(record);
   }
   writeLS(LS_PRODUCTS, products);
+  syncCatalog();
   closeProductForm();
   renderAll();
 }
@@ -485,7 +499,7 @@ function saveProduct() {
 function toggleActive(id) {
   const products = getProducts();
   const p = products.find(x => x.id === id);
-  if (p) { p.active = p.active === false ? true : false; writeLS(LS_PRODUCTS, products); renderAll(); }
+  if (p) { p.active = p.active === false ? true : false; writeLS(LS_PRODUCTS, products); syncCatalog(); renderAll(); }
 }
 
 function deleteProduct(id) {
@@ -494,6 +508,7 @@ function deleteProduct(id) {
   if (!p) return;
   if (!confirm(`确定删除「${p.name}」?不可撤销,建议先在"数据"页导出备份。`)) return;
   writeLS(LS_PRODUCTS, products.filter(x => x.id !== id));
+  syncCatalog();
   renderAll();
 }
 
@@ -706,6 +721,7 @@ function importProducts(event) {
       if (!Array.isArray(data) || !data.every(p => p.id && p.name && p.price)) throw new Error('格式不对');
       if (!confirm(`将导入 ${data.length} 个商品并覆盖现有商品,确定?`)) return;
       writeLS(LS_PRODUCTS, data);
+      syncCatalog();
       renderAll();
       showToast('导入成功');
     } catch (e) { showToast('导入失败:文件不是合法的商品 JSON', 'err'); }
@@ -717,6 +733,7 @@ function importProducts(event) {
 function restoreDefaults() {
   if (!confirm('恢复内置 4 个商品并覆盖现有全部商品数据,确定?')) return;
   writeLS(LS_PRODUCTS, JSON.parse(JSON.stringify(DEFAULT_PRODUCTS)));
+  syncCatalog();
   renderAll();
 }
 
@@ -725,6 +742,55 @@ function clearOrders() {
   writeLS(LS_ORDERS, []);
   renderAll();
 }
+
+// ===== 线上同步(catalog.json 真相源) =====
+const LS_GIT = 'pawshop_github_token';
+
+function loadGitToken() {
+  document.getElementById('cfgGitToken').value = localStorage.getItem(LS_GIT) || '';
+  const st = document.getElementById('syncStatus');
+  st.textContent = localStorage.getItem(LS_GIT) ? '已配置,保存商品时自动同步' : '未配置:改动只在本机浏览器可见';
+}
+function saveGitToken() {
+  localStorage.setItem(LS_GIT, document.getElementById('cfgGitToken').value.trim());
+  showToast('已保存');
+  loadGitToken();
+}
+
+async function syncCatalog(manual) {
+  const token = localStorage.getItem(LS_GIT);
+  if (!token) { if (manual) showToast('请先填写并保存 Token', 'err'); return; }
+  const st = document.getElementById('syncStatus');
+  st.textContent = '同步中...';
+  try {
+    const api = 'https://api.github.com/repos/wesley9311/pawshop/contents/catalog.json';
+    const cur = await fetch(api, { headers: { Authorization: 'token ' + token, Accept: 'application/vnd.github+json' } }).then(r => r.json());
+    const body = {
+      message: 'catalog update from admin',
+      branch: 'main',
+      content: btoa(unescape(encodeURIComponent(JSON.stringify(getProducts(), null, 2)))),
+    };
+    if (cur && cur.sha) body.sha = cur.sha;
+    const r = await fetch(api, {
+      method: 'PUT',
+      headers: { Authorization: 'token ' + token, 'Content-Type': 'application/json', Accept: 'application/vnd.github+json' },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) { st.textContent = '已同步,约1分钟后全设备生效'; if (manual) showToast('已同步到线上'); }
+    else { st.textContent = '同步失败(HTTP ' + r.status + ':Token 权限或网络)'; if (manual) showToast('同步失败,检查 Token 权限/代理', 'err'); }
+  } catch (e) {
+    st.textContent = '同步失败:网络(需开代理)';
+    if (manual) showToast('同步失败:网络(需开代理)', 'err');
+  }
+}
+
+// 打开后台时拉取线上真相,若比本机新则采纳
+fetch('catalog.json?v=' + Date.now()).then(r => r.ok ? r.json() : null).then(j => {
+  if (Array.isArray(j) && j.length && JSON.stringify(j) !== localStorage.getItem(LS_PRODUCTS)) {
+    writeLS(LS_PRODUCTS, j);
+    renderAll();
+  }
+}).catch(() => {});
 
 // ===== 图床上传(imgbb,Key 存本机 localStorage) =====
 const LS_IMGBB = 'pawshop_imgbb_key';
@@ -801,6 +867,7 @@ function renderAll() {
   renderWaitlist();
   loadEmailConfig();
   loadImgbKey();
+  loadGitToken();
 }
 </script>
 

@@ -1,0 +1,110 @@
+[
+  {
+    "id": 1,
+    "name": "Elevated Hemp Cat Bed - Standard",
+    "category": "beds",
+    "price": 19.99,
+    "originalPrice": 29.99,
+    "stock": 120,
+    "icon": "fa-bed",
+    "variants": [
+      "Natural"
+    ],
+    "description": "Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.",
+    "specs": [
+      {
+        "label": "Size",
+        "value": "56.5 × 43 × 25 cm"
+      },
+      {
+        "label": "Material",
+        "value": "Hemp + wood frame"
+      },
+      {
+        "label": "Height",
+        "value": "10cm off ground"
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Elevated Hemp Cat Bed - Large",
+    "category": "beds",
+    "price": 24.99,
+    "originalPrice": 34.99,
+    "stock": 80,
+    "icon": "fa-bed",
+    "variants": [
+      "Natural"
+    ],
+    "description": "Roomier version for large cats or two sharing. Same breathable hemp mat, 10cm elevation.",
+    "specs": [
+      {
+        "label": "Size",
+        "value": "70 × 45.5 × 31.5 cm"
+      },
+      {
+        "label": "Material",
+        "value": "Hemp + wood frame"
+      },
+      {
+        "label": "Height",
+        "value": "10cm off ground"
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "name": "Corrugated Sofa Lounger",
+    "category": "scratchers",
+    "price": 29.99,
+    "originalPrice": 44.99,
+    "stock": 150,
+    "icon": "fa-couch",
+    "variants": [
+      "Natural / Grey"
+    ],
+    "description": "Dual-color corrugated cardboard sofa to scratch, lounge and nap on. Raised 5cm to protect floors.",
+    "specs": [
+      {
+        "label": "Size",
+        "value": "55.5 × 40.5 × 23.5 cm"
+      },
+      {
+        "label": "Material",
+        "value": "Corrugated cardboard"
+      },
+      {
+        "label": "Floor gap",
+        "value": "5cm"
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "name": "Tall Cat Scratcher Post",
+    "category": "scratchers",
+    "price": 27.99,
+    "originalPrice": 39.99,
+    "stock": 90,
+    "icon": "fa-tree",
+    "variants": [
+      "Round"
+    ],
+    "description": "Extra-tall vertical scratcher for full-body stretching. Stable dense-board base, replaceable corrugated core.",
+    "specs": [
+      {
+        "label": "Size",
+        "value": "28 × 28 × 60 cm"
+      },
+      {
+        "label": "Material",
+        "value": "Corrugated + MDF"
+      },
+      {
+        "label": "Shape",
+        "value": "Round column"
+      }
+    ]
+  }
+]

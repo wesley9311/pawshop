@@ -852,6 +852,19 @@ window.addEventListener('storage', e => {
   }
 });
 
+// ===== 共享商品目录:全设备一致的真相源(catalog.json) =====
+fetch('catalog.json?v=' + Date.now()).then(r => r.ok ? r.json() : null).then(j => {
+  if (Array.isArray(j) && j.length && JSON.stringify(j) !== JSON.stringify(products)) {
+    products = j;
+    currentCategory = 'all';
+    displayedProducts = 8;
+    loadCart();
+    renderCategoryBar();
+    renderProducts();
+    updateCart();
+  }
+}).catch(() => {});
+
 // ===== 从详情页跳转:直接开结算 =====
 if (location.hash === '#checkout') setTimeout(() => checkout(), 300);
 

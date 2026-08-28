@@ -432,6 +432,12 @@ document.getElementById('langSelect').value = lang;
 render();
 loadCart();
 updateCart();
+fetch('catalog.json?v=' + Date.now()).then(r => r.ok ? r.json() : null).then(j => {
+  if (Array.isArray(j) && j.length) {
+    const raw = localStorage.getItem(LS_PRODUCTS);
+    if (JSON.stringify(j) !== raw) { render(); }
+  }
+}).catch(() => {});
 </script>
 
 </body>
