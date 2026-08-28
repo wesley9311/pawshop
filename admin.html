@@ -499,7 +499,7 @@ function smartParse() {
   if (m) addSpec('Height', `${m[1]} cm`);
 
   // 重量与承重
-  m = raw.match(/(?:净?重|重量|约重)\s*[:：]?)?\s*(\d+(?:\.\d+)?)\s*(kg|千克|克|g)\b/);
+  m = raw.match(/(?:净重|重量|约重|重)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(kg|千克|克|g)\b/);
   if (m && /重/.test(raw)) { const u = /kg|千克/.test(m[2]) ? 'kg' : 'g'; addSpec('Weight', `${m[1]} ${u}`); found.push('重量'); }
   m = raw.match(/承重\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(kg|千克|克|g)?/);
   if (m) { const u = (m[2] === '克' || m[2] === 'g') ? 'g' : 'kg'; addSpec('Weight Capacity', `${m[1]} ${u}`); found.push('承重'); }
