@@ -608,8 +608,10 @@ async function callGlm(text) {
     r = await doFetch();
   }
   if (!r.ok) {
-    let msg = 'HTTP ' + r.status;
-    try { const j = await r.json(); msg = j.error?.message || msg; } catch (e) {}
+    let msg = 'HTTP ' + r.status, code = '';
+    try { const j = await r.json(); msg = j.error?.message || msg; code = j.error?.code || ''; } catch (e) {}
+    if (r.status === 429 || code === '1305') throw new Error('模型繁忙(免费高峰期),不是Key问题——等几秒重点一次即可');
+    if (r.status === 401 || String(code).startsWith('100')) throw new Error('Key 无效或粘贴不完整,请到数据页重新粘贴完整Key');
     throw new Error(msg);
   }
   const j = await r.json();
