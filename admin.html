@@ -208,6 +208,16 @@
         <p id="syncStatus" class="text-xs text-slate-400 mt-3"></p>
       </div>
 
+      <h2 class="font-bold mt-8 mb-4">AI 解析配置 <span class="text-xs text-slate-400 font-normal">智谱 GLM·智能粘贴用</span></h2>
+      <div class="card p-5">
+        <p class="text-xs text-slate-400 mb-4 leading-relaxed">open.bigmodel.cn 的 API Key,用于商品表单"AI 解析"按钮:粘贴中文商品文字→自动产出英文名称/描述/分类/参数。Key 只存本机浏览器。免费模型高峰期可能繁忙,会自动重试一次。</p>
+        <div class="grid md:grid-cols-2 gap-3">
+          <div><label class="field-label">API Key</label><input id="cfgGlmKey" type="password" class="field-input font-mono text-xs" placeholder="xxxxxxxx.xxxxxxxx"></div>
+          <div><label class="field-label">模型</label><input id="cfgGlmModel" class="field-input font-mono text-xs" placeholder="glm-4.7-flash"></div>
+        </div>
+        <button onclick="saveGlmCfg()" class="mt-4 px-5 py-2.5 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700">保存</button>
+      </div>
+
       <h2 class="font-bold mt-8 mb-4">图床配置 <span class="text-xs text-slate-400 font-normal">imgbb·商品图片上传用</span></h2>
       <div class="card p-5">
         <p class="text-xs text-slate-400 mb-4 leading-relaxed">imgbb.com 免费注册(邮箱即可) → 头像菜单 API → 复制 API Key 填到这里。Key 只存在你本机浏览器,不进公开仓库。之后商品编辑页"从电脑上传"即可自动生成图片链接(永久有效,全球可访问)。</p>
@@ -236,7 +246,8 @@
       <h3 class="text-sm font-semibold mb-2"><span class="text-slate-300 mr-1.5">00</span>智能粘贴 <span class="text-xs text-slate-400 font-normal">粘贴 1688 商品文字,一键识别填充</span></h3>
       <textarea id="smartPaste" rows="3" class="field-input text-sm mb-2" placeholder="把 1688 商品标题/详情文字整段粘到这里,例如:&#10;加厚瓦楞纸猫抓板 大型猫适用 尺寸55×40×5cm 重1.2kg 承重15kg"></textarea>
       <div class="flex items-center gap-2">
-        <button type="button" onclick="smartParse()" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700"><i class="fas fa-wand-magic-sparkles text-xs mr-1"></i>识别并填充</button>
+        <button type="button" onclick="smartParse()" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700"><i class="fas fa-wand-magic-sparkles text-xs mr-1"></i>规则识别</button>
+        <button type="button" id="aiParseBtn" onclick="aiParse()" class="px-4 py-2 border-2 border-slate-900 rounded-lg text-sm font-medium hover:bg-slate-50"><i class="fas fa-brain text-xs mr-1"></i>AI 解析(英文)</button>
         <span id="smartLog" class="text-xs text-slate-400"></span>
       </div>
     </div>
@@ -544,6 +555,90 @@ function smartParse() {
 
   log.textContent = found.length ? '已识别并填入: ' + found.join('、') : '没有识别到结构化信息,请手动填写';
   showToast(found.length ? '填充完成,记得检查修改' : '未识别到字段', found.length ? 'ok' : 'err');
+}
+
+// ===== AI 解析(智谱 GLM) =====
+const LS_GLM_KEY = 'pawshop_glm_key';
+const LS_GLM_MODEL = 'pawshop_glm_model';
+
+function loadGlmCfg() {
+  document.getElementById('cfgGlmKey').value = localStorage.getItem(LS_GLM_KEY) || '';
+  document.getElementById('cfgGlmModel').value = localStorage.getItem(LS_GLM_MODEL) || 'glm-4.7-flash';
+}
+function saveGlmCfg() {
+  localStorage.setItem(LS_GLM_KEY, document.getElementById('cfgGlmKey').value.trim());
+  localStorage.setItem(LS_GLM_MODEL, document.getElementById('cfgGlmModel').value.trim() || 'glm-4.7-flash');
+  showToast('AI 配置已保存');
+}
+
+async function callGlm(text) {
+  const key = localStorage.getItem(LS_GLM_KEY);
+  const model = localStorage.getItem(LS_GLM_MODEL) || 'glm-4.7-flash';
+  if (!key) throw new Error('请先在"数据"页配置 GLM API Key');
+  const sys = 'You extract structured product data for an English pet-supplies storefront. Reply with ONLY a JSON object, no markdown, keys: name (concise English product title), description (2-3 English sentences, factual, no marketing fluff), category (one of: beds, scratchers, dogs, feeding, toys, grooming, other), variants (array of English option names, [] if none), specs (array of {label,value} in English covering Size/Material/Suitable For/Recommended Use/Weight/Weight Capacity where inferable from text), price_usd (number or null, convert CNY at 7.15), cost_cny (number or null, the ¥ wholesale price if present). Use only information in the text; never invent specifications.';
+  const body = {
+    model,
+    messages: [{ role: 'system', content: sys }, { role: 'user', content: text }],
+    temperature: 0.2,
+    max_tokens: 900,
+    response_format: { type: 'json_object' },
+  };
+  const doFetch = () => fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+    body: JSON.stringify(body),
+  });
+  let r = await doFetch();
+  if (r.status === 429) await new Promise(res => setTimeout(res, 3000)) && (r = await doFetch()); // 高峰重试一次
+  if (!r.ok) {
+    let msg = 'HTTP ' + r.status;
+    try { const j = await r.json(); msg = j.error?.message || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  const j = await r.json();
+  const content = j.choices?.[0]?.message?.content || '';
+  const cleaned = content.replace(/^```(json)?|```$/g, '').trim();
+  return JSON.parse(cleaned);
+}
+
+async function aiParse() {
+  const raw = document.getElementById('smartPaste').value.trim();
+  const log = document.getElementById('smartLog');
+  const btn = document.getElementById('aiParseBtn');
+  if (!raw) { showToast('请先粘贴商品文字', 'err'); return; }
+  if (!localStorage.getItem(LS_GLM_KEY)) { showToast('请先在"数据"页配置 GLM API Key', 'err'); return; }
+
+  const original = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs mr-1"></i>AI 解析中...';
+  btn.disabled = true;
+  try {
+    const d = await callGlm(raw);
+    const found = [];
+    if (d.name) { document.getElementById('fName').value = d.name; found.push('名称'); }
+    if (d.description) { document.getElementById('fDescription').value = d.description; found.push('描述'); }
+    if (d.category) { document.getElementById('fCategory').value = String(d.category).toLowerCase(); found.push('分类'); }
+    if (Array.isArray(d.variants) && d.variants.length) { document.getElementById('fVariants').value = d.variants.join(', '); found.push('款式'); }
+    if (d.cost_cny && !document.getElementById('fCost').value) { document.getElementById('fCost').value = d.cost_cny; found.push('成本¥'); }
+    if (d.price_usd && !document.getElementById('fPrice').value) { document.getElementById('fPrice').value = d.price_usd; found.push('售价$'); }
+    if (Array.isArray(d.specs) && d.specs.length) {
+      const ta = document.getElementById('fSpecs');
+      const existing = ta.value.trim() ? ta.value.trim().split('\n') : [];
+      const keys = new Set(existing.map(l => l.split('|')[0].trim()));
+      for (const sp of d.specs) {
+        if (sp && sp.label && sp.value && !keys.has(String(sp.label).trim())) existing.push(`${sp.label}|${sp.value}`);
+      }
+      ta.value = existing.join('\n');
+      found.push('参数' + d.specs.length + '项');
+    }
+    log.textContent = 'AI 已填入: ' + found.join('、');
+    showToast('AI 填充完成,检查后保存');
+  } catch (e) {
+    log.textContent = 'AI 解析失败: ' + e.message;
+    showToast('AI 解析失败: ' + e.message, 'err');
+  } finally {
+    btn.innerHTML = original;
+    btn.disabled = false;
+  }
 }
 
 function addSpecLabel(label) {
@@ -879,6 +974,7 @@ function saveGitToken() {
   localStorage.setItem(LS_GIT, document.getElementById('cfgGitToken').value.trim());
   showToast('已保存');
   loadGitToken();
+  loadGlmCfg();
 }
 
 async function syncCatalog(manual) {
@@ -1005,6 +1101,7 @@ function renderAll() {
   loadEmailConfig();
   loadImgbKey();
   loadGitToken();
+  loadGlmCfg();
 }
 </script>
 
