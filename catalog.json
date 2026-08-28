@@ -7,6 +7,7 @@
     "originalPrice": 29.99,
     "stock": 120,
     "icon": "fa-bed",
+    "images": [],
     "variants": [
       "Natural"
     ],
@@ -19,12 +20,9 @@
       {
         "label": "Material",
         "value": "Hemp + wood frame"
-      },
-      {
-        "label": "Height",
-        "value": "10cm off ground"
       }
-    ]
+    ],
+    "paymentLink": ""
   },
   {
     "id": 2,
@@ -34,6 +32,7 @@
     "originalPrice": 34.99,
     "stock": 80,
     "icon": "fa-bed",
+    "images": [],
     "variants": [
       "Natural"
     ],
@@ -46,12 +45,9 @@
       {
         "label": "Material",
         "value": "Hemp + wood frame"
-      },
-      {
-        "label": "Height",
-        "value": "10cm off ground"
       }
-    ]
+    ],
+    "paymentLink": ""
   },
   {
     "id": 3,
@@ -61,6 +57,7 @@
     "originalPrice": 44.99,
     "stock": 150,
     "icon": "fa-couch",
+    "images": [],
     "variants": [
       "Natural / Grey"
     ],
@@ -73,12 +70,9 @@
       {
         "label": "Material",
         "value": "Corrugated cardboard"
-      },
-      {
-        "label": "Floor gap",
-        "value": "5cm"
       }
-    ]
+    ],
+    "paymentLink": ""
   },
   {
     "id": 4,
@@ -88,6 +82,7 @@
     "originalPrice": 39.99,
     "stock": 90,
     "icon": "fa-tree",
+    "images": [],
     "variants": [
       "Round"
     ],
@@ -100,11 +95,8 @@
       {
         "label": "Material",
         "value": "Corrugated + MDF"
-      },
-      {
-        "label": "Shape",
-        "value": "Round column"
       }
-    ]
+    ],
+    "paymentLink": ""
   }
 ]
