@@ -232,7 +232,15 @@
       </div>
     </div>
 
-    <div class="grid lg:grid-cols-2 gap-4 pt-6 max-w-4xl">
+    <div class="card p-5 mb-4 max-w-4xl">
+      <h3 class="text-sm font-semibold mb-2"><span class="text-slate-300 mr-1.5">00</span>智能粘贴 <span class="text-xs text-slate-400 font-normal">粘贴 1688 商品文字,一键识别填充</span></h3>
+      <textarea id="smartPaste" rows="3" class="field-input text-sm mb-2" placeholder="把 1688 商品标题/详情文字整段粘到这里,例如:&#10;加厚瓦楞纸猫抓板 大型猫适用 尺寸55×40×5cm 重1.2kg 承重15kg"></textarea>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="smartParse()" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700"><i class="fas fa-wand-magic-sparkles text-xs mr-1"></i>识别并填充</button>
+        <span id="smartLog" class="text-xs text-slate-400"></span>
+      </div>
+    </div>
+    <div class="grid lg:grid-cols-2 gap-4 pt-2 max-w-4xl">
       <input type="hidden" id="fId">
       <div class="card p-5">
         <h3 class="text-sm font-semibold mb-4"><span class="text-slate-300 mr-1.5">01</span>基本信息</h3>
@@ -456,6 +464,86 @@ function previewImages() {
   document.getElementById('imgPreview').innerHTML = urls.length
     ? urls.map(u => `<div class="aspect-square bg-slate-50 rounded-lg overflow-hidden border border-slate-100"><img src="${u}" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<i class=\\'fas fa-triangle-exclamation text-red-400 p-3\\'></i>'"></div>`).join('')
     : `<div class="aspect-square bg-slate-50 rounded-lg flex items-center justify-center border border-slate-100 col-span-4"><i class="fas ${icon} text-2xl text-slate-300"></i></div>`;
+}
+
+const MATERIAL_CN2EN = { '瓦楞纸':'Corrugated cardboard','瓦楞':'Corrugated cardboard','纸板':'Cardboard','剑麻':'Sisal','麻':'Hemp','棉':'Cotton','尼龙':'Nylon','涤纶':'Polyester','pp':'PP','pe':'PE','硅胶':'Silicone','木质':'Wood','密度板':'MDF','塑料':'Plastic','橡胶':'Rubber','陶瓷':'Ceramic','不锈钢':'Stainless steel','tpe':'TPE','毛绒':'Plush','绒':'Velvet' };
+
+function smartParse() {
+  const raw = document.getElementById('smartPaste').value.trim();
+  const log = document.getElementById('smartLog');
+  if (!raw) { showToast('请先粘贴商品文字', 'err'); return; }
+  const found = [];
+
+  // 名称:第一行,去掉纯数字/符号噪音
+  const firstLine = raw.split(/[\n。;；]/)[0].trim();
+  if (firstLine && firstLine.length <= 60 && !document.getElementById('fName').value) {
+    document.getElementById('fName').value = firstLine;
+    found.push('名称');
+  }
+
+  // 描述:整段原文(若描述为空)
+  if (!document.getElementById('fDescription').value) {
+    document.getElementById('fDescription').value = raw.slice(0, 500);
+    found.push('描述');
+  }
+
+  const specs = [];
+  const addSpec = (k, v) => { if (v && !specs.some(x => x[0] === k)) specs.push([k, v]); };
+
+  // 尺寸(三维/二维/直径/高度)
+  let m = raw.match(/(\d+(?:\.\d+)?)\s*[×xX*]\s*(\d+(?:\.\d+)?)\s*[×xX*]\s*(\d+(?:\.\d+)?)\s*(cm|毫米|mm|厘米)?/);
+  if (m) { const u = (m[4] === '毫米' || m[4] === 'mm') ? 'mm' : 'cm'; addSpec('Size', `${m[1]} × ${m[2]} × ${m[3]} ${u}`); found.push('尺寸'); }
+  if (!m) { m = raw.match(/(\d+(?:\.\d+)?)\s*[×xX*]\s*(\d+(?:\.\d+)?)\s*(cm|厘米)?/); if (m) { addSpec('Size', `${m[1]} × ${m[2]} cm`); found.push('尺寸'); } }
+  if (!m) { m = raw.match(/(?:直径|Ø|ø)\s*(\d+(?:\.\d+)?)\s*(cm|毫米|mm)?/); if (m) { addSpec('Size', `Ø ${m[1]} ${m[2] === 'mm' || m[2] === '毫米' ? 'mm' : 'cm'}`); found.push('尺寸'); } }
+  m = raw.match(/(?:高|高度)\s*(\d+(?:\.\d+)?)\s*(cm|厘米)/);
+  if (m) addSpec('Height', `${m[1]} cm`);
+
+  // 重量与承重
+  m = raw.match(/(?:净?重|重量|约重)\s*[:：]?)?\s*(\d+(?:\.\d+)?)\s*(kg|千克|克|g)\b/);
+  if (m && /重/.test(raw)) { const u = /kg|千克/.test(m[2]) ? 'kg' : 'g'; addSpec('Weight', `${m[1]} ${u}`); found.push('重量'); }
+  m = raw.match(/承重\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(kg|千克|克|g)?/);
+  if (m) { const u = (m[2] === '克' || m[2] === 'g') ? 'g' : 'kg'; addSpec('Weight Capacity', `${m[1]} ${u}`); found.push('承重'); }
+
+  // 容量
+  m = raw.match(/(\d+(?:\.\d+)?)\s*(ml|毫升|L|升)\b/);
+  if (m) addSpec('Capacity', `${m[1]} ${/ml|毫升/.test(m[2]) ? 'ml' : 'L'}`);
+
+  // 材质
+  for (const [cn, en] of Object.entries(MATERIAL_CN2EN)) {
+    if (raw.toLowerCase().includes(cn.toLowerCase())) { addSpec('Material', en); found.push('材质'); break; }
+  }
+
+  // 品种与用途
+  const pet = /猫|喵/.test(raw) ? 'cat' : (/犬|狗/.test(raw) ? 'dog' : null);
+  if (pet === 'cat') {
+    const sz = /大型猫|胖猫|缅因/.test(raw) ? 'adult and large cats' : (/幼猫|小猫/.test(raw) ? 'kittens and small cats' : 'most cats');
+    addSpec('Suitable For', sz); found.push('适用品种');
+  } else if (pet === 'dog') {
+    const sz = /大型犬|中大型/.test(raw) ? 'medium and large dogs' : (/小型犬|泰迪|比熊/.test(raw) ? 'small dogs' : 'most dogs');
+    addSpec('Suitable For', sz); found.push('适用品种');
+  }
+  const uses = [];
+  if (/磨爪|抓板|猫抓/.test(raw)) uses.push('Scratching');
+  if (/休息|睡|窝/.test(raw)) uses.push('Resting');
+  if (/玩|逗/.test(raw)) uses.push('Playing');
+  if (/食|喂/.test(raw)) uses.push('Feeding');
+  if (uses.length) { addSpec('Recommended Use', uses.join(' · ')); found.push('推荐用途'); }
+
+  // 人民币价格→采购成本(第一个 ¥ 后的数字)
+  m = raw.match(/[¥￥]\s*(\d+(?:\.\d+)?)/);
+  if (m && !document.getElementById('fCost').value) { document.getElementById('fCost').value = m[1]; found.push('成本¥'); }
+
+  // 写入参数框(与已有内容合并去重)
+  if (specs.length) {
+    const ta = document.getElementById('fSpecs');
+    const existing = ta.value.trim() ? ta.value.trim().split('\n') : [];
+    const keys = new Set(existing.map(l => l.split('|')[0].trim()));
+    for (const [k, v] of specs) if (!keys.has(k)) existing.push(`${k}|${v}`);
+    ta.value = existing.join('\n');
+  }
+
+  log.textContent = found.length ? '已识别并填入: ' + found.join('、') : '没有识别到结构化信息,请手动填写';
+  showToast(found.length ? '填充完成,记得检查修改' : '未识别到字段', found.length ? 'ok' : 'err');
 }
 
 function addSpecLabel(label) {
