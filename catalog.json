@@ -1,30 +1,5 @@
 [
   {
-    "id": 1,
-    "name": "Elevated Hemp Cat Bed - Standard",
-    "category": "beds",
-    "price": 19.99,
-    "originalPrice": 29.99,
-    "stock": 120,
-    "icon": "fa-bed",
-    "images": [],
-    "variants": [
-      "Natural"
-    ],
-    "description": "Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.",
-    "specs": [
-      {
-        "label": "Size",
-        "value": "56.5 × 43 × 25 cm"
-      },
-      {
-        "label": "Material",
-        "value": "Hemp + wood frame"
-      }
-    ],
-    "paymentLink": ""
-  },
-  {
     "id": 2,
     "name": "Elevated Hemp Cat Bed - Large",
     "category": "beds",
