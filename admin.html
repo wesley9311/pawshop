@@ -75,7 +75,11 @@
         <div class="card p-4"><div class="text-xs text-slate-400 mb-1">销售额 $</div><div id="statRevenue" class="text-2xl font-bold">$0.00</div></div>
         <div class="card p-4"><div class="text-xs text-slate-400 mb-1">估算毛利 $</div><div id="statMargin" class="text-2xl font-bold text-green-600">$0.00</div></div>
       </div>
-      <div class="grid md:grid-cols-2 gap-3 mt-4">
+      <div class="card p-5 mt-4 text-sm text-slate-500 leading-relaxed flex flex-wrap items-center justify-between gap-3">
+        <span><i class="fas fa-chart-line text-xs mr-1.5"></i>实时数据大屏:销售额/毛利/排行/分布/异动/AI 解读</span>
+        <a href="dashboard.html" target="_blank" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700">打开数据大屏 →</a>
+      </div>
+    <div class="grid md:grid-cols-2 gap-3 mt-4">
         <div class="card p-5 text-sm text-slate-500 leading-relaxed">
           <div class="font-semibold text-slate-900 mb-2 text-sm"><i class="fas fa-arrows-spin text-xs mr-1"></i>闭环怎么跑</div>
           ① 商品页上架 → ② 顾客前台浏览/预留/下单 → ③ 订单页处理、复制采购清单发 1688 → ④ 录物流单号自动发通知 → ⑤ 顾客在"我的订单"看进度。
@@ -290,6 +294,12 @@
       <div class="card p-5">
         <h3 class="text-sm font-semibold mb-4"><span class="text-slate-300 mr-1.5">04</span>规格与收款</h3>
         <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="field-label">供应商平台(订单来了找谁订货)</label>
+              <select id="fSupplier" class="field-input"><option value="">未设置</option><option>1688</option><option>拼多多</option><option>淘宝</option><option>其他</option></select>
+            </div>
+            <div><label class="field-label">供应商链接/货号(选填)</label><input id="fSupplierLink" class="field-input font-mono text-xs" placeholder="1688 商品链接或货号"></div>
+          </div>
           <div><label class="field-label">款式(逗号分隔)</label><input id="fVariants" class="field-input" placeholder="Natural, Grey, Large"></div>
           <div><label class="field-label">参数(每行一项,格式 标签|值)</label>
             <div class="flex flex-wrap gap-1.5 mb-2">
@@ -456,6 +466,8 @@ function openProductForm(id) {
   document.getElementById('fCost').value = p ? p.costCNY || '' : '';
   document.getElementById('fStock').value = p ? p.stock : 100;
   document.getElementById('fVariants').value = p ? (p.variants || []).join(', ') : '';
+  document.getElementById('fSupplier').value = p ? (p.supplier || '') : '';
+  document.getElementById('fSupplierLink').value = p ? (p.supplierLink || '') : '';
   document.getElementById('fSpecs').value = p ? (p.specs || []).map(s => `${s.label}|${s.value}`).join('\n') : '';
   document.getElementById('fPaymentLink').value = p ? p.paymentLink || '' : '';
   previewImages();
@@ -683,6 +695,8 @@ function saveProduct() {
     costCNY: parseFloat(document.getElementById('fCost').value) || null,
     stock: parseInt(document.getElementById('fStock').value) || 0,
     variants: variants.length ? variants : ['Standard'],
+    supplier: document.getElementById('fSupplier').value,
+    supplierLink: document.getElementById('fSupplierLink').value.trim(),
     description: document.getElementById('fDescription').value.trim(),
     specs,
     paymentLink: document.getElementById('fPaymentLink').value.trim(),
@@ -806,7 +820,11 @@ function openOrderDetail(id) {
       <div>
         <h4 class="text-sm font-semibold mb-2">商品</h4>
         <div class="text-sm text-slate-600 space-y-2 mb-4">
-          ${(o.items || []).map(i => `<div class="flex justify-between"><span>${i.name} ×${i.qty}</span><span>$${(i.price * i.qty).toFixed(2)}</span></div>`).join('')}
+          ${(o.items || []).map(i => {
+            const sp = getProducts().find(x => x.id === i.id);
+            const sup = sp && sp.supplier ? ` <span class="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">${sp.supplier}</span>` : '';
+            return `<div class="flex justify-between"><span>${i.name} ×${i.qty}${sup}</span><span>$${(i.price * i.qty).toFixed(2)}</span></div>`;
+          }).join('')}
           <div class="flex justify-between font-bold pt-2 border-t border-slate-100"><span>合计</span><span>$${(o.total || 0).toFixed(2)}</span></div>
         </div>
         <h4 class="text-sm font-semibold mb-2">物流</h4>
@@ -868,9 +886,14 @@ function saveOrderNote() {
 function copyPurchaseList() {
   const o = getOrders().find(x => x.id === currentOrderId);
   if (!o) return;
+  const products = getProducts();
   const text = [
     '【代发下单】',
-    ...(o.items || []).map(i => `商品:${i.name} ×${i.qty}`),
+    ...(o.items || []).map(i => {
+      const sp = products.find(x => x.id === i.id);
+      const sup = sp && sp.supplier ? `(平台:${sp.supplier}${sp.supplierLink ? ' ' + sp.supplierLink : ''})` : '';
+      return `商品:${i.name} ×${i.qty} ${sup}`;
+    }),
     '',
     '收件人:' + (o.customer?.name || ''),
     '电话:' + (o.customer?.phone || ''),
