@@ -202,9 +202,9 @@ function render() {
 
   box.innerHTML = `
   <div class="text-xs text-slate-400 mb-4"><a href="PawShop.html" class="hover:text-slate-700">${T.breadcrumb}</a> / <span class="text-slate-500">${safeHtml(p.name)}</span></div>
-  <div class="grid md:grid-cols-2 gap-8">
-    <div>${gallery}</div>
-    <div>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+    <div class="min-w-0">${gallery}</div>
+    <div class="min-w-0">
       <h1 class="text-2xl font-bold mb-2">${safeHtml(p.name)}</h1>
       ${ratingHtml}
       <div class="flex items-end gap-3 mb-1">
