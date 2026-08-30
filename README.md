@@ -14,8 +14,9 @@ until a server-side commerce backend and verified business operations are ready.
 - Customer inquiry collection: disabled
 - Public legacy admin and analytics: disabled
 
-The incomplete second catalog item is kept inactive until its English copy,
-images, per-SKU pricing and logistics data have been verified.
+The incomplete second catalog item is preserved in a private local operations
+backup outside the website directory until its English copy, images, per-SKU
+pricing and logistics data have been verified.
 
 ## Local development
 
@@ -30,10 +31,12 @@ Open `http://127.0.0.1:4173/PawShop.html`.
 
 ## Release status
 
-This branch is for a draft PR only. It does not merge into `main` or deploy
-the live GitHub Pages site. A storefront preview release and opening real
-commerce are separate approval gates. See [LAUNCH_READINESS.md](LAUNCH_READINESS.md)
-for the remaining decisions, risks and acceptance criteria.
+The owner authorized replacing the legacy live website with this prelaunch
+showcase on 2026-08-30. GitHub Pages publishes `main`. This approval does not
+enable orders, payments or customer-information collection. A showcase release
+and opening real commerce are separate gates. See
+[LAUNCH_READINESS.md](LAUNCH_READINESS.md) for the remaining decisions and
+[MIGRATION_STATUS.md](MIGRATION_STATUS.md) for data preservation boundaries.
 
 ## Safety baseline
 
