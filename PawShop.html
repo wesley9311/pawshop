@@ -3,12 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://i.ibb.co data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>PawShop - Pet Supplies for Cats &amp; Dogs</title>
-<meta name="description" content="Quality pet supplies for cats and dogs. Launching soon - reserve free, no payment now.">
+<meta name="description" content="PawShop prelaunch product preview. Payments and customer orders are not open yet.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<link rel="stylesheet" href="assets/tailwind.css">
+<link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
 
 <style>
   * { box-sizing: border-box; }
@@ -35,7 +37,7 @@
 <!-- ===== Top Bar ===== -->
 <div class="bg-slate-900 text-white text-xs py-2 px-4">
   <div class="max-w-6xl mx-auto flex items-center justify-between">
-    <span data-i18n="topbar_note">Free worldwide shipping · 30-day returns</span>
+    <span data-i18n="topbar_note">Prelaunch preview — payments and orders are not open yet</span>
     <div class="flex items-center gap-3">
       <select id="langSelect" onchange="setLang(this.value)" class="bg-transparent text-white text-xs border-none cursor-pointer">
         <option value="en">English</option>
@@ -53,19 +55,15 @@
         <a href="#" class="text-xl font-bold">PawShop</a>
         <div class="hidden md:flex items-center gap-6">
           <a href="#products" class="text-sm text-slate-600 hover:text-slate-900" data-i18n="nav_shop">Shop</a>
-          <a href="account.html" class="text-sm text-slate-600 hover:text-slate-900" data-i18n="nav_orders">My Orders</a>
         </div>
       </div>
       <div class="flex items-center gap-4">
         <div class="hidden sm:block">
           <input type="text" id="searchInput" placeholder="Search products..." data-i18n-ph="search_ph" class="w-48 lg:w-64 px-4 py-2 bg-slate-50 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300" oninput="handleSearch()">
         </div>
-        <button onclick="openSupport()" aria-label="Customer support" title="Customer service" class="hover:opacity-70">
+        <button onclick="openWaitlist()" aria-label="Launch information" title="Launch information" class="hover:opacity-70">
           <i class="fas fa-headset text-slate-700 text-lg"></i>
         </button>
-        <a href="account.html" aria-label="My orders" class="hover:opacity-70">
-          <i class="fas fa-circle-user text-slate-700 text-lg"></i>
-        </a>
         <button onclick="openCart()" class="relative" aria-label="Cart">
           <i class="fas fa-shopping-bag text-slate-700"></i>
           <span id="cartCount" class="absolute -top-2 -right-2 w-4 h-4 bg-slate-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">0</span>
@@ -80,7 +78,6 @@
     <div class="px-4 py-3 space-y-2">
       <input type="text" placeholder="Search products..." data-i18n-ph="search_ph" class="w-full px-4 py-2 bg-slate-50 rounded-lg text-sm" oninput="handleSearch()">
       <a href="#products" class="block py-2 text-sm" onclick="toggleMobileMenu()" data-i18n="nav_shop">Shop</a>
-      <a href="account.html" class="block py-2 text-sm font-medium" data-i18n="nav_orders">My Orders</a>
     </div>
   </div>
 </nav>
@@ -89,10 +86,10 @@
 <section class="bg-slate-50">
   <div class="max-w-6xl mx-auto px-4 sm:px-6 py-16 lg:py-24 text-center">
     <h1 class="text-4xl lg:text-5xl font-bold tracking-tight mb-4" data-i18n="hero_title">Happier pets, easier days.</h1>
-    <p class="text-lg text-slate-500 mb-8 max-w-xl mx-auto" data-i18n="hero_sub">Comfortable cat beds and scratchers your cat will actually use. Quality-checked, shipped worldwide, free returns.</p>
+    <p class="text-lg text-slate-500 mb-8 max-w-xl mx-auto" data-i18n="hero_sub">Product preview only — payments and orders are not open yet.</p>
     <a href="#products" class="inline-block px-6 py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors" data-i18n="hero_cta">Shop bestsellers</a>
     <div class="mt-4">
-      <button onclick="openWaitlist()" class="text-sm text-slate-500 hover:text-slate-900 underline underline-offset-4" data-i18n="hero_reserve">Or reserve yours free - launching soon, no payment needed</button>
+      <button onclick="openWaitlist()" class="text-sm text-slate-500 hover:text-slate-900 underline underline-offset-4" data-i18n="hero_reserve">View launch status</button>
     </div>
   </div>
 </section>
@@ -130,15 +127,15 @@
     <div class="grid md:grid-cols-2 gap-8">
       <div>
         <h3 class="font-bold mb-4">PawShop</h3>
-        <p class="text-sm text-slate-400" data-i18n="footer_tag">Smart pet supplies, delivered worldwide.</p>
+        <p class="text-sm text-slate-400" data-i18n="footer_tag">Pet supplies for cats and dogs, carefully selected.</p>
       </div>
       <div>
         <h4 class="font-semibold mb-3 text-sm" data-i18n="footer_support">Support</h4>
         <ul class="space-y-2 text-sm text-slate-400">
-          <li><a href="#" class="hover:text-white" data-i18n="footer_shipping">Shipping policy</a></li>
-          <li><a href="#" class="hover:text-white" data-i18n="footer_returns">Returns &amp; refunds</a></li>
-          <li><a href="account.html" class="hover:text-white" data-i18n="footer_myorders">My orders</a></li>
-          <li><a href="javascript:void(0)" onclick="openSupport()" class="hover:text-white" data-i18n="footer_service">Customer service</a></li>
+          <li><a href="shipping.html" class="hover:text-white" data-i18n="footer_shipping">Shipping policy</a></li>
+          <li><a href="returns.html" class="hover:text-white" data-i18n="footer_returns">Returns &amp; refunds</a></li>
+          <li><a href="privacy.html" class="hover:text-white">Privacy</a></li>
+          <li><a href="terms.html" class="hover:text-white">Terms</a></li>
         </ul>
       </div>
     </div>
@@ -148,8 +145,7 @@
   </div>
 </footer>
 
-<script src="config.js"></script>
-<script src="support.js"></script>
+<script src="safe.js"></script>
 
 <!-- ===== Cart Drawer ===== -->
 <div id="cartDrawer" class="drawer fixed top-0 right-0 bottom-0 w-full max-w-sm bg-white z-50 flex flex-col">
@@ -165,84 +161,7 @@
       <span class="text-slate-500" data-i18n="subtotal">Subtotal</span>
       <span id="cartSubtotal" class="font-semibold">$0.00</span>
     </div>
-    <button onclick="checkout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="checkout">Checkout</button>
-  </div>
-</div>
-
-<!-- ===== Checkout Modal ===== -->
-<div id="checkoutModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-  <div class="bg-white rounded-lg max-w-xl w-full max-h-[90vh] overflow-y-auto">
-    <div class="p-6">
-      <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-bold" data-i18n="checkout_title">Checkout</h2>
-        <button onclick="closeCheckout()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
-          <i class="fas fa-times"></i>
-        </button>
-      </div>
-
-      <div id="checkoutSummary" class="bg-slate-50 rounded p-4 mb-6 text-sm"></div>
-
-      <!-- Step 1: Address -->
-      <div id="checkoutStep1" class="checkout-step">
-        <div class="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label class="block text-sm mb-1" data-i18n="full_name">Full name</label>
-            <input type="text" id="addrName" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
-          </div>
-          <div>
-            <label class="block text-sm mb-1" data-i18n="phone">Phone</label>
-            <input type="tel" id="addrPhone" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
-          </div>
-        </div>
-        <div class="mb-4">
-          <label class="block text-sm mb-1" data-i18n="email">Email</label>
-          <input type="email" id="addrEmail" placeholder="you@example.com" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
-        </div>
-        <div class="mb-4">
-          <label class="block text-sm mb-1" data-i18n="country">Country</label>
-          <select id="addrCountry" class="w-full px-3 py-2 border border-slate-200 rounded text-sm">
-            <option value="US">United States</option>
-            <option value="GB">United Kingdom</option>
-            <option value="DE">Germany</option>
-            <option value="FR">France</option>
-            <option value="AU">Australia</option>
-            <option value="CA">Canada</option>
-          </select>
-        </div>
-        <div class="mb-6">
-          <label class="block text-sm mb-1" data-i18n="address">Address</label>
-          <textarea id="addrDetail" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded text-sm"></textarea>
-        </div>
-        <button onclick="nextStep()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="continue_payment">Continue to payment</button>
-      </div>
-
-      <!-- Step 2: Payment -->
-      <div id="checkoutStep2" class="checkout-step hidden">
-        <div class="space-y-3 mb-6">
-          <label class="flex items-center gap-3 p-3 border-2 border-slate-900 rounded cursor-pointer">
-            <input type="radio" name="payment" value="stripe" checked class="accent-slate-900">
-            <i class="fas fa-credit-card text-xl"></i>
-            <div>
-              <div class="text-sm font-medium" data-i18n="payment_card">Credit card</div>
-              <div class="text-xs text-slate-400" data-i18n="payment_card_sub">Visa / Mastercard / Amex</div>
-            </div>
-          </label>
-          <label class="flex items-center gap-3 p-3 border-2 border-slate-200 rounded cursor-pointer">
-            <input type="radio" name="payment" value="paypal" class="accent-slate-900">
-            <i class="fab fa-paypal text-xl text-blue-500"></i>
-            <div>
-              <div class="text-sm font-medium" data-i18n="payment_paypal">PayPal</div>
-              <div class="text-xs text-slate-400" data-i18n="payment_paypal_sub">PayPal balance or card</div>
-            </div>
-          </label>
-        </div>
-        <div class="flex gap-2">
-          <button onclick="prevStep()" class="flex-1 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50" data-i18n="back">Back</button>
-          <button onclick="placeOrder()" id="placeOrderBtn" class="flex-1 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="place_order">Place order</button>
-        </div>
-      </div>
-
-    </div>
+    <button onclick="checkout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="checkout">View launch status</button>
   </div>
 </div>
 
@@ -252,26 +171,10 @@
     <div class="w-12 h-12 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4">
       <i class="fas fa-bell text-white"></i>
     </div>
-    <h2 class="text-lg font-bold mb-1 text-center" data-i18n="waitlist_title">Reserve yours</h2>
-    <p class="text-xs text-slate-500 text-center mb-6" data-i18n="waitlist_body">Free, no payment now. We will email you the moment we launch, with an early-bird discount.</p>
-    <input type="email" id="waitlistEmail" placeholder="you@example.com" data-i18n-ph="waitlist_ph" class="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm mb-3">
-    <button onclick="submitWaitlist()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2" data-i18n="waitlist_cta">Notify me at launch</button>
+    <h2 class="text-lg font-bold mb-1 text-center" data-i18n="waitlist_title">Launch status</h2>
+    <p class="text-xs text-slate-500 text-center mb-6" data-i18n="waitlist_body">Sales and the contact channel are still being prepared. No information is submitted yet.</p>
+    <button onclick="submitWaitlist()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2" data-i18n="waitlist_cta">Check launch status</button>
     <button onclick="document.getElementById('waitlistModal').classList.remove('open')" class="w-full py-2 text-xs text-slate-400 hover:text-slate-600" data-i18n="waitlist_no">No thanks</button>
-  </div>
-</div>
-
-<!-- ===== Order Success Modal ===== -->
-<div id="orderSuccessModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-  <div class="bg-white rounded-lg max-w-sm w-full p-8 text-center">
-    <div class="w-14 h-14 mx-auto bg-green-50 rounded-full flex items-center justify-center mb-4">
-      <i class="fas fa-check text-green-500 text-2xl"></i>
-    </div>
-    <h2 class="text-xl font-bold mb-2" data-i18n="success_title">Order placed!</h2>
-    <p class="text-sm text-slate-500 mb-1" data-i18n="success_number">Your order number:</p>
-    <p id="successOrderId" class="font-mono font-bold text-lg mb-4"></p>
-    <p class="text-sm text-slate-500 mb-6" data-i18n="success_body">We have received your order. Check its status anytime under My Orders.</p>
-    <a href="account.html" class="block w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700 mb-2" data-i18n="success_view">View my orders</a>
-    <button onclick="closeOrderSuccess()" class="w-full py-3 border border-slate-200 text-sm rounded hover:bg-slate-50" data-i18n="success_continue">Continue shopping</button>
   </div>
 </div>
 
@@ -283,26 +186,23 @@
 
 <script>
 // ============================================================
-// DATA LAYER - 商品/订单数据来自运营后台 (admin.html)
-// 读取顺序: localStorage(后台保存的数据) → 内置默认商品
-// 后台改商品后刷新本页生效;两个页面同时开着则自动同步。
-// 真实收款: 每个商品的 paymentLink 字段(在后台填写 Stripe
-// Payment Link),配置后"立即购买"跳转真实 Stripe 收银台。
+// PRELAUNCH DATA LAYER
+// catalog.json is the public catalog source. Payments and orders are disabled
+// until a server-side commerce backend is connected.
 // ============================================================
-const LS_PRODUCTS = 'pawshop_products';
-const LS_ORDERS = 'pawshop_orders';
 const LS_CART = 'pawshop_cart';
+const { html: safeHtml, url: safeUrl, icon: safeIcon, token: safeToken, id: safeId } = PawSafe;
 
 // ===== i18n:界面双语(商品名/描述暂为英文,后台加中文字段是后续迭代) =====
 const I18N = {
   en: {
-    topbar_note: 'New store launching - reserve free, no payment now',
-    nav_shop: 'Shop', nav_orders: 'My Orders',
+    topbar_note: 'Prelaunch preview — payments and orders are not open yet',
+    nav_shop: 'Shop', nav_orders: 'Launch status',
     search_ph: 'Search products...',
     hero_title: 'Happier pets, easier days.',
-    hero_sub: 'Carefully selected supplies for cats and dogs. Launching soon - reserve free, no payment now.',
+    hero_sub: 'Carefully selected supplies for cats and dogs. Product preview only — payments and orders are not open yet.',
     hero_cta: 'Shop bestsellers',
-    hero_reserve: 'Or reserve yours free - launching soon, no payment needed',
+    hero_reserve: 'View launch status',
     cat_all: 'All',
     bestsellers: 'Bestsellers',
     sort_popular: 'Popular', sort_price_low: 'Price: low to high', sort_price_high: 'Price: high to low',
@@ -313,33 +213,33 @@ const I18N = {
     reserve_line: 'Not ready to pay? Reserve yours free - we will email you at launch',
     footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
     footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds', footer_service: 'Customer service',
-    footer_myorders: 'My orders',
-    cart: 'Cart', subtotal: 'Subtotal', checkout: 'Checkout', cart_empty: 'Your cart is empty',
+    footer_myorders: 'Launch status',
+    cart: 'Saved products', subtotal: 'Estimated product total', checkout: 'View launch status', cart_empty: 'Your saved list is empty',
     checkout_title: 'Checkout', items: 'Items', shipping: 'Shipping', shipping_tbd: 'Calculated when we launch', total: 'Total',
     full_name: 'Full name', phone: 'Phone', email: 'Email', country: 'Country', address: 'Address',
     continue_payment: 'Continue to payment',
-    payment_card: 'Credit card', payment_card_sub: 'Visa / Mastercard / Amex',
-    payment_paypal: 'PayPal', payment_paypal_sub: 'PayPal balance or card',
+    payment_card: 'Payments unavailable', payment_card_sub: 'Checkout will open after launch',
+    payment_paypal: 'Payments unavailable', payment_paypal_sub: 'Checkout will open after launch',
     back: 'Back', place_order: 'Place order',
 
     toast_addr: 'Please complete the address form', toast_email: 'Please enter a valid email',
-    toast_added: 'Added to cart', toast_list: "You're on the list!",
-    success_title: 'Order placed!', success_number: 'Your order number:',
-    success_body: 'We have received your order. Check its status anytime under My Orders.',
+    toast_added: 'Saved', toast_list: 'No information was submitted',
+    success_title: 'Store preview', success_number: 'Orders are not open yet.',
+    success_body: 'No payment or customer order was created.',
     success_view: 'View my orders', success_continue: 'Continue shopping',
-    waitlist_title: 'Reserve yours',
-    waitlist_body: 'Free, no payment now. We will email you the moment we launch, with an early-bird discount.',
-    waitlist_ph: 'you@example.com', waitlist_cta: 'Notify me at launch', waitlist_no: 'No thanks',
+    waitlist_title: 'Launch status',
+    waitlist_body: 'Sales and the contact channel are still being prepared. No information is submitted yet.',
+    waitlist_ph: 'Email collection is not active', waitlist_cta: 'Check launch status', waitlist_no: 'Close',
     nav_continue: 'Continue shopping',
   },
   zh: {
-    topbar_note: '新店上线中——免费预留，无需付款',
-    nav_shop: '商品', nav_orders: '我的订单',
+    topbar_note: '预发布展示——暂未开放付款和订单',
+    nav_shop: '商品', nav_orders: '上线状态',
     search_ph: '搜索商品...',
     hero_title: '让毛孩子更幸福，让生活更轻松',
-    hero_sub: '为猫狗精选的好物，舒适耐用。新店上线中——免费预留，无需付款。',
+    hero_sub: '为猫狗精选的好物，舒适耐用。目前仅供商品预览，暂未开放付款和订单。',
     hero_cta: '浏览热卖',
-    hero_reserve: '或免费预留——即将上线，无需付款',
+    hero_reserve: '查看上线状态',
     cat_all: '全部',
     bestsellers: '热卖榜单',
     sort_popular: '人气', sort_price_low: '价格从低到高', sort_price_high: '价格从高到低',
@@ -350,23 +250,23 @@ const I18N = {
     reserve_line: '暂不付款？免费预留，上线时邮件通知你',
     footer_tag: '精选犬猫好物。',
     footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款', footer_service: '联系客服',
-    footer_myorders: '我的订单',
-    cart: '购物车', subtotal: '小计', checkout: '去结算', cart_empty: '购物车是空的',
+    footer_myorders: '上线状态',
+    cart: '已保存商品', subtotal: '商品估算合计', checkout: '上线信息', cart_empty: '保存列表为空',
     checkout_title: '结算', items: '商品', shipping: '运费', shipping_tbd: '上线时按实际计算', total: '合计',
     full_name: '姓名', phone: '电话', email: '邮箱', country: '国家', address: '地址',
     continue_payment: '继续去支付',
-    payment_card: '信用卡', payment_card_sub: '维萨 / 万事达 / 美国运通',
-    payment_paypal: 'PayPal', payment_paypal_sub: 'PayPal 余额或银行卡',
+    payment_card: '暂未开放付款', payment_card_sub: '正式上线后启用',
+    payment_paypal: '暂未开放付款', payment_paypal_sub: '正式上线后启用',
     back: '上一步', place_order: '提交订单',
 
     toast_addr: '请填写完整收货信息', toast_email: '请输入有效的邮箱',
-    toast_added: '已加入购物车', toast_list: '预留成功！',
-    success_title: '下单成功！', success_number: '你的订单号：',
-    success_body: '订单已收到。随时在「我的订单」查看进度。',
+    toast_added: '已保存', toast_list: '未提交任何信息',
+    success_title: '店铺预览', success_number: '暂未开放订单',
+    success_body: '没有创建付款或顾客订单。',
     success_view: '查看我的订单', success_continue: '继续购物',
-    waitlist_title: '免费预留',
-    waitlist_body: '免费，现在无需付款。上线第一时间邮件通知你，并附早鸟优惠。',
-    waitlist_ph: '你的邮箱', waitlist_cta: '上线时通知我', waitlist_no: '不用了',
+    waitlist_title: '上线状态',
+    waitlist_body: '销售和联系通道仍在准备，目前不会提交任何信息。',
+    waitlist_ph: '暂未启用邮箱收集', waitlist_cta: '查看上线状态', waitlist_no: '关闭',
     nav_continue: '继续购物',
   },
 };
@@ -392,56 +292,16 @@ let currentCategory = 'all';
 let currentSort = 'popular';
 let searchQuery = '';
 let displayedProducts = 8;
-let checkoutStep = 1;
 
 const fmt = u => '$' + u.toFixed(2);
 
 // ===== Product Data (内置默认;后台 admin.html 保存的数据优先) =====
-const DEFAULT_PRODUCTS = [
-  {
-    id: 1, name: "Elevated Hemp Cat Bed - Standard", category: "beds", price: 19.99, originalPrice: 29.99, stock: 120, icon: "fa-bed",
-    variants: ["Natural"],
-    description: "Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.",
-    specs: [{label:"Size",value:"56.5 × 43 × 25 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}],
-  },
-  {
-    id: 2, name: "Elevated Hemp Cat Bed - Large", category: "beds", price: 24.99, originalPrice: 34.99, stock: 80, icon: "fa-bed",
-    variants: ["Natural"],
-    description: "Roomier version for large cats or two sharing. Same breathable hemp mat, 10cm elevation.",
-    specs: [{label:"Size",value:"70 × 45.5 × 31.5 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}],
-  },
-  {
-    id: 3, name: "Corrugated Sofa Lounger", category: "scratchers", price: 29.99, originalPrice: 44.99, stock: 150, icon: "fa-couch",
-    variants: ["Natural / Grey"],
-    description: "Dual-color corrugated cardboard sofa to scratch, lounge and nap on. Raised 5cm to protect floors.",
-    specs: [{label:"Size",value:"55.5 × 40.5 × 23.5 cm"},{label:"Material",value:"Corrugated cardboard"},{label:"Floor gap",value:"5cm"}],
-  },
-  {
-    id: 4, name: "Tall Cat Scratcher Post", category: "scratchers", price: 27.99, originalPrice: 39.99, stock: 90, icon: "fa-tree",
-    variants: ["Round"],
-    description: "Extra-tall vertical scratcher for full-body stretching. Stable dense-board base, replaceable corrugated core.",
-    specs: [{label:"Size",value:"28 × 28 × 60 cm"},{label:"Material",value:"Corrugated + MDF"},{label:"Shape",value:"Round column"}],
-  },
-];
+const DEFAULT_PRODUCTS = []; // Fail closed until catalog.json is loaded.
 
-function loadProducts() {
-  try {
-    const raw = localStorage.getItem(LS_PRODUCTS);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed) && parsed.length) return parsed;
-  } catch (e) {}
-  return DEFAULT_PRODUCTS;
-}
+function loadProducts() { return DEFAULT_PRODUCTS; }
 
 let products = loadProducts();
-
-function saveOrder(order) {
-  try {
-    const orders = JSON.parse(localStorage.getItem(LS_ORDERS) || '[]');
-    orders.push(order);
-    localStorage.setItem(LS_ORDERS, JSON.stringify(orders));
-  } catch (e) { console.warn('订单未能写入本地存储', e); }
-}
+let catalogReady = false;
 
 // ===== Cart persistence:只存 id+qty,恢复时回填最新商品数据 =====
 function saveCart() {
@@ -454,7 +314,7 @@ function loadCart() {
     cart = saved
       .map(i => {
         const p = products.find(x => x.id === i.id);
-        return p && p.active !== false ? { ...p, qty: Math.max(1, i.qty) } : null;
+        return p && p.active !== false ? { ...p, qty: PawSafe.quantity(i.qty) } : null;
       })
       .filter(Boolean);
   } catch (e) { cart = []; }
@@ -468,30 +328,30 @@ const CATEGORY_LABELS = {
 };
 
 function renderCategoryBar() {
-  const cats = [...new Set(products.map(p => p.category))];
+  const cats = [...new Set(products.filter(p => p.active !== false).map(p => safeToken(p.category)).filter(Boolean))];
   const label = c => {
     const l = CATEGORY_LABELS[c];
-    if (!l) return c;
+    if (!l) return safeHtml(c);
     return typeof l === 'string' ? l : (l[lang] || l.en);
   };
   document.getElementById('categoryBar').innerHTML =
     `<button onclick="filterProducts('all', event)" class="category-btn active px-4 py-1.5 bg-slate-900 text-white rounded-full text-sm whitespace-nowrap">${t('cat_all')}</button>` +
     cats.map(c =>
-      `<button onclick="filterProducts('${c}', event)" class="category-btn px-4 py-1.5 text-slate-600 rounded-full text-sm whitespace-nowrap hover:bg-slate-100">${label(c)}</button>`
+      `<button onclick="filterProducts('${c}', event)" class="category-btn px-4 py-1.5 text-slate-600 rounded-full text-sm whitespace-nowrap hover:bg-slate-100">${safeHtml(label(c))}</button>`
     ).join('');
 }
 
 function productImages(p) {
-  if (Array.isArray(p.images) && p.images.length) return p.images.filter(Boolean);
-  if (p.imageUrl) return [p.imageUrl];
+  if (Array.isArray(p.images) && p.images.length) return p.images.map(safeUrl).filter(Boolean);
+  if (p.imageUrl) return [safeUrl(p.imageUrl)].filter(Boolean);
   return [];
 }
 
 function productVisual(p, iconClass, imgClass) {
   const imgs = productImages(p);
   return imgs.length
-    ? `<img src="${imgs[0]}" alt="${p.name}" class="${imgClass}" loading="lazy">`
-    : `<i class="fas ${p.icon || 'fa-box'} ${iconClass}"></i>`;
+    ? `<img src="${imgs[0]}" alt="${safeHtml(p.name)}" class="${imgClass}" loading="lazy">`
+    : `<i class="fas ${safeIcon(p.icon)} ${iconClass}"></i>`;
 }
 function renderProducts() {
   const grid = document.getElementById('productGrid');
@@ -516,19 +376,19 @@ function renderProducts() {
   }
 
   grid.innerHTML = displayed.map(p => `
-    <div class="bg-white border border-slate-100 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow fade-in" onclick="location.href='product.html?id=${p.id}'">
+    <div class="bg-white border border-slate-100 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow fade-in" onclick="location.href='product.html?id=${safeId(p.id)}'">
       <div class="relative aspect-square bg-slate-50 flex items-center justify-center overflow-hidden">
         ${productVisual(p, 'text-5xl text-slate-300', 'absolute inset-0 w-full h-full object-cover')}
         ${p.originalPrice > p.price ? `<span class="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">-${Math.round((1 - p.price / p.originalPrice) * 100)}%</span>` : ''}
       </div>
       <div class="p-3">
-        <h3 class="text-sm font-medium mb-2 line-clamp-2">${p.name}</h3>
+        <h3 class="text-sm font-medium mb-2 line-clamp-2">${safeHtml(p.name)}</h3>
         <div class="flex items-center justify-between">
           <div>
             <span class="font-bold">${fmt(p.price)}</span>
             <span class="text-xs text-slate-400 line-through ml-1">${fmt(p.originalPrice)}</span>
           </div>
-          <button onclick="event.stopPropagation(); addToCart(${p.id})" class="w-7 h-7 bg-slate-900 text-white rounded flex items-center justify-center hover:bg-slate-700" aria-label="Add to cart">
+          <button onclick="event.stopPropagation(); addToCart(${safeId(p.id)})" class="w-7 h-7 bg-slate-900 text-white rounded flex items-center justify-center hover:bg-slate-700" aria-label="Add to cart">
             <i class="fas fa-plus text-xs"></i>
           </button>
         </div>
@@ -622,7 +482,7 @@ function updateCart() {
           ${productVisual(item, 'text-2xl text-slate-300', 'w-full h-full object-cover')}
         </div>
         <div class="flex-1">
-          <h4 class="text-sm font-medium mb-1">${item.name}</h4>
+          <h4 class="text-sm font-medium mb-1">${safeHtml(item.name)}</h4>
           <div class="font-bold text-sm mb-2">${fmt(item.price)}</div>
           <div class="flex items-center justify-between">
             <div class="flex items-center border border-slate-200 rounded">
@@ -638,181 +498,31 @@ function updateCart() {
       </div>
     `).join('');
   }
-  saveCart();
+  if (catalogReady) saveCart();
 }
 
 function openCart() { document.getElementById('cartDrawer').classList.add('open'); }
 function closeCart() { document.getElementById('cartDrawer').classList.remove('open'); }
 
-// ===== Checkout =====
+// ===== Prelaunch sales gate =====
 function checkout() {
   if (cart.length === 0) { showToast(t('cart_empty')); return; }
-  checkoutStep = 1;
-  updateCheckoutStep();
-
-  const count = cart.reduce((s, i) => s + i.qty, 0);
-  const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
-  document.getElementById('checkoutSummary').innerHTML = `
-    <div class="flex justify-between mb-1"><span class="text-slate-500">${t('items')}</span><span>${count}</span></div>
-    <div class="flex justify-between mb-1"><span class="text-slate-500">${t('shipping')}</span><span class="text-slate-400 text-xs">${t('shipping_tbd')}</span></div>
-    <div class="flex justify-between font-bold pt-2 border-t border-slate-200 mt-2"><span>${t('total')}</span><span>${fmt(total)}</span></div>
-  `;
-
-  document.getElementById('checkoutModal').classList.add('open');
   closeCart();
-}
-
-function closeCheckout() { document.getElementById('checkoutModal').classList.remove('open'); }
-
-function updateCheckoutStep() {
-  document.querySelectorAll('.checkout-step').forEach(s => s.classList.add('hidden'));
-  document.getElementById(`checkoutStep${checkoutStep}`).classList.remove('hidden');
-}
-
-function nextStep() {
-  const name = document.getElementById('addrName').value.trim();
-  const phone = document.getElementById('addrPhone').value.trim();
-  const email = document.getElementById('addrEmail').value.trim();
-  const addr = document.getElementById('addrDetail').value.trim();
-  if (!email.includes('@')) { showToast(t('toast_email')); return; }
-  if (!name || !phone || !addr) { showToast(t('toast_addr')); return; }
-  checkoutStep = 2;
-  updateCheckoutStep();
-}
-
-function prevStep() { checkoutStep = 1; updateCheckoutStep(); }
-
-function buildPayLink(link, total) {
-  if (!link) return null;
-  if (link.includes('{amount}')) return link.replace('{amount}', total.toFixed(2));
-  if (/^https:\/\/www\.paypal\.me\/[^\/]+\/?$/.test(link)) return link.replace(/\/$/, '') + '/' + total.toFixed(2) + 'USD';
-  return link;
-}
-
-function placeOrder() {
-  // Real-payment path: single-item cart with a configured link
-  // (Stripe Payment Link / PayPal.me with auto amount / {amount} placeholder).
-  if (cart.length === 1 && cart[0].paymentLink) {
-    const link = buildPayLink(cart[0].paymentLink, cart[0].price * cart[0].qty);
-    if (link) { window.location.href = link; return; }
-  }
-
-  const order = {
-    id: 'PO' + Date.now(),
-    createdAt: new Date().toISOString(),
-    items: cart.map(i => ({ id: i.id, name: i.name, qty: i.qty, price: i.price })),
-    customer: {
-      name: document.getElementById('addrName').value,
-      email: document.getElementById('addrEmail').value,
-      phone: document.getElementById('addrPhone').value,
-      country: document.getElementById('addrCountry').value,
-      address: document.getElementById('addrDetail').value,
-    },
-    payment: document.querySelector('input[name="payment"]:checked').value,
-    total: +cart.reduce((s, i) => s + i.price * i.qty, 0).toFixed(2),
-    currency: 'USD',
-    status: 'new',
-    history: [{ status: 'new', at: new Date().toISOString() }],
-  };
-  saveOrder(order);
-  decrementStock(cart);
-  localStorage.setItem('pawshop_customer_email', order.customer.email);
-  sendOrderEmail(order);
-  console.log('ORDER SAVED:', order);
-  closeCheckout();
-  cart = [];
-  updateCart();
-  showOrderSuccess(order.id);
-}
-
-function decrementStock(items) {
-  try {
-    const stored = JSON.parse(localStorage.getItem(LS_PRODUCTS) || 'null');
-    if (!stored) return;
-    items.forEach(i => {
-      const p = stored.find(x => x.id === i.id);
-      if (p) p.stock = Math.max(0, (p.stock || 0) - i.qty);
-    });
-    localStorage.setItem(LS_PRODUCTS, JSON.stringify(stored));
-  } catch (e) {}
-}
-
-// 下单确认邮件:后台"数据备份"页配置 EmailJS 后自动发送;未配置则跳过
-function sendOrderEmail(order) {
-  try {
-    const cfg = JSON.parse(localStorage.getItem('pawshop_email_config') || 'null');
-    if (!cfg || !cfg.publicKey || !cfg.serviceId || !cfg.templateId || typeof emailjs === 'undefined') return;
-    emailjs.init(cfg.publicKey);
-    emailjs.send(cfg.serviceId, cfg.templateId, {
-      to_email: order.customer.email,
-      order_id: order.id,
-      items: order.items.map(i => `${i.name} x${i.qty}`).join(', '),
-      total: '$' + order.total.toFixed(2),
-      status: 'received',
-    });
-  } catch (e) {}
-}
-
-function showOrderSuccess(orderId) {
-  document.getElementById('successOrderId').textContent = orderId;
-  document.getElementById('orderSuccessModal').classList.add('open');
+  openWaitlist();
 }
 
 // ===== Waitlist(免费预留,零资金验证需求) =====
-const LS_WAITLIST = 'pawshop_waitlist';
 let waitlistProductId = null;
 
 function openWaitlist(productId) {
   waitlistProductId = productId || null;
-  const saved = localStorage.getItem('pawshop_customer_email');
-  if (saved) document.getElementById('waitlistEmail').value = saved;
   document.getElementById('waitlistModal').classList.add('open');
 }
 
 function submitWaitlist() {
-  const email = document.getElementById('waitlistEmail').value.trim();
-  if (!email.includes('@')) { showToast(t('toast_email')); return; }
-
-  const p = waitlistProductId ? products.find(x => x.id === waitlistProductId) : null;
-  const productName = p ? p.name : '(site-wide)';
-
-  // 通知站长·通道一:邮箱(FormSubmit,海外网络通畅)
-  if (typeof WAITLIST_NOTIFY_EMAIL !== 'undefined' && WAITLIST_NOTIFY_EMAIL) {
-    fetch('https://formsubmit.co/ajax/' + WAITLIST_NOTIFY_EMAIL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        _subject: 'New reservation - PawShop',
-        _template: 'table',
-        Customer: email,
-        Product: productName,
-        Time: new Date().toLocaleString(),
-      }),
-    }).catch(() => {});
-  }
-
-  // 通知站长·通道二:Server酱微信推送(大陆网络通畅)
-  if (typeof SERVERCHAN_SEND_KEY !== 'undefined' && SERVERCHAN_SEND_KEY) {
-    fetch('https://sctapi.ftqq.com/' + SERVERCHAN_SEND_KEY + '.send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'title=' + encodeURIComponent('PawShop 新预留') +
-        '&desp=' + encodeURIComponent(`顾客邮箱: ${email}\n\n商品: ${productName}\n\n时间: ${new Date().toLocaleString()}`),
-    }).catch(() => {});
-  }
-
-  try {
-    const list = JSON.parse(localStorage.getItem(LS_WAITLIST) || '[]');
-    if (!list.some(w => w.email === email && w.productId === waitlistProductId)) {
-      list.push({ email, productId: waitlistProductId, at: new Date().toISOString() });
-      localStorage.setItem(LS_WAITLIST, JSON.stringify(list));
-    }
-  } catch (e) {}
   document.getElementById('waitlistModal').classList.remove('open');
-  showToast(t('toast_list'));
+  showToast(lang === 'zh' ? '联系通道正在准备，未提交任何信息' : 'Contact channel coming soon — no information was submitted');
 }
-
-function closeOrderSuccess() { document.getElementById('orderSuccessModal').classList.remove('open'); }
 
 // ===== Utility =====
 function showToast(message) {
@@ -825,7 +535,7 @@ function showToast(message) {
 function toggleMobileMenu() { document.getElementById('mobileMenu').classList.toggle('hidden'); }
 
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') { closeCart(); closeCheckout(); }
+  if (e.key === 'Escape') { closeCart(); document.getElementById('waitlistModal').classList.remove('open'); }
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault();
     document.getElementById('searchInput')?.focus();
@@ -834,28 +544,18 @@ document.addEventListener('keydown', function(e) {
 
 document.querySelectorAll('a[href^="#"]').forEach(anchor => {
   anchor.addEventListener('click', function(e) {
-    const target = document.querySelector(this.getAttribute('href'));
+    const href = this.getAttribute('href');
+    const target = href === '#' ? null : document.querySelector(href);
     if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth' }); }
   });
 });
 
-// ===== Sync with admin (live when both pages are open in tabs) =====
-window.addEventListener('storage', e => {
-  if (e.key === LS_PRODUCTS) {
-    products = loadProducts();
-    currentCategory = 'all';
-    displayedProducts = 8;
-    loadCart();
-    renderCategoryBar();
-    renderProducts();
-    updateCart();
-  }
-});
-
 // ===== 共享商品目录:全设备一致的真相源(catalog.json) =====
 fetch('catalog.json?v=' + Date.now()).then(r => r.ok ? r.json() : null).then(j => {
-  if (Array.isArray(j) && j.length && JSON.stringify(j) !== JSON.stringify(products)) {
-    products = j;
+  if (!Array.isArray(j)) throw new Error('Catalog unavailable');
+  {
+    products = PawSafe.catalog(j);
+    catalogReady = true;
     currentCategory = 'all';
     displayedProducts = 8;
     loadCart();
@@ -863,10 +563,9 @@ fetch('catalog.json?v=' + Date.now()).then(r => r.ok ? r.json() : null).then(j =
     renderProducts();
     updateCart();
   }
-}).catch(() => {});
-
-// ===== 从详情页跳转:直接开结算 =====
-if (location.hash === '#checkout') setTimeout(() => checkout(), 300);
+}).catch(() => {
+  document.getElementById('productGrid').innerHTML = `<p class="col-span-full text-center py-12 text-slate-500">${lang === 'zh' ? '商品目录暂时无法加载，请稍后刷新。' : 'The catalog is temporarily unavailable. Please refresh later.'}</p>`;
+});
 
 // ===== Init =====
 document.getElementById('langSelect').value = lang;

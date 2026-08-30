@@ -1,0 +1,22 @@
+{
+  "name": "pawshop-prelaunch",
+  "private": true,
+  "version": "0.1.0",
+  "description": "PawShop prelaunch storefront safety baseline",
+  "scripts": {
+    "serve": "http-server . -a 127.0.0.1 -p 4173 -c-1 -d false",
+    "build:css": "tailwindcss -i ./tailwind.input.css -o ./assets/tailwind.css --minify",
+    "build:icons": "node scripts/build-icons.mjs",
+    "build": "npm run build:css && npm run build:icons",
+    "check:security": "node scripts/check-security.mjs",
+    "check:html": "html-validate PawShop.html product.html account.html admin.html dashboard.html shipping.html returns.html privacy.html terms.html",
+    "test": "node --test tests/*.test.mjs",
+    "check": "npm run check:security && npm run check:html && npm test"
+  },
+  "devDependencies": {
+    "@fortawesome/fontawesome-free": "6.7.2",
+    "html-validate": "10.8.0",
+    "http-server": "14.1.1",
+    "tailwindcss": "3.4.17"
+  }
+}
