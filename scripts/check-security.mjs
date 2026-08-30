@@ -30,3 +30,20 @@ if (failures.length) {
 }
 
 console.log('Security regression check passed.');
+
+const catalog = JSON.parse(await readFile(new URL('../catalog.json', import.meta.url), 'utf8'));
+const privateCatalogFields = ['costCNY', 'supplier', 'supplierLink', 'paymentLink'];
+for (const product of catalog) {
+  if (product.active === false) failures.push(`catalog.json: inactive product ${product.id} is publicly downloadable`);
+  for (const field of privateCatalogFields) {
+    if (Object.hasOwn(product, field)) failures.push(`catalog.json: private field ${field}`);
+  }
+}
+
+if (failures.length) {
+  console.error('Public catalog boundary check failed:');
+  for (const failure of failures) console.error(`- ${failure}`);
+  process.exit(1);
+}
+
+console.log('Public catalog boundary check passed.');

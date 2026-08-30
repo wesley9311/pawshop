@@ -37,5 +37,5 @@ Playwright CLI with an isolated browser session against loopback preview:
 
 - New admin, server-side commerce, real authentication and payment/refund/webhook flows are not implemented in this branch.
 - Policy notices are not legal clearance; business, logistics, return route and payment-provider eligibility remain unresolved.
-- Supplier cost/link removal from public catalog, history exposure review, branch protection, service credentials and full accessibility review remain open.
+- Supplier cost/link removal from the current public catalog is checked; the local backup is outside the website directory with owner-only permissions. Its migration to the authenticated admin, history exposure review, branch protection, service credentials and full accessibility review remain open.
 - No production deployment or main-branch merge is authorized by this draft PR.

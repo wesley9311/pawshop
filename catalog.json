@@ -18,7 +18,6 @@
     "imageUrl": "",
     "icon": "Lounger",
     "originalPrice": 39.9,
-    "costCNY": 23,
     "stock": 100,
     "variants": [
       "Multifunctional Mid-Century Modern Corrugated Cardboard Cat Lounger"
@@ -30,41 +29,6 @@
         "value": "High-Density Corrugated Cardboard"
       }
     ],
-    "paymentLink": "",
     "active": true
-  },
-  {
-    "id": 2,
-    "name": "猫抓板猫咪用品宠物磨爪酒瓶抓柱猫玩具吸盘可吸地面吸盘猫抓板",
-    "category": "beds",
-    "price": 185,
-    "images": [],
-    "imageUrl": "",
-    "icon": "抓板",
-    "originalPrice": 245,
-    "costCNY": 42,
-    "stock": 100,
-    "variants": [
-      "（吸盘酒瓶抓柱）纸麻款，（转盘酒瓶抓柱）麻绳款，（平板酒瓶抓柱）麻绳款"
-    ],
-    "supplier": "1688",
-    "supplierLink": "https://detail.1688.com/offer/892447230500.html?spm=a2615.2177701/2506.wp_pc_auto_offer_big.0",
-    "description": "吸盘稳固不倒防倾倒更安全，麻绳耐用抗抓延长使用寿命，大底座稳如山抓挠更安心",
-    "specs": [
-      {
-        "label": "Material",
-        "value": "Hemp"
-      },
-      {
-        "label": "Suitable For",
-        "value": "most cats"
-      },
-      {
-        "label": "Recommended Use",
-        "value": "Scratching · Playing"
-      }
-    ],
-    "paymentLink": "",
-    "active": false
   }
 ]
