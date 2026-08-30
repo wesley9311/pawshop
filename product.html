@@ -3,9 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://i.ibb.co data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <title>PawShop - Product</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="stylesheet" href="assets/tailwind.css">
+<link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding-bottom: 4rem; }
@@ -26,7 +29,7 @@
 <!-- Top bar -->
 <div class="bg-slate-900 text-white text-xs py-2 px-4">
   <div class="max-w-6xl mx-auto flex items-center justify-between">
-    <span id="topNote">New store launching - reserve free, no payment now</span>
+    <span id="topNote">Prelaunch preview — payments and orders are not open yet</span>
     <select id="langSelect" onchange="setLang(this.value)" class="bg-transparent text-white text-xs border-none cursor-pointer">
       <option value="en">English</option>
       <option value="zh">中文</option>
@@ -39,7 +42,7 @@
   <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
     <a href="PawShop.html" class="text-xl font-bold">PawShop</a>
     <div class="flex items-center gap-4">
-      <button onclick="openSupport()" aria-label="Customer support" class="hover:opacity-70"><i class="fas fa-headset text-slate-700 text-lg"></i></button>
+      <button onclick="openWaitlist()" aria-label="Launch information" class="hover:opacity-70"><i class="fas fa-headset text-slate-700 text-lg"></i></button>
       <button onclick="openCart()" class="relative" aria-label="Cart">
         <i class="fas fa-shopping-bag text-slate-700"></i>
         <span id="cartCount" class="absolute -top-2 -right-2 w-4 h-4 bg-slate-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">0</span>
@@ -61,13 +64,13 @@
 <!-- Cart drawer -->
 <div id="cartDrawer" class="drawer fixed top-0 right-0 bottom-0 w-full max-w-sm bg-white z-50 flex flex-col">
   <div class="p-4 border-b border-slate-100 flex items-center justify-between">
-    <h3 class="font-bold"><span id="cartTitle">Cart</span> <span id="cartItemCount" class="text-sm text-slate-400 font-normal">(0)</span></h3>
+    <h3 class="font-bold"><span id="cartTitle">Saved products</span> <span id="cartItemCount" class="text-sm text-slate-400 font-normal">(0)</span></h3>
     <button onclick="closeCart()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close"><i class="fas fa-times"></i></button>
   </div>
   <div id="cartItems" class="flex-1 overflow-y-auto p-4"></div>
   <div class="p-4 border-t border-slate-100">
-    <div class="flex justify-between mb-4 text-sm"><span class="text-slate-500" id="subtotalT">Subtotal</span><span id="cartSubtotal" class="font-semibold">$0.00</span></div>
-    <button onclick="goCheckout()" id="checkoutBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700">Checkout</button>
+    <div class="flex justify-between mb-4 text-sm"><span class="text-slate-500" id="subtotalT">Estimated product total</span><span id="cartSubtotal" class="font-semibold">$0.00</span></div>
+    <button onclick="goCheckout()" id="checkoutBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700">View launch status</button>
   </div>
 </div>
 <div id="cartBackdrop" class="fixed inset-0 bg-black/40 z-40 hidden" onclick="closeCart()"></div>
@@ -76,10 +79,9 @@
 <div id="waitlistModal" class="fixed inset-0 z-50 bg-black/50 hidden items-center justify-center p-4">
   <div class="bg-white rounded-xl max-w-sm w-full p-8">
     <div class="w-12 h-12 mx-auto bg-slate-900 rounded-lg flex items-center justify-center mb-4"><i class="fas fa-bell text-white"></i></div>
-    <h2 class="text-lg font-bold mb-1 text-center" id="wlTitle">Reserve yours</h2>
-    <p class="text-xs text-slate-500 text-center mb-6" id="wlSub">Free, no payment now. We will email you at launch with an early-bird discount.</p>
-    <input type="email" id="wlEmail" placeholder="you@example.com" class="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm mb-3">
-    <button onclick="submitWaitlist()" id="wlCta" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2">Notify me at launch</button>
+    <h2 class="text-lg font-bold mb-1 text-center" id="wlTitle">Launch status</h2>
+    <p class="text-xs text-slate-500 text-center mb-6" id="wlSub">Sales and the contact channel are still being prepared. No information is submitted yet.</p>
+    <button onclick="submitWaitlist()" id="wlCta" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2">Check launch status</button>
     <button onclick="closeWaitlist()" id="wlNo" class="w-full py-2 text-xs text-slate-400 hover:text-slate-600">No thanks</button>
   </div>
 </div>
@@ -101,14 +103,13 @@ window.addEventListener('scroll', () => {
 <!-- Toast -->
 <div id="toast" class="toast fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 px-5 py-3 bg-slate-900/95 text-white rounded-xl text-sm shadow-xl"><span id="toastText"></span></div>
 
-<script src="config.js"></script>
-<script src="support.js"></script>
+<script src="safe.js"></script>
 <script>
 const LS_CART = 'pawshop_cart';
-const LS_WAITLIST = 'pawshop_waitlist';
 const RATES = { USD: 1 };
 const SYM = { USD: '$' };
 const fmt = u => '$' + u.toFixed(2);
+const { html: safeHtml, url: safeUrl, icon: safeIcon, id: safeId } = PawSafe;
 
 let lang = localStorage.getItem('pawshop_lang') || 'en';
 let currentProduct = null;
@@ -118,74 +119,42 @@ let cart = [];
 
 const L = {
   en: {
-    topNote: 'New store launching - reserve free, no payment now',
+    topNote: 'Prelaunch preview — payments and orders are not open yet',
     shop: 'Shop', breadcrumb: 'Shop', inStock: 'In stock', onlyLeft: n => `Only ${n} left`,
-    addToCart: 'Add to cart', buyNow: 'Buy now', reserve: 'Reserve free - no payment now',
+    addToCart: 'Save to list', buyNow: 'Launch updates', reserve: 'Sales are not open yet',
     quantity: 'Quantity', variant: 'Choose an option', off: n => `-${n}% OFF`,
     soldOut: 'Sold out', unavailable: 'Unavailable', stockLabel: 'Stock', taxIncluded: v => `Tax included (${v} each)`, details: 'Product Details', specs: 'Specifications', galleryTitle: 'Gallery', reviews: 'Reviews',
     related: 'You may also like',
     points: [
-      ['fa-box-open', 'Free to reserve', 'No payment now - decide at launch'],
-      ['fa-tag', 'Early-bird price', 'Reserved customers get the best launch deal'],
+      ['fa-box-open', 'Prelaunch preview', 'Payments and orders are currently disabled'],
+      ['fa-globe', 'Ships from China', 'Available destinations will be confirmed before launch'],
     ],
-    reviewCount: n => `${n} review${n > 1 ? 's' : ''}`, subtotal: 'Subtotal', checkout: 'Checkout',
-    cartEmpty: 'Your cart is empty', viewCart: 'View cart', wlOk: "You're on the list!", wlInvalid: 'Please enter a valid email',
+    reviewCount: n => `${n} review${n > 1 ? 's' : ''}`, subtotal: 'Estimated product total', checkout: 'Launch updates',
+    cartEmpty: 'Your saved list is empty', viewCart: 'View saved list', wlOk: 'No information was submitted', wlInvalid: 'Please enter a valid email',
   },
   zh: {
-    topNote: '新店上线中——免费预留，无需付款',
+    topNote: '预发布展示——暂未开放付款和订单',
     shop: '商品', breadcrumb: '商品', inStock: '有货', onlyLeft: n => `仅剩 ${n} 件`,
-    addToCart: '加入购物车', buyNow: '立即购买', reserve: '免费预留——现在不用付款',
+    addToCart: '保存商品', buyNow: '查看上线进度', reserve: '暂未开放销售',
     quantity: '数量', variant: '选择款式', off: n => `省 ${n}%`,
     soldOut: '无货', unavailable: '已下架', stockLabel: '库存', taxIncluded: v => `含税 ${v}/个`, details: '商品详情', galleryTitle: '图片详情', specs: '规格参数', reviews: '用户评价',
     related: '猜你喜欢',
     points: [
-      ['fa-box-open', '免费预留', '现在不用付款，上线再决定'],
-      ['fa-tag', '早鸟优惠', '预留顾客享受上线最优价'],
+      ['fa-box-open', '预发布展示', '付款和订单功能目前已关闭'],
+      ['fa-globe', '中国发货', '上线前确认可配送国家与费用'],
     ],
-    reviewCount: n => `${n} 条评价`, subtotal: '小计', checkout: '去结算',
-    cartEmpty: '购物车是空的', viewCart: '查看购物车', wlOk: '预留成功！', wlInvalid: '请输入有效的邮箱',
+    reviewCount: n => `${n} 条评价`, subtotal: '商品估算合计', checkout: '上线信息',
+    cartEmpty: '保存列表为空', viewCart: '查看保存列表', wlOk: '未提交任何信息', wlInvalid: '请输入有效的邮箱',
   },
 };
 const T = L[lang] || L.en;
 function setLang(l) { localStorage.setItem('pawshop_lang', l); location.reload(); }
 
-function loadProducts() {
-  try {
-    const raw = localStorage.getItem('pawshop_products');
-    const p = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(p) && p.length) return p;
-  } catch (e) {}
-  return DEFAULT_PRODUCTS;
-}
-const DEFAULT_PRODUCTS = [
-  {
-    id: 1, name: "Elevated Hemp Cat Bed - Standard", category: "beds", price: 19.99, originalPrice: 29.99, stock: 120, icon: "fa-bed",
-    variants: ["Natural"],
-    description: "Breathable hemp mat on a sturdy frame, 10cm off the ground. Keeps cats cool and comfortable year-round.",
-    specs: [{label:"Size",value:"56.5 × 43 × 25 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}],
-  },
-  {
-    id: 2, name: "Elevated Hemp Cat Bed - Large", category: "beds", price: 24.99, originalPrice: 34.99, stock: 80, icon: "fa-bed",
-    variants: ["Natural"],
-    description: "Roomier version for large cats or two sharing. Same breathable hemp mat, 10cm elevation.",
-    specs: [{label:"Size",value:"70 × 45.5 × 31.5 cm"},{label:"Material",value:"Hemp + wood frame"},{label:"Height",value:"10cm off ground"}],
-  },
-  {
-    id: 3, name: "Corrugated Sofa Lounger", category: "scratchers", price: 29.99, originalPrice: 44.99, stock: 150, icon: "fa-couch",
-    variants: ["Natural / Grey"],
-    description: "Dual-color corrugated cardboard sofa to scratch, lounge and nap on. Raised 5cm to protect floors.",
-    specs: [{label:"Size",value:"55.5 × 40.5 × 23.5 cm"},{label:"Material",value:"Corrugated cardboard"},{label:"Floor gap",value:"5cm"}],
-  },
-  {
-    id: 4, name: "Tall Cat Scratcher Post", category: "scratchers", price: 27.99, originalPrice: 39.99, stock: 90, icon: "fa-tree",
-    variants: ["Round"],
-    description: "Extra-tall vertical scratcher for full-body stretching. Stable dense-board base, replaceable corrugated core.",
-    specs: [{label:"Size",value:"28 × 28 × 60 cm"},{label:"Material",value:"Corrugated + MDF"},{label:"Shape",value:"Round column"}],
-  },
-];
+function loadProducts() { return window.__pawCatalog || DEFAULT_PRODUCTS; }
+const DEFAULT_PRODUCTS = []; // Fail closed until catalog.json is loaded.
 function productImages(p) {
-  if (Array.isArray(p.images) && p.images.length) return p.images.filter(Boolean);
-  if (p.imageUrl) return [p.imageUrl];
+  if (Array.isArray(p.images) && p.images.length) return p.images.map(safeUrl).filter(Boolean);
+  if (p.imageUrl) return [safeUrl(p.imageUrl)].filter(Boolean);
   return [];
 }
 
@@ -194,7 +163,7 @@ function getParam() { return new URLSearchParams(location.search).get('id'); }
 function render() {
   const id = parseInt(getParam());
   const products = loadProducts();
-  currentProduct = products.find(p => p.id === id) || null;
+  currentProduct = products.find(p => p.id === id && p.active !== false) || null;
   const box = document.getElementById('pdp');
 
   if (!currentProduct) {
@@ -203,7 +172,7 @@ function render() {
     return;
   }
   const p = currentProduct;
-  document.title = `PawShop - ${p.name}`;
+  document.title = `PawShop - ${String(p.name || '')}`;
   selectedVariant = (p.variants && p.variants[0]) || null;
   const imgs = productImages(p);
   const discount = p.originalPrice && p.originalPrice > p.price ? Math.round((1 - p.price / p.originalPrice) * 100) : 0;
@@ -212,17 +181,17 @@ function render() {
 
   const gallery = imgs.length ? `
     <div class="gallery-main flex overflow-x-auto rounded-xl bg-slate-50 mb-3" id="galleryMain">
-      ${imgs.map(u => `<div class="w-full flex-shrink-0 aspect-square"><img src="${u}" alt="${p.name}" class="w-full h-full object-cover"></div>`).join('')}
+      ${imgs.map(u => `<div class="w-full flex-shrink-0 aspect-square"><img src="${u}" alt="${safeHtml(p.name)}" class="w-full h-full object-cover"></div>`).join('')}
     </div>
     <div class="flex gap-2 overflow-x-auto pb-1">
       ${imgs.map((u, i) => `<img src="${u}" onclick="scrollToImg(${i})" class="w-16 h-16 object-cover rounded-lg cursor-pointer border-2 border-transparent hover:border-slate-900 flex-shrink-0">`).join('')}
     </div>` : `
-    <div class="aspect-square rounded-xl bg-slate-50 flex items-center justify-center"><i class="fas ${p.icon || 'fa-box'} text-6xl text-slate-300"></i></div>`;
+    <div class="aspect-square rounded-xl bg-slate-50 flex items-center justify-center"><i class="fas ${safeIcon(p.icon)} text-6xl text-slate-300"></i></div>`;
 
   const variants = (p.variants || []).length > 1 ? `
     <div class="mb-4">
       <label class="block text-sm font-medium mb-2">${T.variant}</label>
-      <div class="flex flex-wrap gap-2">${p.variants.map((v, i) => `<button onclick="pickVariant(this,'${v.replace(/'/g, "\\'")}')" class="px-4 py-2 border border-slate-200 rounded-lg text-sm ${i === 0 ? 'variant-sel' : ''}">${v}</button>`).join('')}</div>
+      <div class="flex flex-wrap gap-2">${p.variants.map((v, i) => `<button onclick="pickVariant(this,${i})" class="px-4 py-2 border border-slate-200 rounded-lg text-sm ${i === 0 ? 'variant-sel' : ''}">${safeHtml(v)}</button>`).join('')}</div>
     </div>` : '';
 
   const ratingHtml = realReviews.length ? `
@@ -232,11 +201,11 @@ function render() {
     </div>` : '';
 
   box.innerHTML = `
-  <div class="text-xs text-slate-400 mb-4"><a href="PawShop.html" class="hover:text-slate-700">${T.breadcrumb}</a> / <span class="text-slate-500">${p.name}</span></div>
+  <div class="text-xs text-slate-400 mb-4"><a href="PawShop.html" class="hover:text-slate-700">${T.breadcrumb}</a> / <span class="text-slate-500">${safeHtml(p.name)}</span></div>
   <div class="grid md:grid-cols-2 gap-8">
     <div>${gallery}</div>
     <div>
-      <h1 class="text-2xl font-bold mb-2">${p.name}</h1>
+      <h1 class="text-2xl font-bold mb-2">${safeHtml(p.name)}</h1>
       ${ratingHtml}
       <div class="flex items-end gap-3 mb-1">
         <span class="text-3xl font-bold">${fmt(p.price)}</span>
@@ -275,14 +244,14 @@ function render() {
     ${p.description ? `
     <div>
       <h2 class="text-lg font-bold mb-4 pb-2 border-b border-slate-100">${T.details}</h2>
-      <p class="text-sm text-slate-600 leading-relaxed max-w-3xl">${p.description}</p>
+      <p class="text-sm text-slate-600 leading-relaxed max-w-3xl">${safeHtml(p.description)}</p>
     </div>` : ''}
     ${(p.specs || []).length ? `
     <div>
       <h2 class="text-lg font-bold mb-4 pb-2 border-b border-slate-100">${T.specs}</h2>
       <div class="border border-slate-100 rounded-xl overflow-hidden max-w-2xl">
         <table class="w-full text-sm">
-          ${(p.specs || []).map(sp => `<tr class="border-b border-slate-50 last:border-0"><td class="py-3 px-5 text-slate-400 w-40 bg-slate-50/50">${sp.label}</td><td class="py-3 px-5 font-medium">${sp.value}</td></tr>`).join('')}
+          ${(p.specs || []).map(sp => `<tr class="border-b border-slate-50 last:border-0"><td class="py-3 px-5 text-slate-400 w-40 bg-slate-50/50">${safeHtml(sp.label)}</td><td class="py-3 px-5 font-medium">${safeHtml(sp.value)}</td></tr>`).join('')}
         </table>
       </div>
     </div>` : ''}
@@ -299,12 +268,12 @@ function render() {
     <div class="space-y-4 max-w-2xl">${realReviews.map(r => `
       <div class="border border-slate-100 rounded-xl p-5">
         <div class="flex items-center justify-between mb-2">
-          <span class="font-medium text-sm">${r.name}</span>
-          <span class="text-xs text-slate-400">${r.date || ''}</span>
+          <span class="font-medium text-sm">${safeHtml(r.name)}</span>
+          <span class="text-xs text-slate-400">${safeHtml(r.date || '')}</span>
         </div>
         <div class="flex text-yellow-400 text-xs mb-2">${Array(5).fill(0).map((_, i) => `<i class="fas fa-star ${i < (r.rating || 5) ? '' : 'text-slate-200'}"></i>`).join('')}</div>
-        <p class="text-sm text-slate-600">${r.content}</p>
-        ${r.image ? `<img src="${r.image}" class="mt-3 rounded-lg max-h-48">` : ''}
+        <p class="text-sm text-slate-600">${safeHtml(r.content)}</p>
+        ${r.image && safeUrl(r.image) ? `<img src="${safeUrl(r.image)}" class="mt-3 rounded-lg max-h-48">` : ''}
       </div>`).join('')}</div>
   </section>` : ''}
 
@@ -328,12 +297,12 @@ function relatedHtml(products, p) {
     <h2 class="text-lg font-bold mb-5">${T.related}</h2>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       ${others.map(x => `
-      <a href="product.html?id=${x.id}" class="border border-slate-100 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
+      <a href="product.html?id=${safeId(x.id)}" class="border border-slate-100 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
         <div class="aspect-square bg-slate-50 flex items-center justify-center overflow-hidden">
-          ${productImages(x).length ? `<img src="${productImages(x)[0]}" class="w-full h-full object-cover">` : `<i class="fas ${x.icon || 'fa-box'} text-4xl text-slate-300"></i>`}
+          ${productImages(x).length ? `<img src="${productImages(x)[0]}" class="w-full h-full object-cover">` : `<i class="fas ${safeIcon(x.icon)} text-4xl text-slate-300"></i>`}
         </div>
         <div class="p-3">
-          <h3 class="text-sm font-medium line-clamp-2 mb-1">${x.name}</h3>
+          <h3 class="text-sm font-medium line-clamp-2 mb-1">${safeHtml(x.name)}</h3>
           <span class="font-bold text-sm">${fmt(x.price)}</span>
         </div>
       </a>`).join('')}
@@ -345,8 +314,8 @@ function scrollToImg(i) {
   const g = document.getElementById('galleryMain');
   if (g) g.scrollTo({ left: i * g.clientWidth, behavior: 'smooth' });
 }
-function pickVariant(btn, v) {
-  selectedVariant = v;
+function pickVariant(btn, index) {
+  selectedVariant = currentProduct?.variants?.[index] || null;
   btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('variant-sel'));
   btn.classList.add('variant-sel');
 }
@@ -358,17 +327,15 @@ function chQty(d) {
 
 // ===== 购物车(与前台共用 localStorage) =====
 function addToCart() {
+  if (!currentProduct || currentProduct.active === false) return;
   const ex = cart.find(i => i.id === currentProduct.id);
   if (ex) ex.qty += qty; else cart.push({ ...currentProduct, qty });
-  saveCart(); updateCart(); showToast(T.addToCart === '加入购物车' ? '已加入购物车' : 'Added to cart');
+  saveCart(); updateCart(); showToast(lang === 'zh' ? '商品已保存' : 'Saved to list');
 }
 function buyNow() {
-  const ex = cart.find(i => i.id === currentProduct.id);
-  if (ex) ex.qty += qty; else cart.push({ ...currentProduct, qty });
-  saveCart(); updateCart(); closeCart();
-  location.href = 'PawShop.html#checkout';
+  openWaitlist();
 }
-function goCheckout() { closeCart(); location.href = 'PawShop.html#checkout'; }
+function goCheckout() { closeCart(); openWaitlist(); }
 function removeFromCart(id) { cart = cart.filter(i => i.id !== id); saveCart(); updateCart(); }
 function updateCartQty(id, d) { const i = cart.find(x => x.id === id); if (i) { i.qty += d; if (i.qty < 1) removeFromCart(id); else { saveCart(); updateCart(); } } }
 function saveCart() { try { localStorage.setItem(LS_CART, JSON.stringify(cart.map(i => ({ id: i.id, qty: i.qty })))); } catch (e) {} }
@@ -376,7 +343,7 @@ function loadCart() {
   try {
     const saved = JSON.parse(localStorage.getItem(LS_CART) || '[]');
     const products = loadProducts();
-    cart = saved.map(i => { const p = products.find(x => x.id === i.id); return p && p.active !== false ? { ...p, qty: i.qty } : null; }).filter(Boolean);
+    cart = saved.map(i => { const p = products.find(x => x.id === i.id); return p && p.active !== false ? { ...p, qty: PawSafe.quantity(i.qty) } : null; }).filter(Boolean);
   } catch (e) { cart = []; }
 }
 function updateCart() {
@@ -389,10 +356,10 @@ function updateCart() {
   c.innerHTML = cart.length ? cart.map(item => `
     <div class="flex gap-3 py-3 border-b border-slate-100">
       <div class="w-16 h-16 bg-slate-50 rounded flex-shrink-0 flex items-center justify-center overflow-hidden">
-        ${productImages(item).length ? `<img src="${productImages(item)[0]}" class="w-full h-full object-cover">` : `<i class="fas ${item.icon || 'fa-box'} text-2xl text-slate-300"></i>`}
+        ${productImages(item).length ? `<img src="${productImages(item)[0]}" class="w-full h-full object-cover">` : `<i class="fas ${safeIcon(item.icon)} text-2xl text-slate-300"></i>`}
       </div>
       <div class="flex-1">
-        <h4 class="text-sm font-medium mb-1">${item.name}</h4>
+        <h4 class="text-sm font-medium mb-1">${safeHtml(item.name)}</h4>
         <div class="font-bold text-sm mb-2">${fmt(item.price)}</div>
         <div class="flex items-center justify-between">
           <div class="flex items-center border border-slate-200 rounded">
@@ -410,30 +377,12 @@ function closeCart() { document.getElementById('cartDrawer').classList.remove('o
 
 // ===== 预留 =====
 function openWaitlist() {
-  const saved = localStorage.getItem('pawshop_customer_email');
-  if (saved) document.getElementById('wlEmail').value = saved;
   const m = document.getElementById('waitlistModal'); m.style.display = 'flex'; document.body.style.overflow = 'hidden';
 }
 function closeWaitlist() { document.getElementById('waitlistModal').style.display = 'none'; document.body.style.overflow = ''; }
 function submitWaitlist() {
-  const email = document.getElementById('wlEmail').value.trim();
-  if (!email.includes('@')) { showToast(T.wlInvalid); return; }
-  const productName = currentProduct ? currentProduct.name : '';
-  try {
-    const list = JSON.parse(localStorage.getItem(LS_WAITLIST) || '[]');
-    if (!list.some(w => w.email === email && w.productId === (currentProduct && currentProduct.id))) {
-      list.push({ email, productId: currentProduct ? currentProduct.id : null, at: new Date().toISOString() });
-      localStorage.setItem(LS_WAITLIST, JSON.stringify(list));
-    }
-  } catch (e) {}
-  try {
-    const cfgE = (typeof WAITLIST_NOTIFY_EMAIL !== 'undefined') && WAITLIST_NOTIFY_EMAIL;
-    if (cfgE) fetch('https://formsubmit.co/ajax/' + cfgE, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ _subject: 'New reservation - PawShop', _template: 'table', Customer: email, Product: productName, Time: new Date().toLocaleString() }) }).catch(() => {});
-    const cfgK = (typeof SERVERCHAN_SEND_KEY !== 'undefined') && SERVERCHAN_SEND_KEY;
-    if (cfgK) fetch('https://sctapi.ftqq.com/' + cfgK + '.send', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'title=' + encodeURIComponent('PawShop 新预留') + '&desp=' + encodeURIComponent(`顾客邮箱: ${email}\n商品: ${productName}\n时间: ${new Date().toLocaleString()}`) }).catch(() => {});
-  } catch (e) {}
   closeWaitlist();
-  showToast(T.wlOk);
+  showToast(lang === 'zh' ? '联系通道正在准备，未提交任何信息' : 'Contact channel coming soon — no information was submitted');
 }
 
 function showToast(msg) {
@@ -445,12 +394,12 @@ function showToast(msg) {
 
 // 中文界面文案
 if (lang === 'zh') {
-  document.getElementById('cartTitle').textContent = '购物车';
-  document.getElementById('subtotalT').textContent = '小计';
-  document.getElementById('checkoutBtn').textContent = '去结算';
-  document.getElementById('wlTitle').textContent = '免费预留';
-  document.getElementById('wlSub').textContent = '免费，现在无需付款。上线第一时间邮件通知你，并附早鸟优惠。';
-  document.getElementById('wlCta').textContent = '上线时通知我';
+  document.getElementById('cartTitle').textContent = '已保存商品';
+  document.getElementById('subtotalT').textContent = '商品估算合计';
+  document.getElementById('checkoutBtn').textContent = '上线信息';
+  document.getElementById('wlTitle').textContent = '上线状态';
+  document.getElementById('wlSub').textContent = '销售和联系通道仍在准备，目前不会提交任何信息。';
+  document.getElementById('wlCta').textContent = '查看上线状态';
   document.getElementById('wlNo').textContent = '不用了';
   document.getElementById('footShop').textContent = '回商店';
 }
@@ -460,11 +409,16 @@ render();
 loadCart();
 updateCart();
 fetch('catalog.json?v=' + Date.now()).then(r => r.ok ? r.json() : null).then(j => {
-  if (Array.isArray(j) && j.length) {
-    const raw = localStorage.getItem(LS_PRODUCTS);
-    if (JSON.stringify(j) !== raw) { render(); }
+  if (!Array.isArray(j)) throw new Error('Catalog unavailable');
+  {
+    window.__pawCatalog = PawSafe.catalog(j);
+    render();
+    loadCart();
+    updateCart();
   }
-}).catch(() => {});
+}).catch(() => {
+  document.getElementById('pdp').innerHTML = `<p class="py-24 text-center text-slate-500">${lang === 'zh' ? '商品目录暂时无法加载，请稍后刷新。' : 'The catalog is temporarily unavailable. Please refresh later.'}</p>`;
+});
 </script>
 
 </body>
