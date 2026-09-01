@@ -1,0 +1,22 @@
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+import { parseEnv } from 'node:util';
+import { createRequire } from 'node:module';
+
+const major = Number(process.versions.node.split('.')[0]);
+if (![22, 24].includes(major)) throw new Error('Use Node 22 or 24 LTS for the commerce backend.');
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const privateFile = process.env.PAWSHOP_ENV_FILE || join(homedir(), 'Documents', 'PawShop_Private', 'development', 'commerce.env');
+const env = { ...process.env, ...parseEnv(readFileSync(privateFile, 'utf8')), NODE_ENV: 'development', MEDUSA_DISABLE_TELEMETRY: 'true' };
+const require = createRequire(import.meta.url);
+const { validateLocalEnvironment } = require('../src/lib/local-policy.cjs');
+validateLocalEnvironment(env);
+const args = process.argv.slice(2);
+if (!['build', 'develop', 'db:migrate', 'exec', 'user'].includes(args[0])) throw new Error('Unsupported local command.');
+if (args[0] === 'develop') args.push('--host', '127.0.0.1', '--port', '9000');
+const child = spawn(join(root, 'node_modules', '.bin', 'medusa'), args, { cwd: root, env, stdio: 'inherit' });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal));
+child.on('exit', code => process.exit(code ?? 1));

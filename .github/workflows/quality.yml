@@ -20,3 +20,13 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run check
+      - run: npm ci --prefix _commerce
+      - run: npm test --prefix _commerce
+      - run: npm run check:types --prefix _commerce
+      - run: npm run build:ci --prefix _commerce
+        env:
+          NODE_ENV: development
+          PAWSHOP_MODE: local-admin-only
+          DATABASE_URL: postgresql://ci:fixture@127.0.0.1:54329/pawshop_dev
+          JWT_SECRET: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          COOKIE_SECRET: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

@@ -3,3 +3,10 @@ node_modules/
 output/playwright/
 .playwright-cli/
 data/private/
+_commerce/node_modules/
+_commerce/.medusa/
+_commerce/.cache/
+_commerce/.env*
+!_commerce/.env.example
+_commerce/uploads/
+_commerce/*.log

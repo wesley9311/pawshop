@@ -1,0 +1,10 @@
+# GitHub Pages serves only the showcase, never backend or local runtime files.
+exclude:
+  - _commerce
+  - node_modules
+  - scripts
+  - tests
+  - output
+  - data
+  - package.json
+  - package-lock.json
