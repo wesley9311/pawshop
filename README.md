@@ -46,13 +46,18 @@ stored service tokens. It also runs Node regression tests for catalog loading,
 rendering inputs and prelaunch data boundaries. Pull requests and pushes to `main`
 run the same checks. These checks are not a complete security or legal audit.
 
-## Planned commerce migration
+## Self-hosted commerce migration
+
+PawShop is building its own commerce backend instead of subscribing to Shopify.
+The first foundation uses Medusa 2.19 and PostgreSQL 17 and remains local-only:
+it is not connected to the public storefront and cannot accept customer data,
+orders or payments. See [`_commerce/README.md`](_commerce/README.md) and
+[`_commerce/STATUS.md`](_commerce/STATUS.md).
 
 1. Keep the current site in transparent prelaunch mode.
-2. Establish the business entity, logistics, return route and support channel.
-3. Use Shopify Admin for products, variants/SKUs, inventory, orders, fulfillment
-   and refunds.
-4. Enable checkout only after an eligible payment provider and complete policies
-   are configured and tested.
-5. Add custom internal operations tooling later only for PawShop-specific needs,
-   such as supplier sourcing, landed cost and AI-assisted catalog review.
+2. Validate local catalog and owner-admin workflows without publishing products.
+3. Establish the business entity, logistics, return route and support channel.
+4. Design an authenticated production deployment, backups, monitoring and
+   server-side checkout before collecting any customer information.
+5. Integrate an eligible payment provider only after sandbox payment, refund,
+   webhook and reconciliation tests pass.
