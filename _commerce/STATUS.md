@@ -16,6 +16,22 @@ Validated locally on 2026-09-01:
 
 This is an operations foundation, not a live store. The current public site is unchanged and remains a non-transactional showcase.
 
+## Real local operations validation
+
+Validated against the actual owner environment on 2026-09-02, without demo data:
+
+- the owner logged into the running admin UI successfully;
+- the actual product is Draft, has one SKU and nine exact source images;
+- it is assigned to no sales channel;
+- the actual Orders and Customers pages contain no records;
+- an AES-256 encrypted dump of the active database was created;
+- that dump was restored into a new real PostgreSQL database and its product,
+  price, image, owner, customer and order boundaries were verified;
+- private manifests contain the encrypted-backup and restore-verification evidence;
+- restore verification now removes its temporary plaintext database by default.
+
+See [`OPERATIONS_ZH.md`](OPERATIONS_ZH.md) for the owner workflow.
+
 ## Local owner workflow
 
 Use Node 22 LTS for all commands:

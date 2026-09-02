@@ -14,6 +14,8 @@
     "catalog:import": "node scripts/run-local.mjs exec ./src/scripts/import-catalog.ts",
     "catalog:verify": "node scripts/run-local.mjs exec ./src/scripts/verify-catalog.ts",
     "foundation:verify": "node scripts/verify-foundation.mjs",
+    "backup:real": "node scripts/backup-real.mjs",
+    "restore:verify-real": "node scripts/restore-verify-real.mjs",
     "check:types": "tsc --noEmit",
     "test": "node --test tests/*.test.cjs"
   },

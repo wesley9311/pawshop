@@ -1,7 +1,7 @@
 'use strict';
 
 const { randomBytes } = require('node:crypto');
-const { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
+const { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } = require('node:fs');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { parseEnv } = require('node:util');
@@ -12,6 +12,8 @@ const adminFile = join(privateDir, 'local-admin.txt');
 const dataDir = join(privateDir, 'postgres-17');
 const socketDir = join(privateDir, 'postgres-socket');
 const logFile = join(privateDir, 'postgres.log');
+const backupDir = join(privateDir, 'backups');
+const backupKeyFile = join(privateDir, 'backup.key');
 
 function secureWrite(path, content) {
   writeFileSync(path, content, { mode: 0o600 });
@@ -23,6 +25,8 @@ function ensurePrivateRuntime() {
   chmodSync(privateDir, 0o700);
   mkdirSync(socketDir, { recursive: true, mode: 0o700 });
   chmodSync(socketDir, 0o700);
+  mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  chmodSync(backupDir, 0o700);
 
   if (!existsSync(envFile)) {
     const dbPassword = randomBytes(24).toString('base64url');
@@ -53,9 +57,24 @@ function ensurePrivateRuntime() {
     dataDir,
     socketDir,
     logFile,
+    backupDir,
+    backupKeyFile,
     env: parseEnv(readFileSync(envFile, 'utf8')),
     admin: parseEnv(readFileSync(adminFile, 'utf8')),
   };
 }
 
-module.exports = { ensurePrivateRuntime };
+function ensureBackupKey({ allowCreate = false } = {}) {
+  ensurePrivateRuntime();
+  if (!existsSync(backupKeyFile)) {
+    const hasEncryptedBackups = readdirSync(backupDir).some((name) => name.endsWith('.dump.enc'));
+    if (!allowCreate || hasEncryptedBackups) {
+      throw new Error('PawShop backup key is missing. Existing backups must not be overwritten with a new key.');
+    }
+    secureWrite(backupKeyFile, `${randomBytes(32).toString('hex')}\n`);
+  }
+  chmodSync(backupKeyFile, 0o600);
+  return backupKeyFile;
+}
+
+module.exports = { ensureBackupKey, ensurePrivateRuntime };
