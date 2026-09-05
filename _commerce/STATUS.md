@@ -32,7 +32,50 @@ Validated against the actual owner environment on 2026-09-02, without demo data:
 
 See [`OPERATIONS_ZH.md`](OPERATIONS_ZH.md) for the owner workflow.
 
+## Local operations follow-up — 2026-09-03
+
+- Recovered an unresponsive local development server: the old process occupied
+  the loopback port at approximately 100% CPU and did not respond to HTTP checks.
+  Graceful termination did not stop it, so that specific process was terminated
+  and the backend restarted. The underlying hang cause is not yet established.
+- Logged into the actual admin UI and verified the draft product, nine product
+  images, one SKU, USD 29.90 price, and empty customer/order lists.
+- Created an encrypted backup before changing real store configuration through
+  the admin UI. Store name is now PawShop; USD is the default supported currency,
+  with EUR retained. EUR's existing tax-inclusive preference is unchanged; USD
+  uses `is_tax_inclusive=false`. This does not configure tax rates or sales regions.
+- Compared critical-data fingerprints before and after the configuration change:
+  products, variants, price links, prices, images, customers, orders and owner
+  users were unchanged. Product sales-channel links remain absent and
+  `reviewed_for_sale` remains false. Default region/location remain unset.
+- `catalog:verify` and `foundation:verify` passed after the change. Store/customer routes remain
+  closed; the public storefront was not changed or connected to this backend.
+- Remaining local operations gaps include unmanaged SKU inventory, missing
+  shipping attributes, and admin dialog accessibility/ref warnings. Product
+  images are assigned at product level; the variant has no separate media.
+  Development in-memory locking and local event handling are not a production
+  reliability solution. No stock quantity, shipping weight, or sales policy was
+  invented to fill these gaps.
+
+The change was independently reviewed. Browser evidence and the backup manifest
+remain in the private operations directory, outside the repository.
+
 ## Local owner workflow
+
+### Verification hardening — 2026-09-04
+
+- Foundation HTTP probes now have a five-second deadline, reject redirects, and
+  cancel response bodies without logging their content or request credentials.
+- PostgreSQL probes ignore local psql startup files and enforce connection,
+  statement and subprocess deadlines, with sanitized failure messages.
+- Thirteen tests passed, including real loopback HTTP timeout/redirect checks.
+  These failure-injection tests do not create business records or replace the
+  actual database/backend verification.
+- The actual local foundation verification passed after the development watcher
+  finished reloading. The verifier correctly failed during the reload window;
+  it did not retry away the failure or report success while unavailable.
+- This improves failure detection, not uptime or the cause of the previous hang.
+  Production hosting, durable runtime services and access protection remain open.
 
 Use Node 22 LTS for all commands:
 
@@ -49,6 +92,22 @@ npm --prefix _commerce run foundation:verify
 ```
 
 Then open `http://127.0.0.1:9000/app`. The local owner credentials are stored in `~/Documents/PawShop_Private/development/local-admin.txt`; never copy them into Git, screenshots or support messages.
+
+## Production configuration scaffold — 2026-09-05
+
+- Added a separate `production-admin-only` configuration path. It does not read
+  the private Mac development env file and does not weaken the unconditional
+  Store/customer API gate.
+- Production configuration requires TLS-authenticated PostgreSQL and Redis,
+  distinct generated secrets, separate HTTPS storefront/admin origins, an
+  allowlisted worker mode, and a bounded port. Known loopback spellings fail.
+- Production build, sixteen tests, TypeScript checking, and the actual local
+  closed-route verification passed. Fixture build hostnames use `.invalid` and
+  contain no production credentials or customer data.
+- This is a deployable-configuration scaffold, not a live deployment. Redis
+  infrastructure modules, durable object storage, Linux production backups,
+  monitoring and reverse-proxy access control await the selected vendor's real
+  service details. No cloud purchase was made.
 
 ## Still blocked before real sales
 
