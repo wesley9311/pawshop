@@ -23,6 +23,29 @@ if [[ ! $PAWSHOP_RELEASE_ID =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
+probe_host=$(python3 - "$PAWSHOP_HTTP_ORIGIN" "$PAWSHOP_HTTPS_ORIGIN" <<'PY'
+import sys
+from urllib.parse import urlsplit
+
+http_origin, https_origin = map(urlsplit, sys.argv[1:])
+valid = (
+    http_origin.scheme == 'http' and https_origin.scheme == 'https'
+    and http_origin.hostname == https_origin.hostname
+    and http_origin.hostname is not None
+    and http_origin.port is None and https_origin.port is None
+    and not http_origin.username and not https_origin.username
+    and not http_origin.query and not https_origin.query
+    and not http_origin.fragment and not https_origin.fragment
+    and http_origin.path in ('', '/') and https_origin.path in ('', '/')
+)
+if not valid:
+    raise SystemExit('Production origins must be matching standard-port HTTP and HTTPS origins.')
+print(http_origin.hostname)
+PY
+)
+http_resolve=(--resolve "$probe_host:80:127.0.0.1")
+https_resolve=(--resolve "$probe_host:443:127.0.0.1")
+
 release_root=/srv/pawshop/releases
 release_dir="$release_root/$PAWSHOP_RELEASE_ID"
 staging_dir="$release_root/.${PAWSHOP_RELEASE_ID}.staging"
@@ -101,7 +124,7 @@ systemctl reload nginx
 probe_catalog=$(mktemp)
 probe_headers=$(mktemp)
 read -r redirect_status redirect_target < <(
-  curl --silent --show-error --max-time 10 --output /dev/null \
+  curl "${http_resolve[@]}" --silent --show-error --max-time 10 --output /dev/null \
     --write-out '%{http_code} %{redirect_url}' "$PAWSHOP_HTTP_ORIGIN/"
 )
 if [[ $redirect_status != 301 && $redirect_status != 308 ]] ||
@@ -110,7 +133,7 @@ if [[ $redirect_status != 301 && $redirect_status != 308 ]] ||
   false
 fi
 
-home_status=$(curl --silent --show-error --max-time 10 --dump-header "$probe_headers" \
+home_status=$(curl "${https_resolve[@]}" --silent --show-error --max-time 10 --dump-header "$probe_headers" \
   --output /dev/null --write-out '%{http_code}' "$PAWSHOP_HTTPS_ORIGIN/")
 [[ $home_status == 200 ]] || { echo 'Production HTTPS root verification failed.' >&2; false; }
 grep -Eiq '^X-Content-Type-Options:[[:space:]]*nosniff[[:space:]]*$' "$probe_headers" || {
@@ -120,7 +143,7 @@ grep -Eiq '^X-Frame-Options:[[:space:]]*DENY[[:space:]]*$' "$probe_headers" || {
   echo 'Production frame header verification failed.' >&2; false;
 }
 
-catalog_status=$(curl --silent --show-error --max-time 10 --output "$probe_catalog" \
+catalog_status=$(curl "${https_resolve[@]}" --silent --show-error --max-time 10 --output "$probe_catalog" \
   --write-out '%{http_code}' "$PAWSHOP_HTTPS_ORIGIN/catalog.json")
 [[ $catalog_status == 200 ]] || { echo 'Production catalog verification failed.' >&2; false; }
 python3 - "$probe_catalog" <<'PY'
@@ -132,7 +155,7 @@ if not isinstance(products, list) or not products or any(item.get('active') is n
 PY
 
 for sensitive_path in admin.html dashboard.html account.html; do
-  sensitive_status=$(curl --silent --show-error --max-time 10 --output /dev/null \
+  sensitive_status=$(curl "${https_resolve[@]}" --silent --show-error --max-time 10 --output /dev/null \
     --write-out '%{http_code}' "$PAWSHOP_HTTPS_ORIGIN/$sensitive_path")
   [[ $sensitive_status == 404 ]] || {
     echo "Sensitive production route is public: /$sensitive_path" >&2
