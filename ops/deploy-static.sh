@@ -28,6 +28,7 @@ release_dir="$release_root/$PAWSHOP_RELEASE_ID"
 staging_dir="$release_root/.${PAWSHOP_RELEASE_ID}.staging"
 current_link=/srv/pawshop/current
 previous_target=
+release_created=0
 probe_catalog=
 probe_headers=
 
@@ -48,7 +49,10 @@ rollback() {
   if [[ -n $previous_target && -e $previous_target ]]; then
     ln -sfn -- "$previous_target" "$current_link"
     nginx -t >/dev/null && systemctl reload nginx
+  elif [[ -L $current_link && $(readlink -f -- "$current_link") == "$release_dir" ]]; then
+    rm -f -- "$current_link"
   fi
+  [[ $release_created == 0 ]] || rm -rf -- "$release_dir"
   exit "$status"
 }
 trap rollback ERR INT TERM
@@ -88,6 +92,7 @@ done
 chown -R root:root -- "$staging_dir"
 chmod -R u=rwX,go=rX -- "$staging_dir"
 mv -- "$staging_dir" "$release_dir"
+release_created=1
 if [[ -L $current_link ]]; then previous_target=$(readlink -f -- "$current_link"); fi
 ln -sfn -- "$release_dir" "$current_link"
 nginx -t
