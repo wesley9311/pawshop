@@ -125,7 +125,7 @@ probe_catalog=$(mktemp)
 probe_headers=$(mktemp)
 read -r redirect_status redirect_target < <(
   curl "${http_resolve[@]}" --silent --show-error --max-time 10 --output /dev/null \
-    --write-out '%{http_code} %{redirect_url}' "$PAWSHOP_HTTP_ORIGIN/"
+    --write-out '%{http_code} %{redirect_url}\n' "$PAWSHOP_HTTP_ORIGIN/"
 )
 if [[ $redirect_status != 301 && $redirect_status != 308 ]] ||
    [[ $redirect_target != "$PAWSHOP_HTTPS_ORIGIN/" ]]; then
