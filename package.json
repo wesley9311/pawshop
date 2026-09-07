@@ -10,6 +10,7 @@
     "build": "npm run build:css && npm run build:icons",
     "check:security": "node scripts/check-security.mjs",
     "check:html": "html-validate PawShop.html product.html account.html admin.html dashboard.html shipping.html returns.html privacy.html terms.html",
+    "verify:production": "node scripts/verify-production.mjs",
     "test": "node --test tests/*.test.mjs",
     "check": "npm run check:security && npm run check:html && npm test"
   },

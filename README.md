@@ -46,6 +46,29 @@ stored service tokens. It also runs Node regression tests for catalog loading,
 rendering inputs and prelaunch data boundaries. Pull requests and pushes to `main`
 run the same checks. These checks are not a complete security or legal audit.
 
+## Production showcase operations
+
+The public showcase is deployed as an immutable, allowlisted Git release. The
+server-side [`ops/deploy-static.sh`](ops/deploy-static.sh) script archives only
+the approved storefront files, rejects symlinks and private/runtime paths,
+switches `/srv/pawshop/current` atomically, reloads Nginx only after its config
+passes, runs live HTTPS boundary checks, and restores the preceding release if
+activation fails. It uses only Git, tar, curl and Python from the small static
+server; Node.js and the commerce runtime are not installed on that host.
+
+The live verifier is intentionally separate from the local test suite:
+
+```bash
+PAWSHOP_HTTPS_ORIGIN=https://pawlivora.com \
+PAWSHOP_HTTP_ORIGIN=http://pawlivora.com \
+npm run verify:production
+```
+
+It requires an exact HTTP-to-HTTPS redirect, security headers, a non-empty
+active public catalog, and `404` responses for the retired admin, dashboard and
+account pages. It does not open checkout, collect customer data, or prove that
+the future commerce backend is ready.
+
 ## Self-hosted commerce migration
 
 PawShop is building its own commerce backend instead of subscribing to Shopify.
