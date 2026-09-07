@@ -35,6 +35,9 @@ const catalog = JSON.parse(await readFile(new URL('../catalog.json', import.meta
 const privateCatalogFields = ['costCNY', 'supplier', 'supplierLink', 'paymentLink'];
 for (const product of catalog) {
   if (product.active === false) failures.push(`catalog.json: inactive product ${product.id} is publicly downloadable`);
+  if (product.availability !== 'prelaunch') failures.push(`catalog.json: product ${product.id} does not use the prelaunch availability gate`);
+  if (Object.hasOwn(product, 'stock')) failures.push(`catalog.json: product ${product.id} exposes unverified stock`);
+  if (Object.hasOwn(product, 'originalPrice')) failures.push(`catalog.json: product ${product.id} exposes an unverified reference price`);
   for (const field of privateCatalogFields) {
     if (Object.hasOwn(product, field)) failures.push(`catalog.json: private field ${field}`);
   }

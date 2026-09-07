@@ -9,7 +9,8 @@ function fixture(overrides = {}) {
   const responses = new Map([
     [`${httpOrigin}/`, { status: 301, headers: { location: `${httpsOrigin}/` }, body: '' }],
     [`${httpsOrigin}/`, { status: 200, headers: { 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY' }, body: '' }],
-    [`${httpsOrigin}/catalog.json`, { status: 200, headers: {}, body: JSON.stringify([{ id: 1, active: true }]) }],
+    [`${httpsOrigin}/catalog.json`, { status: 200, headers: {}, body: JSON.stringify([{ id: 1, active: true, availability: 'prelaunch', images: ['assets/products/cat-lounger/01-hero-1x1.jpg'] }]) }],
+    [`${httpsOrigin}/assets/products/cat-lounger/01-hero-1x1.jpg`, { status: 200, headers: {}, body: '' }],
     [`${httpsOrigin}/admin.html`, { status: 404, headers: {}, body: '' }],
     [`${httpsOrigin}/dashboard.html`, { status: 404, headers: {}, body: '' }],
     [`${httpsOrigin}/account.html`, { status: 404, headers: {}, body: '' }],
@@ -57,7 +58,12 @@ test('rejects redirect drift and missing security headers', async () => {
 });
 
 test('rejects malformed, empty, or inactive public catalogs', async () => {
-  for (const body of ['not-json', '[]', JSON.stringify([{ id: 1, active: false }])]) {
+  for (const body of [
+    'not-json',
+    '[]',
+    JSON.stringify([{ id: 1, active: false, availability: 'prelaunch', images: ['assets/products/cat-lounger/01-hero-1x1.jpg'] }]),
+    JSON.stringify([{ id: 1, active: true, availability: 'in_stock', stock: 100, images: ['https://images.example/hero.jpg'] }]),
+  ]) {
     await assert.rejects(verifyProduction({
       httpsOrigin,
       httpOrigin,
@@ -79,4 +85,3 @@ test('rejects credentials, paths, and mismatched hosts in production origins', a
     /same hostname/,
   );
 });
-

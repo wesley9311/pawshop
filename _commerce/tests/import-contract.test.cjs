@@ -14,6 +14,10 @@ test('catalog importer preserves approved commercial review gates', () => {
   assert.match(importer, /reviewed_for_sale:\s*false/);
   assert.match(importer, /product\.price !== 29\.9/);
   assert.match(importer, /product\.images\.length !== 9/);
+  assert.match(importer, /product\.availability !== 'prelaunch'/);
+  assert.match(importer, /Object\.prototype\.hasOwnProperty\.call\(product, 'stock'\)/);
+  assert.match(importer, /assets\\\/products\\\/cat-lounger/);
+  assert.match(importer, /PUBLIC_ORIGIN = 'https:\/\/pawlivora\.com'/);
   assert.doesNotMatch(importer, /amount:\s*source\.price\s*\*\s*100/);
 });
 

@@ -146,12 +146,26 @@ grep -Eiq '^X-Frame-Options:[[:space:]]*DENY[[:space:]]*$' "$probe_headers" || {
 catalog_status=$(curl "${https_resolve[@]}" --silent --show-error --max-time 10 --output "$probe_catalog" \
   --write-out '%{http_code}' "$PAWSHOP_HTTPS_ORIGIN/catalog.json")
 [[ $catalog_status == 200 ]] || { echo 'Production catalog verification failed.' >&2; false; }
-python3 - "$probe_catalog" <<'PY'
-import json, sys
+python3 - "$probe_catalog" "$release_dir" <<'PY'
+import json, pathlib, re, sys
 with open(sys.argv[1], encoding='utf-8') as source:
     products = json.load(source)
-if not isinstance(products, list) or not products or any(item.get('active') is not True for item in products):
-    raise SystemExit('Public catalog must contain active products only.')
+release_dir = pathlib.Path(sys.argv[2]).resolve()
+image_path = re.compile(r'^assets/products/[a-z0-9-]+/[a-z0-9-]+\.jpg$')
+if not isinstance(products, list) or not products:
+    raise SystemExit('Public catalog must contain at least one product.')
+for item in products:
+    images = item.get('images')
+    if (item.get('active') is not True or item.get('availability') != 'prelaunch'):
+        raise SystemExit('Public catalog must contain active prelaunch products only.')
+    if 'stock' in item or 'originalPrice' in item:
+        raise SystemExit('Public catalog contains an unverified stock or reference-price claim.')
+    if not isinstance(images, list) or not images or any(not isinstance(path, str) or not image_path.fullmatch(path) for path in images):
+        raise SystemExit('Public catalog images must use the self-hosted product image directory.')
+    for path in images:
+        image = (release_dir / path).resolve()
+        if release_dir not in image.parents or not image.is_file() or image.stat().st_size == 0:
+            raise SystemExit('A public catalog image is missing from the immutable release.')
 PY
 
 for sensitive_path in admin.html dashboard.html account.html; do

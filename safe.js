@@ -14,7 +14,7 @@
     try {
       if (typeof value !== 'string' || !value.trim()) return '';
       const parsed = new URL(value, window.location.href);
-      if (!['https:', 'http:'].includes(parsed.protocol)) return '';
+      if (!['https:', 'http:'].includes(parsed.protocol) || parsed.origin !== window.location.origin) return '';
       return html(parsed.href);
     } catch (_) {
       return '';
@@ -47,12 +47,12 @@
     return value.filter(p => {
       if (!p || p.active === false || !Number.isSafeInteger(p.id) || p.id <= 0 || seen.has(p.id)) return false;
       if (typeof p.name !== 'string' || !p.name.trim() || typeof p.price !== 'number' || !Number.isFinite(p.price) || p.price < 0) return false;
-      if (!Number.isSafeInteger(p.stock) || p.stock < 0) return false;
+      if (p.availability !== 'prelaunch' || Object.hasOwn(p, 'stock')) return false;
       seen.add(p.id);
       return true;
     }).map(p => ({
       ...p,
-      originalPrice: typeof p.originalPrice === 'number' && Number.isFinite(p.originalPrice) && p.originalPrice >= p.price ? p.originalPrice : p.price,
+      originalPrice: typeof p.originalPrice === 'number' && Number.isFinite(p.originalPrice) && p.originalPrice > p.price ? p.originalPrice : null,
       variants: Array.isArray(p.variants) ? p.variants.filter(v => typeof v === 'string') : [],
       specs: Array.isArray(p.specs) ? p.specs.filter(v => v && typeof v === 'object') : [],
       reviews: Array.isArray(p.reviews) ? p.reviews.filter(v => v && typeof v === 'object') : [],

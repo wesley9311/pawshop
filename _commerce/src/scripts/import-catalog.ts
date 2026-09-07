@@ -6,6 +6,8 @@ import { resolve } from 'node:path'
 
 const HANDLE = 'large-corrugated-cardboard-cat-lounger'
 const SKU = 'PAW-CSL-NG-001'
+const PUBLIC_ORIGIN = 'https://pawlivora.com'
+const IMAGE_PATH = /^assets\/products\/cat-lounger\/[a-z0-9-]+\.jpg$/
 
 type SourceProduct = {
   id: number
@@ -14,6 +16,7 @@ type SourceProduct = {
   images: string[]
   description: string
   active: boolean
+  availability: 'prelaunch'
   variants: string[]
 }
 
@@ -21,9 +24,10 @@ function validateSource(value: unknown): SourceProduct {
   if (!Array.isArray(value) || value.length !== 1) throw new Error('catalog.json must contain exactly one launch product.')
   const product = value[0] as SourceProduct
   if (product.id !== 1 || product.active !== true) throw new Error('Only reviewed source product id=1 may be imported.')
+  if (product.availability !== 'prelaunch' || Object.prototype.hasOwnProperty.call(product, 'stock')) throw new Error('Source product must remain explicitly prelaunch without a public stock claim.')
   if (product.price !== 29.9) throw new Error('Expected the reviewed USD price of 29.90.')
   if (!Array.isArray(product.images) || product.images.length !== 9) throw new Error('Expected exactly nine approved listing images.')
-  if (!product.images.every(url => /^https:\/\/i\.ibb\.co\//.test(url))) throw new Error('An image URL is outside the approved host.')
+  if (!product.images.every(path => IMAGE_PATH.test(path))) throw new Error('An image path is outside the approved self-hosted product directory.')
   if (!product.name || !product.description || product.variants?.length !== 1) throw new Error('Required product copy or variant is missing.')
   return product
 }
@@ -31,6 +35,7 @@ function validateSource(value: unknown): SourceProduct {
 export default async function importCatalog({ container }: ExecArgs) {
   const sourcePath = resolve(process.cwd(), '..', 'catalog.json')
   const source = validateSource(JSON.parse(await readFile(sourcePath, 'utf8')))
+  const publicImages = source.images.map(path => `${PUBLIC_ORIGIN}/${path}`)
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const { data: existing } = await query.graph({
     entity: 'product',
@@ -48,7 +53,7 @@ export default async function importCatalog({ container }: ExecArgs) {
     if (
       product.status !== ProductStatus.DRAFT ||
       product.images?.length !== source.images.length ||
-      !source.images.every(url => product.images.some((image: any) => image.url === url)) ||
+      !publicImages.every(url => product.images.some((image: any) => image.url === url)) ||
       product.variants?.length !== 1 ||
       product.variants[0].sku !== SKU ||
       usd?.amount !== source.price ||
@@ -68,8 +73,8 @@ export default async function importCatalog({ container }: ExecArgs) {
         handle: HANDLE,
         description: source.description,
         status: ProductStatus.DRAFT,
-        thumbnail: source.images[0],
-        images: source.images.map(url => ({ url })),
+        thumbnail: publicImages[0],
+        images: publicImages.map(url => ({ url })),
         options: [{ title: 'Style', values: [source.variants[0]] }],
         variants: [{
           title: source.variants[0],
@@ -83,7 +88,7 @@ export default async function importCatalog({ container }: ExecArgs) {
         metadata: {
           source_catalog_id: source.id,
           reviewed_for_sale: false,
-          import_contract: 'pawshop-local-v1',
+          import_contract: 'pawshop-local-v2',
         },
       }],
     },

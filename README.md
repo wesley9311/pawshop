@@ -56,6 +56,11 @@ passes, runs live HTTPS boundary checks, and restores the preceding release if
 activation fails. It uses only Git, tar, curl and Python from the small static
 server; Node.js and the commerce runtime are not installed on that host.
 
+Approved listing images are served from the same PawLivora release rather than
+from a free third-party image host. The public catalog deliberately uses a
+`prelaunch` availability state and contains neither an unverified stock count
+nor a reference-price discount claim.
+
 The live verifier is intentionally separate from the local test suite:
 
 ```bash

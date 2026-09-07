@@ -5,20 +5,19 @@
     "category": "lounger",
     "price": 29.9,
     "images": [
-      "https://i.ibb.co/KjzP1cPd/01-Hero-1x1.png",
-      "https://i.ibb.co/Df83RchW/02-Product-Dimensions-1x1.png",
-      "https://i.ibb.co/qYZVHWm7/03-Spacious-Surface-1x1.png",
-      "https://i.ibb.co/SDqgGYbz/04-Ground-Clearance-1x1.png",
-      "https://i.ibb.co/whLFnBS8/05-Catnip-Ball-1x1.png",
-      "https://i.ibb.co/VW9PHyg0/06-A4-Hand-Size-Comparison-1x1.png",
-      "https://i.ibb.co/YB0xK2ht/07-Multi-Angle-View-1x1-v5.png",
-      "https://i.ibb.co/3yVg3cS4/08-Replaceable-Corrugated-Board-1x1-v6.png",
-      "https://i.ibb.co/ZpjvZkPv/09-Feature-Overview-English-1x1.png"
+      "assets/products/cat-lounger/01-hero-1x1.jpg",
+      "assets/products/cat-lounger/02-product-dimensions-1x1.jpg",
+      "assets/products/cat-lounger/03-spacious-surface-1x1.jpg",
+      "assets/products/cat-lounger/04-ground-clearance-1x1.jpg",
+      "assets/products/cat-lounger/05-catnip-ball-1x1.jpg",
+      "assets/products/cat-lounger/06-a4-hand-size-comparison-1x1.jpg",
+      "assets/products/cat-lounger/07-multi-angle-view-1x1-v5.jpg",
+      "assets/products/cat-lounger/08-replaceable-corrugated-board-1x1-v6.jpg",
+      "assets/products/cat-lounger/09-feature-overview-english-1x1.jpg"
     ],
     "imageUrl": "",
     "icon": "Lounger",
-    "originalPrice": 39.9,
-    "stock": 100,
+    "availability": "prelaunch",
     "variants": [
       "Multifunctional Mid-Century Modern Corrugated Cardboard Cat Lounger"
     ],

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://i.ibb.co data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>PawShop - Pet Supplies for Cats &amp; Dogs</title>
 <meta name="description" content="PawShop prelaunch product preview. Payments and customer orders are not open yet.">
@@ -208,7 +208,6 @@ const I18N = {
     sort_popular: 'Popular', sort_price_low: 'Price: low to high', sort_price_high: 'Price: high to low',
     load_more: 'Load more', no_products: 'No products found',
     variant: 'Variant', quantity: 'Quantity',
-    in_stock: 'In stock',
     add_to_cart: 'Add to cart', buy_now: 'Buy now',
     reserve_line: 'Not ready to pay? Reserve yours free - we will email you at launch',
     footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
@@ -245,7 +244,6 @@ const I18N = {
     sort_popular: '人气', sort_price_low: '价格从低到高', sort_price_high: '价格从高到低',
     load_more: '加载更多', no_products: '没有找到商品',
     variant: '款式', quantity: '数量',
-    in_stock: '有货',
     add_to_cart: '加入购物车', buy_now: '立即购买',
     reserve_line: '暂不付款？免费预留，上线时邮件通知你',
     footer_tag: '精选犬猫好物。',
@@ -386,7 +384,7 @@ function renderProducts() {
         <div class="flex items-center justify-between">
           <div>
             <span class="font-bold">${fmt(p.price)}</span>
-            <span class="text-xs text-slate-400 line-through ml-1">${fmt(p.originalPrice)}</span>
+            ${p.originalPrice > p.price ? `<span class="text-xs text-slate-400 line-through ml-1">${fmt(p.originalPrice)}</span>` : ''}
           </div>
           <button onclick="event.stopPropagation(); addToCart(${safeId(p.id)})" class="w-7 h-7 bg-slate-900 text-white rounded flex items-center justify-center hover:bg-slate-700" aria-label="Add to cart">
             <i class="fas fa-plus text-xs"></i>

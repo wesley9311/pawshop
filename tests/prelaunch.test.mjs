@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 
 const read = name => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
-const product = { id: 1, name: 'Preview lounger', price: 29.9, stock: 10, active: true };
+const product = { id: 1, name: 'Preview lounger', price: 29.9, availability: 'prelaunch', active: true };
 
 // Execute the actual inline page scripts with a minimal DOM. Browser layout and
 // event interactions are verified separately; these tests cover data boundaries.
@@ -57,7 +57,7 @@ for (const page of ['PawShop.html', 'product.html']) {
     await app.load([{ ...product, name: '<img src=x onerror=alert(1)>', icon: 'x" onerror="alert(1)', imageUrl: 'https://i.ibb.co/x" onerror="alert(1)' }, { ...product, id: 2, active: false }]);
     assert.equal(app.run('cart.length'), 1);
     assert.equal(app.run('cart[0].qty'), 1);
-    assert.equal(app.run('PawSafe.catalog([{id: 2, name: "Hidden", price: 1, stock: 1, active: false}]).length'), 0);
+    assert.equal(app.run('PawSafe.catalog([{id: 2, name: "Hidden", price: 1, availability: "prelaunch", active: false}]).length'), 0);
     const markup = app.nodes.get(page === 'PawShop.html' ? 'productGrid' : 'pdp').innerHTML;
     assert.ok(markup.includes('&lt;img'));
     assert.ok(!markup.includes('src="https://i.ibb.co/x" onerror='));
@@ -92,12 +92,13 @@ test('safe helpers reject malformed catalog fields and dangerous URL schemes', (
   const { context } = boot('PawShop.html');
   const safe = context.PawSafe;
   for (const input of ['', null, undefined, 'javascript:alert(1)', 'data:text/html,hi']) assert.equal(safe.url(input), '');
+  assert.equal(safe.url('https://images.example/photo.png'), '');
   assert.equal(safe.url('photo.png'), 'http://localhost:4173/pawshop/photo.png');
   assert.equal(safe.id('1);alert(1)'), 0);
   assert.equal(safe.quantity('NaN'), 1);
   assert.equal(safe.quantity(100000), 99);
-  assert.equal(safe.catalog([null, {}, { ...product, price: '29' }, { ...product, stock: NaN }, { ...product, id: '1' }]).length, 0);
+  assert.equal(safe.catalog([null, {}, { ...product, price: '29' }, { ...product, availability: 'in_stock' }, { ...product, stock: 10 }, { ...product, id: '1' }]).length, 0);
   const clean = safe.catalog([product, product]);
   assert.equal(clean.length, 1);
-  assert.equal(clean[0].originalPrice, product.price);
+  assert.equal(clean[0].originalPrice, null);
 });

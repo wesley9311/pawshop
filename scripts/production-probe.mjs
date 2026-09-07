@@ -88,9 +88,20 @@ export async function verifyProduction({ httpsOrigin, httpOrigin, request = requ
   } catch {
     throw new Error('Public catalog is not valid JSON.');
   }
-  if (!Array.isArray(products) || products.length < 1 || products.some(product => product?.active !== true)) {
-    throw new Error('Public catalog must contain at least one active product and no inactive products.');
+  if (!Array.isArray(products) || products.length < 1 || products.some(product => (
+    product?.active !== true ||
+    product?.availability !== 'prelaunch' ||
+    Object.hasOwn(product, 'stock') ||
+    Object.hasOwn(product, 'originalPrice') ||
+    !Array.isArray(product.images) ||
+    product.images.length < 1 ||
+    product.images.some(path => !/^assets\/products\/[a-z0-9-]+\/[a-z0-9-]+\.jpg$/.test(path))
+  ))) {
+    throw new Error('Public catalog violates the active prelaunch and self-hosted image boundary.');
   }
+
+  const heroImage = await request(`${secure}/${products[0].images[0]}`);
+  expectStatus(heroImage, 200, 'Primary product image');
 
   for (const path of ['admin.html', 'dashboard.html', 'account.html']) {
     const result = await request(`${secure}/${path}`);
@@ -99,4 +110,3 @@ export async function verifyProduction({ httpsOrigin, httpOrigin, request = requ
 
   return { productCount: products.length };
 }
-

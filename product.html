@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://i.ibb.co data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <title>PawShop - Product</title>
@@ -120,10 +120,10 @@ let cart = [];
 const L = {
   en: {
     topNote: 'Prelaunch preview — payments and orders are not open yet',
-    shop: 'Shop', breadcrumb: 'Shop', inStock: 'In stock', onlyLeft: n => `Only ${n} left`,
+    shop: 'Shop', breadcrumb: 'Shop', previewAvailability: 'Availability and inventory will be confirmed before sales open',
     addToCart: 'Save to list', buyNow: 'Launch updates', reserve: 'Sales are not open yet',
     quantity: 'Quantity', variant: 'Choose an option', off: n => `-${n}% OFF`,
-    soldOut: 'Sold out', unavailable: 'Unavailable', stockLabel: 'Stock', taxIncluded: v => `Tax included (${v} each)`, details: 'Product Details', specs: 'Specifications', galleryTitle: 'Gallery', reviews: 'Reviews',
+    unavailable: 'Unavailable', taxIncluded: v => `Tax included (${v} each)`, details: 'Product Details', specs: 'Specifications', galleryTitle: 'Gallery', reviews: 'Reviews',
     related: 'You may also like',
     points: [
       ['fa-box-open', 'Prelaunch preview', 'Payments and orders are currently disabled'],
@@ -134,10 +134,10 @@ const L = {
   },
   zh: {
     topNote: '预发布展示——暂未开放付款和订单',
-    shop: '商品', breadcrumb: '商品', inStock: '有货', onlyLeft: n => `仅剩 ${n} 件`,
+    shop: '商品', breadcrumb: '商品', previewAvailability: '正式开售前将确认可售范围与实际库存',
     addToCart: '保存商品', buyNow: '查看上线进度', reserve: '暂未开放销售',
     quantity: '数量', variant: '选择款式', off: n => `省 ${n}%`,
-    soldOut: '无货', unavailable: '已下架', stockLabel: '库存', taxIncluded: v => `含税 ${v}/个`, details: '商品详情', galleryTitle: '图片详情', specs: '规格参数', reviews: '用户评价',
+    unavailable: '已下架', taxIncluded: v => `含税 ${v}/个`, details: '商品详情', galleryTitle: '图片详情', specs: '规格参数', reviews: '用户评价',
     related: '猜你喜欢',
     points: [
       ['fa-box-open', '预发布展示', '付款和订单功能目前已关闭'],
@@ -176,7 +176,6 @@ function render() {
   selectedVariant = (p.variants && p.variants[0]) || null;
   const imgs = productImages(p);
   const discount = p.originalPrice && p.originalPrice > p.price ? Math.round((1 - p.price / p.originalPrice) * 100) : 0;
-  const soldOut = p.stock <= 0 || p.active === false;
   const realReviews = (p.reviews || []).filter(r => r.name && r.content);
 
   const gallery = imgs.length ? `
@@ -212,7 +211,7 @@ function render() {
         ${p.originalPrice && p.originalPrice > p.price ? `<span class="text-slate-400 line-through">${fmt(p.originalPrice)}</span><span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">${T.off(discount)}</span>` : ''}
       </div>
       ${typeof TAX_RATE !== 'undefined' && TAX_RATE > 0 ? `<p class="text-xs text-slate-400 mb-1">${T.taxIncluded(fmt(p.price * TAX_RATE))}</p>` : ''}
-      <p class="text-xs text-slate-400 mb-5">${soldOut ? T.soldOut : (p.stock < 20 ? T.onlyLeft(p.stock) : T.inStock)}</p>
+      <p class="text-xs text-slate-500 mb-5">${T.previewAvailability}</p>
 
       ${variants}
       <div class="mb-5">
@@ -223,13 +222,13 @@ function render() {
             <span id="qtyVal" class="w-12 text-center font-medium">1</span>
             <button onclick="chQty(1)" class="w-10 h-10 hover:bg-slate-50">+</button>
           </div>
-          <span id="stockBadge" class="text-xs ${p.active === false || p.stock <= 0 ? 'text-red-500 font-medium' : 'text-slate-400'}">${p.active === false ? T.unavailable : (p.stock <= 0 ? T.soldOut : (p.stock < 20 ? T.onlyLeft(p.stock) : `${T.stockLabel} ${p.stock}`))}</span>
+          <span class="text-xs text-slate-400">${T.previewAvailability}</span>
         </div>
       </div>
 
       <div class="flex flex-col sm:flex-row gap-3 mb-6">
-        <button onclick="addToCart()" ${soldOut ? 'disabled' : ''} class="flex-1 py-4 sm:py-3.5 bg-slate-900 text-white font-semibold rounded-xl hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-slate-900/10">${T.addToCart}</button>
-        <button onclick="buyNow()" ${soldOut ? 'disabled' : ''} class="flex-1 py-4 sm:py-3.5 border-2 border-slate-900 font-semibold rounded-xl hover:bg-slate-50 disabled:opacity-40">${T.buyNow}</button>
+        <button onclick="addToCart()" class="flex-1 py-4 sm:py-3.5 bg-slate-900 text-white font-semibold rounded-xl hover:bg-slate-700 shadow-lg shadow-slate-900/10">${T.addToCart}</button>
+        <button onclick="buyNow()" class="flex-1 py-4 sm:py-3.5 border-2 border-slate-900 font-semibold rounded-xl hover:bg-slate-50">${T.buyNow}</button>
       </div>
       <button onclick="openWaitlist()" class="text-sm text-slate-500 hover:text-slate-900 underline underline-offset-4 mb-6">${T.reserve}</button>
 
@@ -282,8 +281,8 @@ function render() {
   // 移动端吸底栏
   document.getElementById('stickyBar').innerHTML = `
     <div class="flex-shrink-0"><div class="text-[10px] text-slate-400">${T.addToCart === '加入购物车' ? '价格' : 'Price'}</div><div class="font-bold">${fmt(p.price)}</div></div>
-    <button onclick="addToCart()" ${soldOut ? 'disabled' : ''} class="flex-1 py-3 bg-slate-900 text-white text-sm font-semibold rounded-xl disabled:opacity-40">${T.addToCart}</button>
-    <button onclick="buyNow()" ${soldOut ? 'disabled' : ''} class="flex-1 py-3 border-2 border-slate-900 text-sm font-semibold rounded-xl disabled:opacity-40">${T.buyNow}</button>`;
+    <button onclick="addToCart()" class="flex-1 py-3 bg-slate-900 text-white text-sm font-semibold rounded-xl">${T.addToCart}</button>
+    <button onclick="buyNow()" class="flex-1 py-3 border-2 border-slate-900 text-sm font-semibold rounded-xl">${T.buyNow}</button>`;
 
   document.getElementById('topNote').textContent = T.topNote;
 }
@@ -320,8 +319,7 @@ function pickVariant(btn, index) {
   btn.classList.add('variant-sel');
 }
 function chQty(d) {
-  const max = currentProduct ? currentProduct.stock : 99;
-  qty = Math.min(Math.max(1, qty + d), Math.max(1, max));
+  qty = Math.min(Math.max(1, qty + d), 99);
   document.getElementById('qtyVal').textContent = qty;
 }
 
