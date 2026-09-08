@@ -14,6 +14,10 @@ const criticalTables = [
   ['"order"', 'id'],
   ['"user"', 'id'],
 ];
+const productionManifestFields = [
+  'created_at', 'encrypted_file', 'encryption', 'hmac_sha256', 'manifest_hmac_sha256',
+  'schema', 'sha256', 'size_bytes', 'source_database',
+].sort();
 
 function criticalDataSha256(query) {
   const hash = createHash('sha256');
@@ -59,6 +63,45 @@ function backupManifestHmac(manifest, key) {
   return createHmac('sha256', key).update(JSON.stringify(authenticated)).digest('hex');
 }
 
+function backupReceiptHmac(receipt, key) {
+  const authenticated = {
+    schema: receipt.schema,
+    verified_at: receipt.verified_at,
+    manifest_file: receipt.manifest_file,
+    encrypted_file: receipt.encrypted_file,
+    encrypted_sha256: receipt.encrypted_sha256,
+    manifest_sha256: receipt.manifest_sha256,
+    bucket: receipt.bucket,
+    encrypted_object_key: receipt.encrypted_object_key,
+    encrypted_version_id: receipt.encrypted_version_id,
+    manifest_object_key: receipt.manifest_object_key,
+    manifest_version_id: receipt.manifest_version_id,
+  };
+  return createHmac('sha256', key).update(JSON.stringify(authenticated)).digest('hex');
+}
+
+function assertProductionBackupManifest(manifest, manifestFileName) {
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) ||
+      Object.keys(manifest).sort().join('\0') !== productionManifestFields.join('\0') ||
+      manifest.schema !== 'pawshop-production-backup-v1' ||
+      manifest.encryption !== 'AES-256-CBC PBKDF2' ||
+      !/^[a-z][a-z0-9_]{0,62}$/.test(manifest.source_database || '') ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(manifest.created_at || '') ||
+      !Number.isSafeInteger(Date.parse(manifest.created_at)) ||
+      !/^[0-9a-f]{64}$/i.test(manifest.sha256 || '') || !/^[0-9a-f]{64}$/i.test(manifest.hmac_sha256 || '') ||
+      !/^[0-9a-f]{64}$/i.test(manifest.manifest_hmac_sha256 || '') ||
+      !Number.isSafeInteger(manifest.size_bytes) || manifest.size_bytes <= 0) {
+    throw new Error('Production backup manifest has unsupported or unsafe metadata.');
+  }
+  const stamp = manifest.created_at.replaceAll(/[-:.]/g, '');
+  const expectedEncrypted = `pawshop_production_${stamp}.dump.enc`;
+  const expectedManifest = `pawshop_production_${stamp}.manifest.json`;
+  if (manifest.encrypted_file !== expectedEncrypted || (manifestFileName && manifestFileName !== expectedManifest)) {
+    throw new Error('Production backup manifest filenames do not match its authenticated timestamp.');
+  }
+  return { expectedEncrypted, expectedManifest };
+}
+
 function constrainedBackupPath(backupDir, candidate, label) {
   const base = resolve(backupDir);
   const target = resolve(candidate);
@@ -67,7 +110,9 @@ function constrainedBackupPath(backupDir, candidate, label) {
 }
 
 module.exports = {
+  assertProductionBackupManifest,
   backupManifestHmac,
+  backupReceiptHmac,
   constrainedBackupPath,
   criticalDataSha256,
   digestFile,

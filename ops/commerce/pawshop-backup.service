@@ -5,12 +5,16 @@ Requires=postgresql.service
 
 [Service]
 Type=oneshot
-User=pawshop
-Group=pawshop
+User=pawshop-backup
+Group=pawshop-backup
 WorkingDirectory=/srv/pawshop-commerce/current/_commerce
-EnvironmentFile=/etc/pawshop/commerce.env
+EnvironmentFile=/etc/pawshop-backup/backup.env
+EnvironmentFile=/etc/pawshop-backup/backup-offsite.env
+LoadCredential=backup-s3-access-key:/etc/pawshop-backup/backup-s3-access-key
+LoadCredential=backup-s3-secret-key:/etc/pawshop-backup/backup-s3-secret-key
 ExecStart=/usr/bin/node scripts/backup-production.mjs
-TimeoutStartSec=10min
+ExecStartPost=/usr/bin/node scripts/sync-production-backups.mjs
+TimeoutStartSec=30min
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

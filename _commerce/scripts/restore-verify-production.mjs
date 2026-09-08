@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { pipeline } from 'node:stream/promises';
 
 const require = createRequire(import.meta.url);
-const { backupManifestHmac, digestFile, equalHex, readBackupKey } = require('./backup-integrity.cjs');
+const { assertProductionBackupManifest, backupManifestHmac, digestFile, equalHex, readBackupKey } = require('./backup-integrity.cjs');
 
 const root = '/var/lib/pawshop-restore';
 const inputDir = join(root, 'input');
@@ -55,18 +55,7 @@ try {
 } catch {
   throw new Error('Restore manifest is not valid JSON.');
 }
-const manifestFields = [
-  'created_at', 'encrypted_file', 'encryption', 'hmac_sha256', 'manifest_hmac_sha256',
-  'schema', 'sha256', 'size_bytes', 'source_database',
-];
-if (Object.keys(manifest).sort().join('\0') !== manifestFields.sort().join('\0') ||
-    manifest.schema !== 'pawshop-production-backup-v1' ||
-    manifest.encryption !== 'AES-256-CBC PBKDF2' ||
-    !/^[a-z][a-z0-9_]{0,62}$/.test(manifest.source_database || '') ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(manifest.created_at || '') ||
-    manifest.encrypted_file !== `pawshop_production_${manifest.created_at.replaceAll(/[-:.]/g, '')}.dump.enc`) {
-  throw new Error('Restore manifest contains unsupported or unsafe metadata.');
-}
+assertProductionBackupManifest(manifest);
 const encryptedFile = join(inputDir, manifest.encrypted_file);
 const encryptedStat = assertInputFile(encryptedFile, 'Encrypted restore archive', Number.MAX_SAFE_INTEGER);
 if (!Number.isSafeInteger(manifest.size_bytes) || manifest.size_bytes !== encryptedStat.size) {

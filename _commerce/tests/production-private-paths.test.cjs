@@ -7,18 +7,19 @@ const {
   assertBackupKeyStat,
   databaseConnection,
   productionPrivatePaths,
+  validateProductionBackupEnvironment,
 } = require('../scripts/production-private-paths.cjs');
 
 test('production backup locations cannot drift into public or release paths', () => {
   assert.deepEqual(productionPrivatePaths({
     PAWSHOP_BACKUP_DIR: '/var/backups/pawshop',
-    PAWSHOP_BACKUP_KEY_FILE: '/etc/pawshop/backup.key',
+    PAWSHOP_BACKUP_KEY_FILE: '/etc/pawshop-backup/backup.key',
   }), {
-    backupDir: '/var/backups/pawshop', backupKeyFile: '/etc/pawshop/backup.key',
+    backupDir: '/var/backups/pawshop', backupKeyFile: '/etc/pawshop-backup/backup.key',
   });
   assert.throws(() => productionPrivatePaths({
     PAWSHOP_BACKUP_DIR: '/srv/pawshop/current/backups',
-    PAWSHOP_BACKUP_KEY_FILE: '/etc/pawshop/backup.key',
+    PAWSHOP_BACKUP_KEY_FILE: '/etc/pawshop-backup/backup.key',
   }), /approved private Ubuntu locations/);
 });
 
@@ -31,7 +32,19 @@ test('production backup parses only the fixed authenticated PostgreSQL endpoint'
     'postgresql://pawshop:secret@127.0.0.1:5433/pawshop',
     'postgresql://pawshop@127.0.0.1:5432/pawshop',
     'postgresql://pawshop:secret@127.0.0.1:5432/pawshop-production',
+    'postgresql://pawshop:secret@127.0.0.1:5432/pawshop?sslmode=require',
+    'postgresql://pawshop:secret@127.0.0.1:5432/pawshop?sslmode=disable&extra=1',
   ]) assert.throws(() => databaseConnection(url));
+});
+
+test('production backup uses a minimal dedicated environment', () => {
+  const env = {
+    NODE_ENV: 'production', PAWSHOP_MODE: 'production-admin-only',
+    PAWSHOP_INFRA_TOPOLOGY: 'single-host-private',
+    DATABASE_URL: 'postgresql://pawshop_backup:secret@127.0.0.1:5432/pawshop?sslmode=disable',
+  };
+  assert.equal(validateProductionBackupEnvironment(env).connection.user, 'pawshop_backup');
+  assert.throws(() => validateProductionBackupEnvironment({ ...env, PAWSHOP_MODE: 'wrong' }));
 });
 
 test('production backup key must be a nonsymlink root and service-group file with mode 0640', () => {

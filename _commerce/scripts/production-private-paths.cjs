@@ -3,7 +3,7 @@
 const { resolve } = require('node:path');
 
 const EXPECTED_BACKUP_DIR = '/var/backups/pawshop';
-const EXPECTED_BACKUP_KEY_FILE = '/etc/pawshop/backup.key';
+const EXPECTED_BACKUP_KEY_FILE = '/etc/pawshop-backup/backup.key';
 
 function productionPrivatePaths(env) {
   const backupDir = resolve(env.PAWSHOP_BACKUP_DIR || '');
@@ -15,16 +15,35 @@ function productionPrivatePaths(env) {
 }
 
 function databaseConnection(databaseUrl) {
-  const url = new URL(databaseUrl);
-  const database = decodeURIComponent(url.pathname.slice(1));
-  if (url.hostname !== '127.0.0.1' || (url.port || '5432') !== '5432' || !url.username || !url.password ||
-      !/^[a-z][a-z0-9_]{0,62}$/.test(database)) {
+  let url;
+  let user;
+  let password;
+  let database;
+  try {
+    url = new URL(databaseUrl);
+    user = decodeURIComponent(url.username);
+    password = decodeURIComponent(url.password);
+    database = decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    throw new Error('Production backup database connection is invalid.');
+  }
+  if (url.protocol !== 'postgresql:' || url.hostname !== '127.0.0.1' || (url.port || '5432') !== '5432' ||
+      !/^[a-z][a-z0-9_]{0,62}$/.test(user) || !password || !/^[a-z][a-z0-9_]{0,62}$/.test(database) ||
+      url.searchParams.size !== 1 || url.searchParams.get('sslmode') !== 'disable' || url.hash) {
     throw new Error('Production backup database connection is outside the approved loopback service.');
   }
   return {
     host: '127.0.0.1', port: '5432',
-    user: decodeURIComponent(url.username), password: decodeURIComponent(url.password), database,
+    user, password, database,
   };
+}
+
+function validateProductionBackupEnvironment(env) {
+  if (env.NODE_ENV !== 'production' || env.PAWSHOP_MODE !== 'production-admin-only' ||
+      env.PAWSHOP_INFRA_TOPOLOGY !== 'single-host-private') {
+    throw new Error('Production backup requires the approved private production topology.');
+  }
+  return { connection: databaseConnection(env.DATABASE_URL || '') };
 }
 
 function assertBackupKeyStat(stat, serviceGid) {
@@ -53,4 +72,5 @@ module.exports = {
   assertBackupKeyStat,
   databaseConnection,
   productionPrivatePaths,
+  validateProductionBackupEnvironment,
 };

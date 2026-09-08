@@ -30,7 +30,8 @@ RestrictSUIDSGID=true
 LockPersonality=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadWritePaths=/var/lib/pawshop /var/backups/pawshop
+ReadWritePaths=/var/lib/pawshop
+InaccessiblePaths=-/var/backups/pawshop -/etc/pawshop-backup
 
 [Install]
 WantedBy=multi-user.target

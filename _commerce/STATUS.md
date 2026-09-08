@@ -158,7 +158,7 @@ create orders, collect customer data or enable payment.
 - Backup directories and the external key file are restricted to approved
   private Ubuntu paths outside all public and release directories. The key must
   be a root-owned nonsymlink file, group-readable only by the service account.
-- The expanded commerce suite now contains thirty-two passing tests; the
+- The expanded commerce suite now contains forty passing tests; the
   native service files remain inactive templates until real-host verification.
 - Added a manual-only production restore unit running as a separate unprivileged
   OS account from root-installed immutable scripts. It authenticates the staged
@@ -166,6 +166,20 @@ create orders, collect customer data or enable payment.
   no network listener, checks critical table counts, and records success only
   after the cluster directory is removed. It never connects to production.
 
-Production restore verification, retention/remote-copy policy, atomic release
-activation and rollback are the next implementation steps. None of these units
-have been installed or enabled on the undersized live server.
+None of these units have been installed or enabled on the undersized live server.
+
+## Offsite backup retention round — 2026-09-08
+
+- Added a separate S3-compatible encrypted-backup path using systemd credentials;
+  the database key is never uploaded and no remote delete API exists in runtime code.
+- Requires bucket versioning, a declared minimum 90-day lifecycle, and an explicit
+  no-delete credential gate before any object request.
+- Newly uploaded ciphertext and manifests are fully read back by their exact
+  returned version IDs and SHA-256 checked; later runs validate exact recorded
+  version IDs against HMAC-signed local receipts.
+- Local pruning keeps at least seven sets and never removes the latest, young, or
+  remotely unverified set. Remote retention remains controlled by the bucket owner.
+
+The next implementation step is atomic release activation and rollback. Real S3
+upload/read-back/delete-denial evidence still requires an owner-created bucket and
+least-privilege credentials; no external account or data was used in this round.

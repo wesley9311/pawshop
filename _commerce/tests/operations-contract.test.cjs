@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
-const { backupManifestHmac, constrainedBackupPath, equalHex } = require('../scripts/backup-integrity.cjs');
+const { assertProductionBackupManifest, backupManifestHmac, constrainedBackupPath, equalHex } = require('../scripts/backup-integrity.cjs');
 
 const root = resolve(__dirname, '..');
 const backup = readFileSync(resolve(root, 'scripts/backup-real.mjs'), 'utf8');
@@ -14,6 +14,8 @@ const productionVerifier = readFileSync(resolve(root, 'scripts/verify-production
 const productionBackup = readFileSync(resolve(root, 'scripts/backup-production.mjs'), 'utf8');
 const productionRestore = readFileSync(resolve(root, 'scripts/restore-verify-production.mjs'), 'utf8');
 const productionWait = readFileSync(resolve(root, 'scripts/wait-production-admin.mjs'), 'utf8');
+const offsiteSync = readFileSync(resolve(root, 'scripts/sync-production-backups.mjs'), 'utf8');
+const offsiteClient = readFileSync(resolve(root, 'scripts/offsite-s3-client.cjs'), 'utf8');
 const commerceService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-commerce.service'), 'utf8');
 const backupService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup.service'), 'utf8');
 const restoreService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-restore-verify.service'), 'utf8');
@@ -65,6 +67,10 @@ test('production manifest authentication covers archive identity and provenance'
   for (const field of ['created_at', 'source_database', 'encrypted_file', 'sha256', 'hmac_sha256', 'size_bytes']) {
     assert.notEqual(backupManifestHmac({ ...manifest, [field]: `${manifest[field]}x` }, key), signed);
   }
+  const complete = { ...manifest, manifest_hmac_sha256: signed };
+  assert.doesNotThrow(() => assertProductionBackupManifest(complete, 'pawshop_production_20260908T000000000Z.manifest.json'));
+  assert.throws(() => assertProductionBackupManifest({ ...complete, extra: true }));
+  assert.throws(() => assertProductionBackupManifest(complete, 'pawshop_production_20260909T000000000Z.manifest.json'));
 });
 
 test('production admin verifier keeps customer commerce closed', () => {
@@ -97,7 +103,7 @@ test('production backup encrypts data and suppresses database command output', (
 });
 
 test('production restore streams decrypted data into an isolated database and always removes it', () => {
-  assert.match(productionRestore, /pawshop-production-backup-v1/);
+  assert.match(productionRestore, /assertProductionBackupManifest/);
   assert.match(productionRestore, /digestFile\(encryptedFile/);
   assert.match(productionRestore, /manifest_hmac_sha256/);
   assert.match(productionRestore, /pipeline\(decrypt\.stdout, restore\.stdin\)/);
@@ -135,6 +141,26 @@ test('systemd service is unprivileged, hardened, and verifies startup', () => {
   assert.match(commerceService, /^TimeoutStartSec=180s$/m);
   assert.match(productionWait, /Date\.now\(\) \+ 120000/);
   assert.match(productionWait, /verifierTimeoutMs = 5000/);
-  assert.match(backupService, /^TimeoutStartSec=10min$/m);
+  assert.match(backupService, /^TimeoutStartSec=30min$/m);
+  assert.match(backupService, /^User=pawshop-backup$/m);
+  assert.match(backupService, /^EnvironmentFile=\/etc\/pawshop-backup\/backup\.env$/m);
+  assert.match(commerceService, /^InaccessiblePaths=-\/var\/backups\/pawshop -\/etc\/pawshop-backup$/m);
   assert.doesNotMatch(commerceService, /0\.0\.0\.0|--host\s+::/);
+});
+
+test('offsite sync is versioned, read-back verified, credential isolated, and never deletes remote objects', () => {
+  assert.match(offsiteSync, /assertVersioningEnabled/);
+  assert.match(offsiteSync, /manifest_hmac_sha256/);
+  assert.match(offsiteSync, /receipt_hmac_sha256/);
+  assert.match(offsiteSync, /selectLocalPruneCandidates/);
+  assert.match(offsiteSync, /remote\.versionId !== versionId/);
+  assert.match(offsiteSync, /\.offsite-sync\.lock/);
+  assert.match(offsiteSync, /client\?\.destroy\(\)/);
+  assert.match(offsiteClient, /versionId: upload\.VersionId/);
+  assert.match(offsiteClient, /NodeHttpHandler/);
+  assert.doesNotMatch(`${offsiteSync}\n${offsiteClient}`, /DeleteObject|DeleteObjects/);
+  assert.match(backupService, /^LoadCredential=backup-s3-access-key:/m);
+  assert.match(backupService, /^LoadCredential=backup-s3-secret-key:/m);
+  assert.match(backupService, /ExecStartPost=.*sync-production-backups\.mjs/);
+  assert.doesNotMatch(backupService, /BACKUP_S3_ACCESS_KEY|BACKUP_S3_SECRET/);
 });

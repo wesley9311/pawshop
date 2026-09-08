@@ -6,15 +6,15 @@ import { pipeline } from 'node:stream/promises';
 
 const require = createRequire(import.meta.url);
 const { backupManifestHmac, digestFile, readBackupKey } = require('./backup-integrity.cjs');
-const { assertBackupDirectoryStat, assertBackupKeyStat, databaseConnection, productionPrivatePaths } = require('./production-private-paths.cjs');
-const { validateProductionEnvironment } = require('../src/lib/production-policy.cjs');
+const {
+  assertBackupDirectoryStat, assertBackupKeyStat, productionPrivatePaths, validateProductionBackupEnvironment,
+} = require('./production-private-paths.cjs');
 
-const config = validateProductionEnvironment(process.env);
-if (process.platform !== 'linux' || config.topology !== 'single-host-private') {
+const { connection } = validateProductionBackupEnvironment(process.env);
+if (process.platform !== 'linux') {
   throw new Error('Production backup requires the Linux single-host private topology.');
 }
 const { backupDir, backupKeyFile } = productionPrivatePaths(process.env);
-const connection = databaseConnection(config.databaseUrl);
 assertBackupDirectoryStat(lstatSync(backupDir), process.getuid());
 assertBackupKeyStat(lstatSync(backupKeyFile), process.getgid());
 const backupKey = readBackupKey(backupKeyFile);
