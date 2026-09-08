@@ -19,6 +19,7 @@ const offsiteClient = readFileSync(resolve(root, 'scripts/offsite-s3-client.cjs'
 const commerceService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-commerce.service'), 'utf8');
 const backupService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup.service'), 'utf8');
 const restoreService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-restore-verify.service'), 'utf8');
+const hostBootstrap = readFileSync(resolve(root, '..', 'ops/commerce/bootstrap-ubuntu-host.sh'), 'utf8');
 
 test('real backup is encrypted and plaintext is removed', () => {
   assert.match(backup, /aes-256-cbc/);
@@ -139,6 +140,9 @@ test('systemd service is unprivileged, hardened, and verifies startup', () => {
   assert.match(commerceService, /^CapabilityBoundingSet=$/m);
   assert.match(commerceService, /wait-production-admin\.mjs/);
   assert.match(commerceService, /^TimeoutStartSec=180s$/m);
+  assert.match(commerceService, /^Environment=NODE_OPTIONS=--max-old-space-size=768$/m);
+  assert.match(commerceService, /^MemoryHigh=1G$/m);
+  assert.match(commerceService, /^MemoryMax=1200M$/m);
   assert.match(productionWait, /Date\.now\(\) \+ 120000/);
   assert.match(productionWait, /verifierTimeoutMs = 5000/);
   assert.match(backupService, /^TimeoutStartSec=30min$/m);
@@ -146,6 +150,35 @@ test('systemd service is unprivileged, hardened, and verifies startup', () => {
   assert.match(backupService, /^EnvironmentFile=\/etc\/pawshop-backup\/backup\.env$/m);
   assert.match(commerceService, /^InaccessiblePaths=-\/var\/backups\/pawshop -\/etc\/pawshop-backup$/m);
   assert.doesNotMatch(commerceService, /0\.0\.0\.0|--host\s+::/);
+});
+
+test('Ubuntu bootstrap pins supply chain and keeps data services private', () => {
+  assert.match(hostBootstrap, /node_version=22\.23\.2/);
+  assert.match(hostBootstrap, /node_sha256=d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307/);
+  assert.match(hostBootstrap, /pgdg_fingerprint=B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8/);
+  assert.match(hostBootstrap, /primary_fingerprints != "\$pgdg_fingerprint"/);
+  assert.match(hostBootstrap, /postgresql-17 postgresql-client-17/);
+  assert.match(hostBootstrap, /listen_addresses = '127\.0\.0\.1'/);
+  assert.match(hostBootstrap, /--bind 127\.0\.0\.1/);
+  assert.match(hostBootstrap, /--maxmemory 96mb/);
+  assert.match(hostBootstrap, /shared_buffers = '128MB'/);
+  assert.match(hostBootstrap, /max_connections = 40/);
+  assert.match(hostBootstrap, /actual_listeners != "\$expected_listeners"/);
+  assert.match(hostBootstrap, /for unit in postgresql@17-main\.service redis-server\.service/);
+  assert.match(hostBootstrap, /systemctl stop "\$unit"/);
+  assert.match(hostBootstrap, /systemctl disable "\$unit"/);
+  assert.match(hostBootstrap, /policy_rc_path=\/usr\/sbin\/policy-rc\.d/);
+  assert.match(hostBootstrap, /exit 101/);
+  assert.match(hostBootstrap, /runtime_mutation_started=1[\s\S]*apt-get install/);
+  assert.match(hostBootstrap, /enabled_state == disabled \|\| \$enabled_state == not-found/);
+  assert.match(hostBootstrap, /CRITICAL: bootstrap failed and PostgreSQL\/Redis containment or policy-rc\.d removal was not verified/);
+  assert.match(hostBootstrap, /systemctl is-active --quiet "\$unit"/);
+  assert.match(hostBootstrap, /Existing system account does not match the approved identity/);
+  assert.match(hostBootstrap, /The approved system group is shared by another account/);
+  assert.match(hostBootstrap, /-n \$group_members/);
+  assert.match(hostBootstrap, /diff --brief --recursive --no-dereference/);
+  assert.match(hostBootstrap, /Medusa, database roles, migrations, customer APIs, backups and payments remain inactive/);
+  assert.doesNotMatch(hostBootstrap, /commerce\.env|backup\.key|CREATE ROLE|db:migrate|systemctl enable.*pawshop-commerce/);
 });
 
 test('offsite sync is versioned, read-back verified, credential isolated, and never deletes remote objects', () => {

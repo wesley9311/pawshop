@@ -10,11 +10,14 @@ User=pawshop
 Group=pawshop
 WorkingDirectory=/srv/pawshop-commerce/current/_commerce
 EnvironmentFile=/etc/pawshop/commerce.env
+Environment=NODE_OPTIONS=--max-old-space-size=768
 ExecStartPre=/usr/bin/node scripts/preflight-production-host.mjs
 ExecStart=/usr/bin/node scripts/run-production.mjs start
 ExecStartPost=/usr/bin/node scripts/wait-production-admin.mjs
 Restart=on-failure
 RestartSec=5s
+MemoryHigh=1G
+MemoryMax=1200M
 TimeoutStartSec=180s
 TimeoutStopSec=30s
 UMask=0077

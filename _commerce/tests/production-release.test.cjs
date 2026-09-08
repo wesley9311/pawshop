@@ -57,6 +57,7 @@ test('commerce deployment is immutable, atomic, secret-isolated, and automatical
   assert.match(build, /validateProductionEnvironment/);
   assert.doesNotMatch(build, /commerce\.env|readFileSync/);
   assert.match(build, /HOME: '\/var\/cache\/pawshop-build'/);
+  assert.match(build, /NODE_OPTIONS: '--max-old-space-size=1024'/);
 });
 
 test('manual rollback requires a retained exact release and schema compatibility gate', () => {

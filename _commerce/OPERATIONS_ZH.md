@@ -74,37 +74,41 @@ npm --prefix _commerce run restore:verify-real
 - `pawshop-restore-verify.service`：仅由管理员手动启动，以独立无特权账号和
   独立临时 PostgreSQL 集群验证 root 暂存的备份副本，绝不连接生产数据库。
 
+首次主机准备只运行审查过的 `bootstrap-ubuntu-host.sh`。它固定并校验 Node
+22.23.2 官方发布包哈希，验证 PostgreSQL 官方仓库签名密钥指纹，安装 PostgreSQL
+17 与 Redis，并把两个数据服务限制到 IPv4 回环地址。针对 2 GB 套餐，PostgreSQL
+使用 128 MB shared buffers 和最多 40 个连接，Redis 上限 96 MB；Medusa 运行时
+使用 768 MB V8 heap、1 GB memory high 与 1200 MB hard limit，发布构建 heap 上限
+为 1024 MB。Node 二进制是固定版本，不由 Ubuntu 自动更新；每次升级必须更新哈希、
+重跑测试并重新审查。该脚本不会创建数据库业务角色、运行迁移、生成备份或对象存储
+密钥，也不会安装或启用 Medusa systemd 单元。
+
+软件包安装期间脚本会临时创建 `policy-rc.d`，阻止 Ubuntu 的安装脚本在安全配置与
+监听验证之前自动启动 PostgreSQL 或 Redis；正常完成和异常退出都会删除该临时策略。
+如果主机原本已有 `policy-rc.d`，脚本会拒绝覆盖并停止，保留现有主机策略。
+
+初始化阶段的 Redis 只允许从本机 IPv4 回环访问，但这不是 Medusa 的最终生产认证
+状态。启用 Medusa 前必须另行生成独立 Redis ACL 用户与强密码，把带认证信息的
+`REDIS_URL` 写入仅服务账号可读的生产环境文件，并完成凭据轮换与拒绝匿名访问验证；
+未通过该门槛时不得启动 Medusa、客户 API 或订单写入。
+
 生产备份密钥和最小化备份环境必须位于 `/etc/pawshop-backup/`，备份必须位于
 `/var/backups/pawshop/`，都不得放进 Git、静态站目录或发布目录。服务器升配与
 系统盘扩容已经完成，但这些单元仍不得直接启用；必须先完成生产主机预检、
 真实恢复核验和异地副本验证。
 
-主机预检通过后，由 root 一次性建立私有目录和备份密钥；不要把密钥打印到终端、
-日志或聊天中：
+初始化脚本会创建并严格核验系统账号及私有目录；不要再手工重复执行 `useradd` 或
+改变这些账号的主组、附加组、home 与 shell。生产数据库角色和异地备份条件就绪后，
+才由 root 一次性生成备份密钥；不要把密钥打印到终端、日志或聊天中：
 
 ```bash
-sudo install -d -o root -g pawshop -m 0750 /etc/pawshop
-sudo useradd --system --home-dir /var/cache/pawshop-build --shell /usr/sbin/nologin pawshop-build
-sudo install -d -o pawshop-build -g pawshop-build -m 0700 /var/cache/pawshop-build
-sudo useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin pawshop-backup
-sudo install -d -o root -g pawshop-backup -m 0750 /etc/pawshop-backup
-sudo install -d -o pawshop-backup -g pawshop-backup -m 0700 /var/backups/pawshop
-sudo install -d -o pawshop -g pawshop -m 0700 /var/lib/pawshop
 sudo sh -c 'umask 027; openssl rand -hex 32 > /etc/pawshop-backup/backup.key'
 sudo chown root:pawshop-backup /etc/pawshop-backup/backup.key
 sudo chmod 0640 /etc/pawshop-backup/backup.key
-sudo useradd --system --home-dir /var/lib/pawshop-restore --shell /usr/sbin/nologin pawshop-restore
-sudo install -d -o root -g pawshop-restore -m 0750 /var/lib/pawshop-restore
-sudo install -d -o pawshop-restore -g pawshop-restore -m 0700 \
-  /var/lib/pawshop-restore/work \
-  /var/lib/pawshop-restore/verifications
-sudo install -d -o root -g pawshop-restore -m 0750 /var/lib/pawshop-restore/input
-sudo install -d -o root -g root -m 0755 /usr/local/libexec/pawshop
-sudo install -o root -g root -m 0555 \
-  /srv/pawshop-commerce/current/_commerce/scripts/restore-verify-production.mjs \
-  /srv/pawshop-commerce/current/_commerce/scripts/backup-integrity.cjs \
-  /usr/local/libexec/pawshop/
 ```
+
+恢复验证脚本必须从随后选定并审查过的精确 release 安装到
+`/usr/local/libexec/pawshop/`，不能从活动软链接或工作目录临时复制。
 
 备份程序会拒绝符号链接、非 root 所有、非 `pawshop-backup` 组或不是精确 `0640`
 权限的密钥。备份单元只读取独立的 `backup.env`，不读取包含后台 JWT、Cookie、

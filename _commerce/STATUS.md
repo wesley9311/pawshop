@@ -207,3 +207,24 @@ host gate now accepts no less than 1,600,000 KiB while still rejecting the forme
 1 GB plan. The root ext4 filesystem was expanded online from 30 GB to 40 GB after
 storing a root-only partition-table backup; it has about 33 GB free. Node,
 PostgreSQL, Redis, database migration and commerce activation have not been performed.
+
+## Reviewed Ubuntu runtime bootstrap — 2026-09-08
+
+- Added a repeatable, fail-closed Ubuntu 24.04 x86_64 bootstrap that installs a pinned,
+  checksum-verified Node 22.23.2 runtime, PostgreSQL 17 from the fingerprint-checked
+  official PGDG repository, and Ubuntu Redis.
+- PostgreSQL and Redis are restricted to IPv4 loopback and bounded to 128 MB shared
+  buffers / 40 connections and 96 MB cache respectively. Medusa is constrained to a
+  768 MB V8 heap, 1 GB memory-high threshold and 1200 MB systemd hard limit; release
+  builds use a 1024 MB heap cap.
+- A temporary, collision-checked `policy-rc.d` prevents package maintainer scripts
+  from starting data services before their private configuration is installed. Both
+  success and failure paths remove it, and failure containment covers package setup.
+- The bootstrap prepares only system accounts, directories and the two private data
+  services. It does not create commerce roles, migrate a database, generate secrets,
+  install the Medusa unit, expose the admin, collect customer data or enable payments.
+- Loopback-only Redis is an initialization state, not the Medusa activation state.
+  A dedicated Redis ACL credential, authenticated `REDIS_URL`, rotation procedure and
+  anonymous-access rejection check are hard gates before Medusa can be started.
+
+This bootstrap is locally verified but has not yet been executed on the live host.

@@ -31,6 +31,7 @@ const child = spawn('/usr/bin/npm', ['run', 'build:production'], {
   cwd: projectRoot,
   env: {
     HOME: '/var/cache/pawshop-build', LANG: 'C.UTF-8', PATH: '/usr/bin:/bin',
+    NODE_OPTIONS: '--max-old-space-size=1024',
     npm_config_cache: '/var/cache/pawshop-build/npm', ...buildEnv,
   },
   stdio: 'inherit',
