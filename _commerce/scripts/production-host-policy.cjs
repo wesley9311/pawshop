@@ -1,6 +1,9 @@
 'use strict';
 
-const MIN_MEMORY_KIB = 1_800_000;
+// Alibaba Cloud's reviewed 2 GiB SWAS plan exposes 1,651,800 KiB to Ubuntu.
+// Keep enough tolerance for provider-reserved memory while rejecting the former
+// 1 GiB plan (measured at roughly 915,000 KiB).
+const MIN_MEMORY_KIB = 1_600_000;
 const MIN_AVAILABLE_DISK_KIB = 8 * 1024 * 1024;
 const PRODUCTION_NODE_PATH = '/usr/bin/node';
 
@@ -12,7 +15,7 @@ function parseMemTotal(source) {
 
 function assertProductionHost({ memoryKib, availableDiskKib }) {
   if (!Number.isSafeInteger(memoryKib) || memoryKib < MIN_MEMORY_KIB) {
-    throw new Error('Production commerce requires at least a nominal 2 GB RAM host.');
+    throw new Error('Production commerce requires the reviewed 2 GB plan and at least 1,600,000 KiB reported RAM.');
   }
   if (!Number.isSafeInteger(availableDiskKib) || availableDiskKib < MIN_AVAILABLE_DISK_KIB) {
     throw new Error('Production commerce requires at least 8 GB available disk before deployment.');

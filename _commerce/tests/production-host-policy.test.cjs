@@ -17,7 +17,8 @@ test('production host parser reads Linux MemTotal', () => {
 
 test('production host rejects undersized RAM and disk', () => {
   assert.doesNotThrow(() => assertProductionHost({ memoryKib: MIN_MEMORY_KIB, availableDiskKib: MIN_AVAILABLE_DISK_KIB }));
-  assert.throws(() => assertProductionHost({ memoryKib: MIN_MEMORY_KIB - 1, availableDiskKib: MIN_AVAILABLE_DISK_KIB }), /2 GB RAM/);
+  assert.doesNotThrow(() => assertProductionHost({ memoryKib: 1651800, availableDiskKib: MIN_AVAILABLE_DISK_KIB }));
+  assert.throws(() => assertProductionHost({ memoryKib: MIN_MEMORY_KIB - 1, availableDiskKib: MIN_AVAILABLE_DISK_KIB }), /1,600,000 KiB reported RAM/);
   assert.throws(() => assertProductionHost({ memoryKib: MIN_MEMORY_KIB, availableDiskKib: MIN_AVAILABLE_DISK_KIB - 1 }), /8 GB available/);
 });
 

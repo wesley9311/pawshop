@@ -129,10 +129,10 @@ Then open `http://127.0.0.1:9000/app`. The local owner credentials are stored in
   locking instead of falling back to development in-memory modules.
 - Production product uploads require an S3-compatible file provider. Credentials
   and endpoints have no defaults and must remain outside Git.
-- Added an Ubuntu host preflight that requires nominal 2 GB RAM, 8 GB free disk,
-  the system `/usr/bin/node` at Node 22 or 24 LTS, and the production command
-  set. The purchased server was measured at roughly
-  894 MiB usable RAM, so deployment is intentionally blocked on its current plan.
+- Added an Ubuntu host preflight requiring the system `/usr/bin/node` at Node 22
+  or 24 LTS and the production command set. At that stage the purchased server
+  measured roughly 894 MiB usable RAM, so activation was blocked until the later
+  2 GB plan upgrade recorded below.
 - Added a production boundary verifier covering health, unauthenticated admin
   rejection, and continued 503 responses for products, carts and customer signup.
 - The production scaffold was first accepted with twenty-three commerce tests,
@@ -201,7 +201,9 @@ least-privilege credentials; no external account or data was used in this round.
   the full Medusa backend/admin build, 14 storefront safety tests, shell and Node
   syntax checks, HTML validation, security checks and Git whitespace validation.
 
-These remain inactive templates. The approximately 1 GB ECS cannot pass the nominal
-2 GB host gate, and its Workbench login expired before a fresh live preflight could
-be captured. Host resize, real service installation, database migration and activation
-have not been performed.
+These remain inactive templates. The Alibaba Cloud SWAS instance is now on its
+2 vCPU / 2 GB / 40 GB plan. Ubuntu reports 1,651,800 KiB RAM with 2 GB swap; the
+host gate now accepts no less than 1,600,000 KiB while still rejecting the former
+1 GB plan. The root ext4 filesystem was expanded online from 30 GB to 40 GB after
+storing a root-only partition-table backup; it has about 33 GB free. Node,
+PostgreSQL, Redis, database migration and commerce activation have not been performed.
