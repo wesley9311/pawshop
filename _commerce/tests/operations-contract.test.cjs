@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
-const { constrainedBackupPath, equalHex } = require('../scripts/backup-integrity.cjs');
+const { backupManifestHmac, constrainedBackupPath, equalHex } = require('../scripts/backup-integrity.cjs');
 
 const root = resolve(__dirname, '..');
 const backup = readFileSync(resolve(root, 'scripts/backup-real.mjs'), 'utf8');
@@ -12,9 +12,11 @@ const restore = readFileSync(resolve(root, 'scripts/restore-verify-real.mjs'), '
 const runtime = readFileSync(resolve(root, 'scripts/private-runtime.cjs'), 'utf8');
 const productionVerifier = readFileSync(resolve(root, 'scripts/verify-production-admin.mjs'), 'utf8');
 const productionBackup = readFileSync(resolve(root, 'scripts/backup-production.mjs'), 'utf8');
+const productionRestore = readFileSync(resolve(root, 'scripts/restore-verify-production.mjs'), 'utf8');
 const productionWait = readFileSync(resolve(root, 'scripts/wait-production-admin.mjs'), 'utf8');
 const commerceService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-commerce.service'), 'utf8');
 const backupService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup.service'), 'utf8');
+const restoreService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-restore-verify.service'), 'utf8');
 
 test('real backup is encrypted and plaintext is removed', () => {
   assert.match(backup, /aes-256-cbc/);
@@ -51,6 +53,20 @@ test('backup path and digest comparisons reject unsafe values', () => {
   assert.equal(equalHex('invalid', 'invalid'), false);
 });
 
+test('production manifest authentication covers archive identity and provenance', () => {
+  const key = Buffer.alloc(32, 7);
+  const manifest = {
+    schema: 'pawshop-production-backup-v1', created_at: '2026-09-08T00:00:00.000Z',
+    source_database: 'pawshop', encrypted_file: 'pawshop_production_20260908T000000000Z.dump.enc',
+    encryption: 'AES-256-CBC PBKDF2', sha256: 'a'.repeat(64), hmac_sha256: 'b'.repeat(64), size_bytes: 123,
+  };
+  const signed = backupManifestHmac(manifest, key);
+  assert.equal(signed.length, 64);
+  for (const field of ['created_at', 'source_database', 'encrypted_file', 'sha256', 'hmac_sha256', 'size_bytes']) {
+    assert.notEqual(backupManifestHmac({ ...manifest, [field]: `${manifest[field]}x` }, key), signed);
+  }
+});
+
 test('production admin verifier keeps customer commerce closed', () => {
   assert.match(productionVerifier, /\/admin\/products/);
   assert.match(productionVerifier, /\/admin\/orders/);
@@ -68,13 +84,46 @@ test('production backup encrypts data and suppresses database command output', (
   assert.match(productionBackup, /pg_dump/);
   assert.match(productionBackup, /aes-256-cbc/);
   assert.match(productionBackup, /hmac_sha256/);
+  assert.match(productionBackup, /manifest_hmac_sha256/);
+  assert.match(productionBackup, /basename\(encryptedFile\)/);
   assert.match(productionBackup, /pipeline\(dump\.stdout, encrypt\.stdin\)/);
+  assert.match(productionBackup, /assertBackupDirectoryStat\(lstatSync\(backupDir\), process\.getuid\(\)\)/);
   assert.match(productionBackup, /openSync\(encryptedTemp, 'wx', 0o600\)/);
   assert.doesNotMatch(productionBackup, /plainTemp|\.dump\.tmp|--file|-out/);
   assert.deepEqual(
     [...productionBackup.matchAll(/console\.log\(([^)]*)\)/g)].map(match => match[1]),
     ["'Encrypted production database backup completed.'"],
   );
+});
+
+test('production restore streams decrypted data into an isolated database and always removes it', () => {
+  assert.match(productionRestore, /pawshop-production-backup-v1/);
+  assert.match(productionRestore, /digestFile\(encryptedFile/);
+  assert.match(productionRestore, /manifest_hmac_sha256/);
+  assert.match(productionRestore, /pipeline\(decrypt\.stdout, restore\.stdin\)/);
+  assert.match(productionRestore, /\/usr\/lib\/postgresql\/17\/bin/);
+  assert.match(productionRestore, /initdb/);
+  assert.match(productionRestore, /'-l', postgresLog/);
+  assert.match(productionRestore, /postgresStartAttempted = true/);
+  assert.match(productionRestore, /postgresStartAttempted && postgresIsRunning\(\)/);
+  assert.match(productionRestore, /listen_addresses=/);
+  assert.match(productionRestore, /openSync\(lockFile, 'wx'/);
+  assert.match(productionRestore, /operationDeadline/);
+  assert.match(productionRestore, /requiredBytes/);
+  assert.match(productionRestore, /isolated_cluster_removed: true/);
+  assert.match(productionRestore, /critical_table_counts/);
+  assert.match(productionRestore, /manifest\.size_bytes !== encryptedStat\.size/);
+  assert.match(productionRestore, /\/var\/lib\/pawshop-restore/);
+  assert.doesNotMatch(productionRestore, /plainDump|\.dump\.tmp|PAWSHOP_KEEP_RESTORE_DB|runuser|dropdb/);
+  assert.match(restoreService, /^User=pawshop-restore$/m);
+  assert.match(restoreService, /^ExecStart=\/usr\/bin\/node \/usr\/local\/libexec\/pawshop\/restore-verify-production\.mjs$/m);
+  assert.match(restoreService, /^KillMode=control-group$/m);
+  assert.match(restoreService, /^RestrictAddressFamilies=AF_UNIX$/m);
+  assert.match(restoreService, /^TimeoutStartSec=15min$/m);
+  assert.match(restoreService, /^CapabilityBoundingSet=$/m);
+  assert.match(restoreService, /^IPAddressDeny=any$/m);
+  assert.match(restoreService, /^ReadWritePaths=\/var\/lib\/pawshop-restore\/work \/var\/lib\/pawshop-restore\/verifications$/m);
+  assert.doesNotMatch(restoreService, /EnvironmentFile/);
 });
 
 test('systemd service is unprivileged, hardened, and verifies startup', () => {

@@ -158,8 +158,13 @@ create orders, collect customer data or enable payment.
 - Backup directories and the external key file are restricted to approved
   private Ubuntu paths outside all public and release directories. The key must
   be a root-owned nonsymlink file, group-readable only by the service account.
-- The expanded commerce suite now contains twenty-nine passing tests; the
+- The expanded commerce suite now contains thirty-two passing tests; the
   native service files remain inactive templates until real-host verification.
+- Added a manual-only production restore unit running as a separate unprivileged
+  OS account from root-installed immutable scripts. It authenticates the staged
+  manifest and archive, creates a private throwaway PostgreSQL 17 cluster with
+  no network listener, checks critical table counts, and records success only
+  after the cluster directory is removed. It never connects to production.
 
 Production restore verification, retention/remote-copy policy, atomic release
 activation and rollback are the next implementation steps. None of these units

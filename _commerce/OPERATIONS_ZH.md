@@ -71,6 +71,8 @@ npm --prefix _commerce run restore:verify-real
   运行和备份目录，启动后必须通过生产身份、回环监听与关闭交易探测；
 - `pawshop-backup.service`：运行加密 PostgreSQL 备份；
 - `pawshop-backup.timer`：每天执行一次并补跑错过的计划任务。
+- `pawshop-restore-verify.service`：仅由管理员手动启动，以独立无特权账号和
+  独立临时 PostgreSQL 集群验证 root 暂存的备份副本，绝不连接生产数据库。
 
 生产密钥必须位于 `/etc/pawshop/`，备份必须位于
 `/var/backups/pawshop/`，都不得放进 Git、静态站目录或发布目录。当前服务器
@@ -86,8 +88,41 @@ sudo install -d -o pawshop -g pawshop -m 0700 /var/backups/pawshop /var/lib/paws
 sudo sh -c 'umask 027; openssl rand -hex 32 > /etc/pawshop/backup.key'
 sudo chown root:pawshop /etc/pawshop/backup.key
 sudo chmod 0640 /etc/pawshop/backup.key
+sudo useradd --system --home-dir /var/lib/pawshop-restore --shell /usr/sbin/nologin pawshop-restore
+sudo install -d -o root -g pawshop-restore -m 0750 /var/lib/pawshop-restore
+sudo install -d -o pawshop-restore -g pawshop-restore -m 0700 \
+  /var/lib/pawshop-restore/work \
+  /var/lib/pawshop-restore/verifications
+sudo install -d -o root -g pawshop-restore -m 0750 /var/lib/pawshop-restore/input
+sudo install -d -o root -g root -m 0755 /usr/local/libexec/pawshop
+sudo install -o root -g root -m 0555 \
+  /srv/pawshop-commerce/current/_commerce/scripts/restore-verify-production.mjs \
+  /srv/pawshop-commerce/current/_commerce/scripts/backup-integrity.cjs \
+  /usr/local/libexec/pawshop/
 ```
 
 备份程序会拒绝符号链接、非 root 所有、非 `pawshop` 组或不是精确 `0640`
 权限的密钥。数据库导出通过管道直接进入 OpenSSL；磁盘上只允许出现加密的
 临时文件和最终备份，不允许出现明文数据库转储。
+
+生产备份完成后，root 必须把选定且文件名完全匹配的一份 manifest、对应密文和
+密钥复制到只读暂存目录；暂存文件统一为 `root:pawshop-restore 0640`。不得用
+通配符，不得从聊天或下载目录取文件。完成暂存后才能手动执行恢复验证；该单元
+不能设为开机启动或定时器：
+
+```bash
+sudo systemctl start pawshop-restore-verify.service
+sudo systemctl status pawshop-restore-verify.service --no-pager
+```
+
+恢复程序不读取商务应用密码、不以 root 或生产 PostgreSQL 超级用户运行，
+也不连接生产数据库。它以 `pawshop-restore` 无特权系统账号，在私有目录创建
+一个仅 Unix socket 可达的临时 PostgreSQL 17 集群；解密流直接进入该集群的
+`pg_restore`，因此没有明文 dump 文件，但恢复后的表和 WAL 会暂时以数据库
+文件形式写入隔离目录。应使用加密磁盘，并确保至少 8 GiB、且不低于密文十倍
+的可用空间。只有集群停止并删除后，才会写入不含客户明文的验证记录。
+
+工作目录中的排他锁可以阻止并发验证。断电或强制终止会保留锁和隔离目录并让下次运行硬性
+失败，管理员必须先确认没有残留进程、保存故障证据并人工清理；程序不会按名称
+扫描或删除任何现有数据库。验证完成后，root 还必须删除只读暂存目录中的密钥
+副本、manifest 和密文副本。

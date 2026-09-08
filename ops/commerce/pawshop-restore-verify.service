@@ -1,0 +1,34 @@
+[Unit]
+Description=Verify PawShop production backup in an isolated PostgreSQL cluster
+
+[Service]
+Type=oneshot
+User=pawshop-restore
+Group=pawshop-restore
+WorkingDirectory=/var/lib/pawshop-restore
+ExecStart=/usr/bin/node /usr/local/libexec/pawshop/restore-verify-production.mjs
+TimeoutStartSec=15min
+TimeoutStopSec=30s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadOnlyPaths=/var/lib/pawshop-restore/input
+ReadWritePaths=/var/lib/pawshop-restore/work /var/lib/pawshop-restore/verifications

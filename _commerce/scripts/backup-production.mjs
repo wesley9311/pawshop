@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, closeSync, lstatSync, openSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { pipeline } from 'node:stream/promises';
 
 const require = createRequire(import.meta.url);
-const { digestFile, readBackupKey } = require('./backup-integrity.cjs');
-const { assertBackupKeyStat, databaseConnection, productionPrivatePaths } = require('./production-private-paths.cjs');
+const { backupManifestHmac, digestFile, readBackupKey } = require('./backup-integrity.cjs');
+const { assertBackupDirectoryStat, assertBackupKeyStat, databaseConnection, productionPrivatePaths } = require('./production-private-paths.cjs');
 const { validateProductionEnvironment } = require('../src/lib/production-policy.cjs');
 
 const config = validateProductionEnvironment(process.env);
@@ -15,12 +15,12 @@ if (process.platform !== 'linux' || config.topology !== 'single-host-private') {
 }
 const { backupDir, backupKeyFile } = productionPrivatePaths(process.env);
 const connection = databaseConnection(config.databaseUrl);
-mkdirSync(backupDir, { recursive: true, mode: 0o700 });
-chmodSync(backupDir, 0o700);
+assertBackupDirectoryStat(lstatSync(backupDir), process.getuid());
 assertBackupKeyStat(lstatSync(backupKeyFile), process.getgid());
 const backupKey = readBackupKey(backupKeyFile);
 
-const stamp = new Date().toISOString().replaceAll(/[-:.]/g, '').replace('Z', 'Z');
+const createdAt = new Date().toISOString();
+const stamp = createdAt.replaceAll(/[-:.]/g, '');
 const base = `pawshop_production_${stamp}`;
 const encryptedTemp = join(backupDir, `.${base}.dump.enc.tmp`);
 const encryptedFile = join(backupDir, `${base}.dump.enc`);
@@ -100,17 +100,18 @@ try {
 
 const sha256 = await digestFile(encryptedFile);
 const hmacSha256 = await digestFile(encryptedFile, { hmacKey: backupKey });
-const manifest = {
+const manifestCore = {
   schema: 'pawshop-production-backup-v1',
-  created_at: new Date().toISOString(),
+  created_at: createdAt,
   source_database: connection.database,
-  encrypted_file: encryptedFile,
+  encrypted_file: basename(encryptedFile),
   encryption: 'AES-256-CBC PBKDF2',
   sha256,
   hmac_sha256: hmacSha256,
   size_bytes: statSync(encryptedFile).size,
 };
+const manifest = { ...manifestCore, manifest_hmac_sha256: backupManifestHmac(manifestCore, backupKey) };
 atomicPrivateWrite(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
-atomicPrivateWrite(latestFile, `${JSON.stringify({ manifest_file: manifestFile }, null, 2)}\n`);
+atomicPrivateWrite(latestFile, `${JSON.stringify({ manifest_file: basename(manifestFile) }, null, 2)}\n`);
 
 console.log('Encrypted production database backup completed.');

@@ -45,6 +45,20 @@ function equalHex(left, right) {
   return timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'));
 }
 
+function backupManifestHmac(manifest, key) {
+  const authenticated = {
+    schema: manifest.schema,
+    created_at: manifest.created_at,
+    source_database: manifest.source_database,
+    encrypted_file: manifest.encrypted_file,
+    encryption: manifest.encryption,
+    sha256: manifest.sha256,
+    hmac_sha256: manifest.hmac_sha256,
+    size_bytes: manifest.size_bytes,
+  };
+  return createHmac('sha256', key).update(JSON.stringify(authenticated)).digest('hex');
+}
+
 function constrainedBackupPath(backupDir, candidate, label) {
   const base = resolve(backupDir);
   const target = resolve(candidate);
@@ -53,6 +67,7 @@ function constrainedBackupPath(backupDir, candidate, label) {
 }
 
 module.exports = {
+  backupManifestHmac,
   constrainedBackupPath,
   criticalDataSha256,
   digestFile,
