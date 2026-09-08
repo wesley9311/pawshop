@@ -61,3 +61,33 @@ npm --prefix _commerce run restore:verify-real
 ```
 
 停止前先完成真实备份。不要手动删除数据库目录或备份文件。
+
+## 生产 Ubuntu 服务（尚未启用）
+
+首发采用原生 systemd，不使用 Docker。这里的模板专门面向当前 Ubuntu
+服务器，不是通用 Linux 发行版模板。服务模板位于 `ops/commerce/`：
+
+- `pawshop-commerce.service`：以无特权 `pawshop` 用户运行，只允许写入指定
+  运行和备份目录，启动后必须通过生产身份、回环监听与关闭交易探测；
+- `pawshop-backup.service`：运行加密 PostgreSQL 备份；
+- `pawshop-backup.timer`：每天执行一次并补跑错过的计划任务。
+
+生产密钥必须位于 `/etc/pawshop/`，备份必须位于
+`/var/backups/pawshop/`，都不得放进 Git、静态站目录或发布目录。当前服务器
+内存不足，这些单元不得安装或启用；后续必须先完成主机升级、生产恢复核验
+和异地副本验证。
+
+升级主机后，由 root 一次性建立私有目录和备份密钥；不要把密钥打印到终端、
+日志或聊天中：
+
+```bash
+sudo install -d -o root -g pawshop -m 0750 /etc/pawshop
+sudo install -d -o pawshop -g pawshop -m 0700 /var/backups/pawshop /var/lib/pawshop
+sudo sh -c 'umask 027; openssl rand -hex 32 > /etc/pawshop/backup.key'
+sudo chown root:pawshop /etc/pawshop/backup.key
+sudo chmod 0640 /etc/pawshop/backup.key
+```
+
+备份程序会拒绝符号链接、非 root 所有、非 `pawshop` 组或不是精确 `0640`
+权限的密钥。数据库导出通过管道直接进入 OpenSSL；磁盘上只允许出现加密的
+临时文件和最终备份，不允许出现明文数据库转储。

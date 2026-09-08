@@ -129,14 +129,38 @@ Then open `http://127.0.0.1:9000/app`. The local owner credentials are stored in
   locking instead of falling back to development in-memory modules.
 - Production product uploads require an S3-compatible file provider. Credentials
   and endpoints have no defaults and must remain outside Git.
-- Added a Linux host preflight that requires nominal 2 GB RAM, 8 GB free disk and
-  the production command set. The purchased server was measured at roughly
+- Added an Ubuntu host preflight that requires nominal 2 GB RAM, 8 GB free disk,
+  the system `/usr/bin/node` at Node 22 or 24 LTS, and the production command
+  set. The purchased server was measured at roughly
   894 MiB usable RAM, so deployment is intentionally blocked on its current plan.
 - Added a production boundary verifier covering health, unauthenticated admin
   rejection, and continued 503 responses for products, carts and customer signup.
-- Twenty-three commerce tests, TypeScript checking, a production-mode Medusa build
+- The production scaffold was first accepted with twenty-three commerce tests,
+  TypeScript checking, and a production-mode Medusa build
   with inert `.invalid` fixtures, and the fourteen public-site safety tests pass.
 
 This round prepares the private owner backend but does not install packages on
 the live server, publish the admin, migrate production data, enable Store APIs,
 create orders, collect customer data or enable payment.
+
+## Native Ubuntu operations round — 2026-09-08
+
+- Chose native Ubuntu services for the initial low-cost launch rather than
+  Docker: systemd runs Medusa as an unprivileged `pawshop` user while the host
+  runs PostgreSQL, Redis and the already-working Nginx service.
+- Added hardened Medusa and daily-backup systemd units. The application unit
+  waits for a bounded production identity, listener and closed-route check
+  before startup is accepted.
+- Added an Ubuntu production backup command that streams PostgreSQL over loopback
+  directly into encryption, suppresses command output, never writes a plaintext
+  database dump, encrypts with
+  AES-256-CBC/PBKDF2, and records SHA-256 plus keyed HMAC integrity evidence.
+- Backup directories and the external key file are restricted to approved
+  private Ubuntu paths outside all public and release directories. The key must
+  be a root-owned nonsymlink file, group-readable only by the service account.
+- The expanded commerce suite now contains twenty-nine passing tests; the
+  native service files remain inactive templates until real-host verification.
+
+Production restore verification, retention/remote-copy policy, atomic release
+activation and rollback are the next implementation steps. None of these units
+have been installed or enabled on the undersized live server.

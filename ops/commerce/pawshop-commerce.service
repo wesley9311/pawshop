@@ -1,0 +1,36 @@
+[Unit]
+Description=PawShop private Medusa commerce admin
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=pawshop
+Group=pawshop
+WorkingDirectory=/srv/pawshop-commerce/current/_commerce
+EnvironmentFile=/etc/pawshop/commerce.env
+ExecStartPre=/usr/bin/node scripts/preflight-production-host.mjs
+ExecStart=/usr/bin/node scripts/run-production.mjs start
+ExecStartPost=/usr/bin/node scripts/wait-production-admin.mjs
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=180s
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/pawshop /var/backups/pawshop
+
+[Install]
+WantedBy=multi-user.target
