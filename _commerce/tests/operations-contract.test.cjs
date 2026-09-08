@@ -196,6 +196,8 @@ test('production identity provisioning is private, fail-closed, and keeps OSS in
   assert.match(identityProvisioner, /--aclfile \/etc\/pawshop-redis\/users\.acl/);
   assert.match(identityProvisioner, /install -d -o root -g redis -m 0750 "\$redis_acl_dir"/);
   assert.match(identityProvisioner, /anonymous_redis != 'NOAUTH Authentication required\.'/);
+  assert.doesNotMatch(identityProvisioner, /redis-cli --host|redis-cli --port/);
+  assert.match(identityProvisioner, /env -u REDISCLI_AUTH redis-cli -h 127\.0\.0\.1 -p 6379 PING/);
   assert.match(identityProvisioner, /REDISCLI_AUTH="\$redis_password"/);
   assert.match(identityProvisioner, /CRITICAL: identity rollback could not be verified/);
   assert.match(identityProvisioner, /runuser -u postgres -- psql[\s\S]*< "\$sql_file"/);

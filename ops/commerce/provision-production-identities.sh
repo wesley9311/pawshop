@@ -7,7 +7,7 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exit 1
 fi
 
-for required_command in openssl psql dropdb runuser systemctl ss install stat getent redis-cli sha256sum awk grep rm rmdir cmp mv id mktemp chmod chown sed cut date sort flock; do
+for required_command in openssl psql dropdb runuser systemctl ss install stat getent redis-cli sha256sum awk grep rm rmdir cmp mv id mktemp chmod chown sed cut date sort flock env; do
   command -v "$required_command" >/dev/null || {
     echo "Required production command is unavailable: $required_command" >&2
     exit 1
@@ -116,7 +116,7 @@ fi
 work_dir=$(mktemp -d /var/tmp/pawshop-identities.XXXXXXXX)
 chmod 0700 "$work_dir"
 install -o root -g root -m 0600 "$redis_dropin" "$work_dir/redis-dropin.original"
-baseline_redis=$(redis-cli --host 127.0.0.1 --port 6379 PING 2>&1) || {
+baseline_redis=$(env -u REDISCLI_AUTH redis-cli -h 127.0.0.1 -p 6379 PING 2>&1) || {
   echo 'Redis did not provide the expected pre-provisioning baseline.' >&2
   rm -rf -- "$work_dir"
   exit 1
@@ -143,7 +143,7 @@ cleanup() {
       systemctl restart redis-server.service || containment_failed=1
       systemctl is-active --quiet redis-server.service || containment_failed=1
       cmp -s -- "$work_dir/redis-dropin.original" "$redis_dropin" || containment_failed=1
-      restored_redis=$(redis-cli --host 127.0.0.1 --port 6379 PING 2>&1)
+      restored_redis=$(env -u REDISCLI_AUTH redis-cli -h 127.0.0.1 -p 6379 PING 2>&1)
       [[ $restored_redis == PONG ]] || containment_failed=1
     fi
     if [[ $database_created == 1 ]]; then
@@ -273,7 +273,7 @@ systemctl daemon-reload
 systemctl restart redis-server.service
 systemctl is-active --quiet redis-server.service
 anonymous_redis_status=0
-anonymous_redis=$(redis-cli --host 127.0.0.1 --port 6379 PING 2>&1) || anonymous_redis_status=$?
+anonymous_redis=$(env -u REDISCLI_AUTH redis-cli -h 127.0.0.1 -p 6379 PING 2>&1) || anonymous_redis_status=$?
 if (( anonymous_redis_status > 1 )) ||
    [[ $anonymous_redis != 'NOAUTH Authentication required.' &&
       $anonymous_redis != '(error) NOAUTH Authentication required.' ]]; then
@@ -281,7 +281,7 @@ if (( anonymous_redis_status > 1 )) ||
   exit 1
 fi
 [[ $anonymous_redis != *PONG* ]] || { echo 'Redis still accepts an unauthenticated request.' >&2; exit 1; }
-REDISCLI_AUTH="$redis_password" redis-cli --no-auth-warning --host 127.0.0.1 --port 6379 \
+REDISCLI_AUTH="$redis_password" redis-cli --no-auth-warning -h 127.0.0.1 -p 6379 \
   --user pawshop PING | grep -qx PONG
 
 cat > "$work_dir/internal-secrets.env" <<EOF
