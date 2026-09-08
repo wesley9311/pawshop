@@ -1,9 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { parseMemTotal, assertProductionHost, assertProductionNodeRuntime } = require('./production-host-policy.cjs');
+const {
+  assertProductionEnvironmentFileStat, parseProductionEnvironmentFile, requiredFields,
+} = require('./production-env-file.cjs');
 
 if (process.platform !== 'linux') throw new Error('Production host preflight must run on the Ubuntu production host.');
 assertProductionNodeRuntime({
@@ -14,6 +17,13 @@ const memoryKib = parseMemTotal(readFileSync('/proc/meminfo', 'utf8'));
 const diskLine = execFileSync('df', ['-Pk', process.cwd()], { encoding: 'utf8' }).trim().split('\n').at(-1);
 const availableDiskKib = Number(diskLine.trim().split(/\s+/)[3]);
 assertProductionHost({ memoryKib, availableDiskKib });
+
+const environmentFile = '/etc/pawshop/commerce.env';
+assertProductionEnvironmentFileStat(lstatSync(environmentFile), process.getgid());
+const environmentValues = parseProductionEnvironmentFile(readFileSync(environmentFile, 'utf8'));
+if (requiredFields.some(field => process.env[field] !== environmentValues[field])) {
+  throw new Error('The loaded production environment does not match its authenticated file.');
+}
 
 for (const command of ['nginx', 'node', 'npm', 'psql', 'pg_dump', 'redis-cli', 'systemctl', 'ss', 'curl', 'openssl', 'tar']) {
   try {

@@ -183,3 +183,25 @@ None of these units have been installed or enabled on the undersized live server
 The next implementation step is atomic release activation and rollback. Real S3
 upload/read-back/delete-denial evidence still requires an owner-created bucket and
 least-privilege credentials; no external account or data was used in this round.
+
+## Atomic commerce release and admin language round — 2026-09-08
+
+- Added an immutable commerce release builder with an exact Git identity, clean-tree
+  gate, secret-isolated `pawshop-build` dependency/build steps, root-owned final artifact and atomic
+  current-link activation.
+- Failed startup verification restores the prior release. Manual rollback requires
+  a retained exact release plus an explicit database-schema compatibility gate;
+  neither path runs migrations or deletes retained releases.
+- The production environment file has an exact parser and root/service-group mode
+  contract instead of being evaluated as shell code.
+- Added a `语言 / Language` admin route that switches Medusa's existing full UI
+  resources between Simplified Chinese and English. It explicitly does not translate
+  merchant-entered product or policy content.
+- The completed local verification passed 45 commerce tests, TypeScript checking,
+  the full Medusa backend/admin build, 14 storefront safety tests, shell and Node
+  syntax checks, HTML validation, security checks and Git whitespace validation.
+
+These remain inactive templates. The approximately 1 GB ECS cannot pass the nominal
+2 GB host gate, and its Workbench login expired before a fresh live preflight could
+be captured. Host resize, real service installation, database migration and activation
+have not been performed.

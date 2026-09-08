@@ -84,6 +84,8 @@ npm --prefix _commerce run restore:verify-real
 
 ```bash
 sudo install -d -o root -g pawshop -m 0750 /etc/pawshop
+sudo useradd --system --home-dir /var/cache/pawshop-build --shell /usr/sbin/nologin pawshop-build
+sudo install -d -o pawshop-build -g pawshop-build -m 0700 /var/cache/pawshop-build
 sudo useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin pawshop-backup
 sudo install -d -o root -g pawshop-backup -m 0750 /etc/pawshop-backup
 sudo install -d -o pawshop-backup -g pawshop-backup -m 0700 /var/backups/pawshop
@@ -169,3 +171,44 @@ SHA-256，然后为密文和 manifest 记录版本 ID 与带 HMAC 的本地收�
 
 同步脚本使用排他锁；不得绕过 systemd 并发直接运行。断电或强制终止可能保留锁，
 此时后续运行会硬性失败，管理员应先确认没有同步进程并保留故障证据，再人工移除锁。
+
+## 后台中英文切换
+
+Medusa 2.19 自带简体中文与英文界面。登录后可直接打开侧栏的
+`语言 / Language`，点击“简体中文”或“English”，整个管理界面会立即切换并在
+当前浏览器保存选择；也可在“个人资料 → 编辑 → 语言”使用 Medusa 原生选择器。
+这个设置只翻译后台按钮、菜单和提示，不会自动翻译商品标题、详情、物流条款或
+顾客可见内容。简体中文属于社区翻译，关键订单、退款和金额操作上线前仍需与英文
+原文做一次双语校对。
+
+## 商务后台原子发布与回滚（尚未启用）
+
+`ops/commerce/deploy-commerce.sh` 只接受固定在 `/srv/pawshop-source`、由 root 管理且
+当前干净的 Git checkout 完整 commit SHA。Git 检查、归档、tar、npm 生命周期和构建
+全部由无法读取生产密钥的 `pawshop-build` 执行，root 只负责固定路径、所有权、
+原子链接和 systemd 服务切换。
+把 `_commerce` 解包到新的临时目录，以无法读取任何生产密钥的 `pawshop-build`
+无特权账号安装依赖和构建，再把成品改为 root 只读并通过临时软链接加 `mv -T`
+原子切换 `current`。构建只使用 `.invalid` 固定占位配置，真实配置仅由运行时
+`pawshop` 服务读取。服务重启及其
+生产验证失败时，脚本自动恢复上一版本并再次启动；只有确认旧链接和服务均恢复后
+才删除失败版本。若恢复本身失败，两套版本都保留并输出 CRITICAL，不会制造悬空链接。
+旧的成功版本不会自动删除。
+
+发布前要求发布文件系统至少有 8 GiB 可用空间；npm 缓存和历史成功版本不会由
+脚本自动删除，必须在确认目标版本不再承担回滚用途并保留审计记录后人工清理。
+`/etc/pawshop/commerce.env` 只允许单行、不加引号且不含空白、反斜杠或单双引号的
+值；URL 中的特殊凭据必须先按 URL 规则编码，避免脚本解析值与 systemd 实际加载值不同。
+当前这套严格环境文件和主机预检只支持已经评审的 `single-host-private` 单机私有拓扑；
+未来改为托管数据库或托管 TLS 时，必须先扩展并重新审查字段契约，不能直接改变量绕过。
+
+发布脚本绝不自动运行数据库迁移。每次上线前必须先完成加密备份、真实恢复验证、
+迁移审查，并确认新旧版本与当前数据库 schema 的兼容边界；只有完成这些步骤后才可
+设置一次性的 `PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1`。手动回退使用
+`rollback-commerce.sh`，必须指定仍保留的完整 SHA，并在确认数据库向后兼容后设置
+`PAWSHOP_ROLLBACK_COMPATIBLE=1`。这两个确认变量不是证据本身，操作记录必须保存
+对应的备份、恢复、迁移和验证结果。
+
+当前约 1 GB ECS 仍低于硬性 2 GB 内存门槛，因此这些脚本只能检查和构建，不能在
+该规格上启用 Medusa 服务。升配后先运行主机预检、真实备份/恢复及对象存储证据，
+再进行首次原子激活。

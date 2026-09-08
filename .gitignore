@@ -9,4 +9,5 @@ _commerce/.cache/
 _commerce/.env*
 !_commerce/.env.example
 _commerce/uploads/
+_commerce/static/
 _commerce/*.log
