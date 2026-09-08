@@ -20,6 +20,7 @@ const commerceService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-c
 const backupService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup.service'), 'utf8');
 const restoreService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-restore-verify.service'), 'utf8');
 const hostBootstrap = readFileSync(resolve(root, '..', 'ops/commerce/bootstrap-ubuntu-host.sh'), 'utf8');
+const identityProvisioner = readFileSync(resolve(root, '..', 'ops/commerce/provision-production-identities.sh'), 'utf8');
 
 test('real backup is encrypted and plaintext is removed', () => {
   assert.match(backup, /aes-256-cbc/);
@@ -179,6 +180,34 @@ test('Ubuntu bootstrap pins supply chain and keeps data services private', () =>
   assert.match(hostBootstrap, /diff --brief --recursive --no-dereference/);
   assert.match(hostBootstrap, /Medusa, database roles, migrations, customer APIs, backups and payments remain inactive/);
   assert.doesNotMatch(hostBootstrap, /commerce\.env|backup\.key|CREATE ROLE|db:migrate|systemctl enable.*pawshop-commerce/);
+});
+
+test('production identity provisioning is private, fail-closed, and keeps OSS incomplete', () => {
+  assert.match(identityProvisioner, /^set \+x$/m);
+  assert.match(identityProvisioner, /Existing production identity artifact requires an explicit recovery review/);
+  assert.match(identityProvisioner, /flock -n 9/);
+  assert.match(identityProvisioner, /CREATE ROLE pawshop LOGIN PASSWORD/);
+  assert.match(identityProvisioner, /CREATE ROLE pawshop_backup LOGIN PASSWORD/);
+  assert.match(identityProvisioner, /REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
+  assert.match(identityProvisioner, /GRANT SELECT ON ALL TABLES IN SCHEMA public TO pawshop_backup/);
+  assert.doesNotMatch(identityProvisioner, /pg_read_all_data/);
+  assert.match(identityProvisioner, /user default off/);
+  assert.match(identityProvisioner, /user pawshop on #\$redis_password_hash/);
+  assert.match(identityProvisioner, /--aclfile \/etc\/pawshop-redis\/users\.acl/);
+  assert.match(identityProvisioner, /install -d -o root -g redis -m 0750 "\$redis_acl_dir"/);
+  assert.match(identityProvisioner, /anonymous_redis != 'NOAUTH Authentication required\.'/);
+  assert.match(identityProvisioner, /REDISCLI_AUTH="\$redis_password"/);
+  assert.match(identityProvisioner, /CRITICAL: identity rollback could not be verified/);
+  assert.match(identityProvisioner, /runuser -u postgres -- psql[\s\S]*< "\$sql_file"/);
+  assert.match(identityProvisioner, /app_role_created=1/);
+  assert.match(identityProvisioner, /recovery-secrets\.txt/);
+  assert.match(identityProvisioner, /validate_system_account pawshop \/var\/lib\/pawshop/);
+  assert.match(identityProvisioner, /validate_private_directory \/etc\/pawshop root pawshop 750/);
+  assert.match(identityProvisioner, /install -o root -g root -m 0600.*owner-credentials\.txt/);
+  assert.match(identityProvisioner, /RAM user\/access key: PENDING/);
+  assert.match(identityProvisioner, /commerce\.env and Medusa stay inactive/);
+  assert.doesNotMatch(identityProvisioner, /S3_SECRET_ACCESS_KEY=/);
+  assert.doesNotMatch(identityProvisioner, /systemctl enable.*pawshop-commerce/);
 });
 
 test('offsite sync is versioned, read-back verified, credential isolated, and never deletes remote objects', () => {
