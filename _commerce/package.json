@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Local-only self-hosted PawShop commerce foundation",
-  "engines": { "node": "^22.12.0 || ^24.0.0" },
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0"
+  },
   "scripts": {
     "setup:local": "node scripts/setup-local.mjs",
     "build": "node scripts/run-local.mjs build",
@@ -13,6 +15,8 @@
     "start:production": "node scripts/run-production.mjs start",
     "db:migrate:production": "node scripts/run-production.mjs db:migrate",
     "db:migrate": "node scripts/run-local.mjs db:migrate",
+    "preflight:production-host": "node scripts/preflight-production-host.mjs",
+    "verify:production-admin": "node scripts/verify-production-admin.mjs",
     "admin:create": "node scripts/create-local-admin.mjs",
     "catalog:import": "node scripts/run-local.mjs exec ./src/scripts/import-catalog.ts",
     "catalog:verify": "node scripts/run-local.mjs exec ./src/scripts/verify-catalog.ts",
@@ -24,9 +28,14 @@
   },
   "dependencies": {
     "@medusajs/admin-sdk": "2.19.0",
+    "@medusajs/caching-redis": "2.19.0",
     "@medusajs/cli": "2.19.0",
+    "@medusajs/event-bus-redis": "2.19.0",
+    "@medusajs/file-s3": "2.19.0",
     "@medusajs/framework": "2.19.0",
-    "@medusajs/medusa": "2.19.0"
+    "@medusajs/locking-redis": "2.19.0",
+    "@medusajs/medusa": "2.19.0",
+    "@medusajs/workflow-engine-redis": "2.19.0"
   },
   "devDependencies": {
     "@swc/core": "^1.7.28",

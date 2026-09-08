@@ -119,3 +119,24 @@ Then open `http://127.0.0.1:9000/app`. The local owner credentials are stored in
 - customer privacy retention, export and deletion procedures;
 - backups, restore drill, monitoring, alerts and rollback;
 - storefront-to-backend integration and end-to-end order tests.
+
+## Private production topology round — 2026-09-08
+
+- Added an explicit low-cost `single-host-private` topology. PostgreSQL, Redis
+  and Medusa are fixed to loopback addresses; the owner admin origin is a local
+  SSH-tunnel endpoint rather than a public admin domain.
+- Production now registers Redis-backed caching, events, workflow execution and
+  locking instead of falling back to development in-memory modules.
+- Production product uploads require an S3-compatible file provider. Credentials
+  and endpoints have no defaults and must remain outside Git.
+- Added a Linux host preflight that requires nominal 2 GB RAM, 8 GB free disk and
+  the production command set. The purchased server was measured at roughly
+  894 MiB usable RAM, so deployment is intentionally blocked on its current plan.
+- Added a production boundary verifier covering health, unauthenticated admin
+  rejection, and continued 503 responses for products, carts and customer signup.
+- Twenty-three commerce tests, TypeScript checking, a production-mode Medusa build
+  with inert `.invalid` fixtures, and the fourteen public-site safety tests pass.
+
+This round prepares the private owner backend but does not install packages on
+the live server, publish the admin, migrate production data, enable Store APIs,
+create orders, collect customer data or enable payment.

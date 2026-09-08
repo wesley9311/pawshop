@@ -10,6 +10,7 @@ const root = resolve(__dirname, '..');
 const backup = readFileSync(resolve(root, 'scripts/backup-real.mjs'), 'utf8');
 const restore = readFileSync(resolve(root, 'scripts/restore-verify-real.mjs'), 'utf8');
 const runtime = readFileSync(resolve(root, 'scripts/private-runtime.cjs'), 'utf8');
+const productionVerifier = readFileSync(resolve(root, 'scripts/verify-production-admin.mjs'), 'utf8');
 
 test('real backup is encrypted and plaintext is removed', () => {
   assert.match(backup, /aes-256-cbc/);
@@ -44,4 +45,17 @@ test('backup path and digest comparisons reject unsafe values', () => {
   assert.equal(equalHex('a'.repeat(64), 'a'.repeat(64)), true);
   assert.equal(equalHex('a'.repeat(64), 'b'.repeat(64)), false);
   assert.equal(equalHex('invalid', 'invalid'), false);
+});
+
+test('production admin verifier keeps customer commerce closed', () => {
+  assert.match(productionVerifier, /\/admin\/products/);
+  assert.match(productionVerifier, /\/admin\/orders/);
+  assert.match(productionVerifier, /\/store\/products/);
+  assert.match(productionVerifier, /\/store\/carts/);
+  assert.match(productionVerifier, /\/auth\/customer\/emailpass\/register/);
+  assert.match(productionVerifier, /503/);
+  assert.match(productionVerifier, /pawshop-runtime/);
+  assert.match(productionVerifier, /assertLoopbackListeners/);
+  assert.match(productionVerifier, /validateProductionEnvironment/);
+  assert.doesNotMatch(productionVerifier, /publishable|authorization|cookie/i);
 });
