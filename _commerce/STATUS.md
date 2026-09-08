@@ -227,4 +227,24 @@ PostgreSQL, Redis, database migration and commerce activation have not been perf
   A dedicated Redis ACL credential, authenticated `REDIS_URL`, rotation procedure and
   anonymous-access rejection check are hard gates before Medusa can be started.
 
-This bootstrap is locally verified but has not yet been executed on the live host.
+The reviewed bootstrap from commit `16cb87508de53d23a9d181d68035e14e76ae878f`
+has now been executed successfully on the live Alibaba Cloud host. Post-execution
+evidence confirms:
+
+- Node 22.23.2 resolves to the pinned root-owned runtime under `/opt/pawshop-node`;
+- PostgreSQL 17.11 and Redis 7.0.15 are active and enabled, with the only matching
+  listeners at `127.0.0.1:5432` and `127.0.0.1:6379`;
+- PostgreSQL uses SCRAM-SHA-256, 128 MB shared buffers and 40 connections; Redis
+  uses protected mode, a 96 MB no-eviction limit and remains pre-ACL/inactive for
+  Medusa until the credential gate is completed;
+- all four PawShop service identities have distinct private primary groups and no
+  supplementary groups, and the temporary `policy-rc.d` is absent;
+- the host still has about 1.1 GiB available RAM, 2 GiB free swap and 32 GiB free
+  disk; no recent kernel OOM event was found, Nginx remained active, and the live
+  static storefront returned HTTP 200.
+
+The production source is pinned at the same detached commit in root-owned,
+non-writable `/srv/pawshop-source`. The isolated `pawshop-build` identity can read
+and verify that exact clean checkout but cannot modify it. Medusa, commerce database
+roles, Redis ACL credentials, migrations, backup activation, customer APIs and
+payments remain inactive.
