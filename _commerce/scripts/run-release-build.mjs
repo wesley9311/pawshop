@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { lstatSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -26,13 +27,23 @@ const buildEnv = {
 };
 validateProductionEnvironment(buildEnv);
 
+const npmGlobalConfig = '/etc/pawshop-build/npmrc-empty';
+const npmGlobalConfigStat = lstatSync(npmGlobalConfig);
+if (!npmGlobalConfigStat.isFile() || npmGlobalConfigStat.isSymbolicLink() ||
+    npmGlobalConfigStat.uid !== 0 || npmGlobalConfigStat.gid !== 0 ||
+    (npmGlobalConfigStat.mode & 0o777) !== 0o444 || npmGlobalConfigStat.size !== 0) {
+  throw new Error('Production release build npm configuration is not an empty root-owned read-only file.');
+}
+
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const child = spawn('/usr/bin/npm', ['run', 'build:production'], {
   cwd: projectRoot,
   env: {
     HOME: '/var/cache/pawshop-build', LANG: 'C.UTF-8', PATH: '/usr/bin:/bin',
     NODE_OPTIONS: '--max-old-space-size=1024',
-    npm_config_cache: '/var/cache/pawshop-build/npm', ...buildEnv,
+    npm_config_cache: '/var/cache/pawshop-build/npm',
+    npm_config_userconfig: '/dev/null', npm_config_globalconfig: npmGlobalConfig,
+    ...buildEnv,
   },
   stdio: 'inherit',
 });

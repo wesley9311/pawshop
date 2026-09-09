@@ -116,6 +116,20 @@ fi
 validate_root_directory "$release_root"
 release_root_validated=1
 
+validate_root_directory /etc
+if [[ ! -e /etc/pawshop-build && ! -L /etc/pawshop-build ]]; then
+  install -d -o root -g root -m 0755 /etc/pawshop-build
+fi
+validate_root_directory /etc/pawshop-build
+empty_npmrc=/etc/pawshop-build/npmrc-empty
+if [[ ! -e $empty_npmrc && ! -L $empty_npmrc ]]; then
+  install -o root -g root -m 0444 /dev/null "$empty_npmrc"
+fi
+if [[ ! -f $empty_npmrc || -L $empty_npmrc || $(stat -c '%u:%g:%a:%s' -- "$empty_npmrc") != '0:0:444:0' ]]; then
+  echo 'The isolated empty npm configuration has unsafe ownership, type, permissions, or content.' >&2
+  exit 1
+fi
+
 validate_root_directory /var
 validate_root_directory /var/cache
 build_uid=$(id -u pawshop-build)
@@ -171,12 +185,14 @@ if find "$staging_dir" -type l -print -quit | grep -q . ||
 fi
 chown -R pawshop-build:pawshop-build -- "$staging_dir"
 runuser -u pawshop-build -- env -i HOME=/var/cache/pawshop-build LANG=C.UTF-8 PATH=/usr/bin:/bin \
-  npm_config_cache=/var/cache/pawshop-build/npm npm_config_userconfig=/dev/null npm_config_globalconfig=/dev/null \
+  npm_config_cache=/var/cache/pawshop-build/npm npm_config_userconfig=/dev/null \
+  npm_config_globalconfig="$empty_npmrc" \
   /usr/bin/npm --prefix "$staging_dir/_commerce" ci --no-audit --no-fund
 runuser -u pawshop-build -- env -i HOME=/var/cache/pawshop-build LANG=C.UTF-8 PATH=/usr/bin:/bin \
   /usr/bin/node "$staging_dir/_commerce/scripts/run-release-build.mjs"
 runuser -u pawshop-build -- env -i HOME=/var/cache/pawshop-build LANG=C.UTF-8 PATH=/usr/bin:/bin \
-  npm_config_cache=/var/cache/pawshop-build/npm npm_config_userconfig=/dev/null npm_config_globalconfig=/dev/null \
+  npm_config_cache=/var/cache/pawshop-build/npm npm_config_userconfig=/dev/null \
+  npm_config_globalconfig="$empty_npmrc" \
   /usr/bin/npm --prefix "$staging_dir/_commerce" prune --omit=dev --no-audit --no-fund
 
 printf '%s\n' "$PAWSHOP_RELEASE_ID" > "$staging_dir/.pawshop-release"

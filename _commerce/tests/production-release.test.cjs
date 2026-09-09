@@ -59,6 +59,12 @@ test('commerce deployment is immutable, atomic, secret-isolated, and automatical
   assert.doesNotMatch(build, /commerce\.env|readFileSync/);
   assert.match(build, /HOME: '\/var\/cache\/pawshop-build'/);
   assert.match(build, /NODE_OPTIONS: '--max-old-space-size=1024'/);
+  assert.match(build, /npmGlobalConfig = '\/etc\/pawshop-build\/npmrc-empty'/);
+  assert.match(build, /npmGlobalConfigStat\.isSymbolicLink\(\)/);
+  assert.match(build, /npmGlobalConfigStat\.uid !== 0/);
+  assert.match(build, /npmGlobalConfigStat\.size !== 0/);
+  assert.match(build, /npm_config_userconfig: '\/dev\/null'/);
+  assert.match(build, /npm_config_globalconfig: npmGlobalConfig/);
 });
 
 test('commerce release preparation builds an immutable candidate without activation', () => {
@@ -80,7 +86,9 @@ test('commerce release preparation builds an immutable candidate without activat
   assert.match(prepare, /getent passwd \| awk/);
   assert.match(prepare, /cleanup \|\| status=1/);
   assert.match(prepare, /npm_config_userconfig=\/dev\/null/);
-  assert.match(prepare, /npm_config_globalconfig=\/dev\/null/);
+  assert.match(prepare, /empty_npmrc=\/etc\/pawshop-build\/npmrc-empty/);
+  assert.match(prepare, /stat -c '%u:%g:%a:%s'.*empty_npmrc/);
+  assert.match(prepare, /npm_config_globalconfig="\$empty_npmrc"/);
   assert.match(prepare, /temporary artifacts were removed/);
   assert.doesNotMatch(prepare, /systemctl|current_link|commerce\.env|db:migrate|PAWSHOP_RELEASE_ACTIVATION_CONFIRMED/);
 });
