@@ -192,14 +192,15 @@ root 管理的 `/srv/pawshop-source` 构建指定完整 commit，产出 root 只
 不会改动 `current` 链接，不会安装、启动或启用任何 systemd 单元，也不会读取生产
 密钥或运行数据库迁移。候选版本准备成功不等于可以激活。
 
-`ops/commerce/deploy-commerce.sh` 只接受固定在 `/srv/pawshop-source`、由 root 管理且
-当前干净的 Git checkout 完整 commit SHA。Git 检查、归档、tar、npm 生命周期和构建
-全部由无法读取生产密钥的 `pawshop-build` 执行，root 只负责固定路径、所有权、
-原子链接和 systemd 服务切换。
-把 `_commerce` 解包到新的临时目录，以无法读取任何生产密钥的 `pawshop-build`
-无特权账号安装依赖和构建，再把成品改为 root 只读并通过临时软链接加 `mv -T`
-原子切换 `current`。构建只使用 `.invalid` 固定占位配置，真实配置仅由运行时
-`pawshop` 服务读取。服务重启及其
+候选版本同时包含经审查的 `ops/commerce` 运维文件。首次安装先运行
+`install-commerce-runtime.sh`；它只从精确的不可变候选版本复制 systemd 单元和恢复
+程序，发现既有文件、活动单元或已启用单元就停止，并在结束时再次证明所有商务单元
+仍处于未启用、未运行状态。
+
+`ops/commerce/deploy-commerce.sh` 不再重新构建，也不从工作目录取文件。它只接受已经
+准备好的完整 commit 候选版本，并要求 `/var/lib/pawshop-release-evidence/<commit>/`
+下存在 root-only、只读且绑定同一 commit 的迁移证据与加密备份/隔离恢复证据，然后
+才通过临时软链接加 `mv -T` 原子切换 `current`。服务重启及其
 生产验证失败时，脚本自动恢复上一版本并再次启动；只有确认旧链接和服务均恢复后
 才删除失败版本。若恢复本身失败，两套版本都保留并输出 CRITICAL，不会制造悬空链接。
 旧的成功版本不会自动删除。

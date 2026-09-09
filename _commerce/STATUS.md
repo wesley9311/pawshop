@@ -248,3 +248,25 @@ non-writable `/srv/pawshop-source`. The isolated `pawshop-build` identity can re
 and verify that exact clean checkout but cannot modify it. Medusa, commerce database
 roles, Redis ACL credentials, migrations, backup activation, customer APIs and
 payments remain inactive.
+
+## Fail-closed release evidence slice — 2026-09-09
+
+- Prepared candidates now include their reviewed commerce operations files and a
+  deterministic manifest covering content, type, permissions and safe internal
+  symlink targets. Tracked source and unit files are rechecked against their exact
+  Git blob identities after all npm lifecycle, build and prune steps.
+- Root never trusts or executes a candidate-supplied verifier. Preparation,
+  dormant installation and activation invoke verifiers only from the exact clean,
+  root-owned `/srv/pawshop-source` checkout.
+- A first-install helper can install reviewed units and restore helpers while
+  proving that application services and the backup timer remain inactive and
+  disabled. Existing files or unexpected unit states stop the operation.
+- Activation no longer rebuilds. It consumes one immutable prepared candidate,
+  checks its installed units and libexec files, and requires root-only migration
+  plus backup/isolated-restore receipts chained to the same release digest before
+  switching `current`.
+
+The receipt generators and exact-release migration stage are intentionally not
+implemented in this slice. Therefore the activation gate currently fails closed;
+this commit is safe to prepare or install dormant, but not to activate. Commerce
+tests pass 51/51 and the public Store/customer/payment boundaries remain closed.

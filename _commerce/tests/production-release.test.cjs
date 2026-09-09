@@ -12,7 +12,11 @@ const root = resolve(__dirname, '..', '..');
 const deploy = readFileSync(resolve(root, 'ops/commerce/deploy-commerce.sh'), 'utf8');
 const prepare = readFileSync(resolve(root, 'ops/commerce/prepare-commerce-release.sh'), 'utf8');
 const rollback = readFileSync(resolve(root, 'ops/commerce/rollback-commerce.sh'), 'utf8');
+const installer = readFileSync(resolve(root, 'ops/commerce/install-commerce-runtime.sh'), 'utf8');
 const build = readFileSync(resolve(root, '_commerce/scripts/run-release-build.mjs'), 'utf8');
+const evidenceVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-release-evidence.mjs'), 'utf8');
+const releaseManifest = readFileSync(resolve(root, '_commerce/scripts/release-manifest.cjs'), 'utf8');
+const trackedVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-tracked-release.mjs'), 'utf8');
 const languagePage = readFileSync(resolve(root, '_commerce/src/admin/routes/language/page.tsx'), 'utf8');
 
 function fixture() {
@@ -42,18 +46,21 @@ test('production environment file ownership is exact', () => {
   ]) assert.throws(() => assertProductionEnvironmentFileStat({ ...valid, ...mutation }, 991));
 });
 
-test('commerce deployment is immutable, atomic, secret-isolated, and automatically rolls back', () => {
+test('commerce activation consumes an immutable prepared release and verified evidence', () => {
   assert.match(deploy, /PAWSHOP_RELEASE_ACTIVATION_CONFIRMED/);
-  assert.match(deploy, /source_dir=\/srv\/pawshop-source/);
-  assert.match(deploy, /git_readonly archive/);
-  assert.match(deploy, /runuser -u pawshop-build/);
+  assert.match(deploy, /verify-release-evidence\.mjs/);
+  assert.match(deploy, /verify-release-manifest\.mjs/);
+  assert.match(deploy, /verify-tracked-release\.mjs/);
+  assert.match(deploy, /Installed runtime units do not match/);
   assert.match(deploy, /mv -Tf -- .*current_link/);
   assert.match(deploy, /trap rollback ERR INT TERM/);
   assert.match(deploy, /systemctl restart pawshop-commerce\.service/);
-  assert.match(deploy, /chown -R root:root/);
-  assert.match(deploy, /available_disk_kib < 8388608/);
   assert.match(deploy, /CRITICAL: activation failed and automatic restoration was not verified/);
-  assert.doesNotMatch(deploy, /db:migrate|commerce\.env.*source|source .*commerce\.env/);
+  assert.doesNotMatch(deploy, /db:migrate|npm (ci|prune)|git_readonly archive|commerce\.env.*source|source .*commerce\.env/);
+  assert.match(evidenceVerifier, /migration\.json/);
+  assert.match(evidenceVerifier, /backup-restore\.json/);
+  assert.match(evidenceVerifier, /migration_receipt_sha256/);
+  assert.match(releaseManifest, /contentSha256/);
   assert.match(build, /media\.invalid/);
   assert.match(build, /validateProductionEnvironment/);
   assert.doesNotMatch(build, /commerce\.env|readFileSync/);
@@ -70,9 +77,14 @@ test('commerce deployment is immutable, atomic, secret-isolated, and automatical
 test('commerce release preparation builds an immutable candidate without activation', () => {
   assert.match(prepare, /PAWSHOP_RELEASE_ID/);
   assert.match(prepare, /git_readonly archive/);
+  assert.match(prepare, /_commerce ops\/commerce/);
   assert.match(prepare, /runuser -u pawshop-build/);
   assert.match(prepare, /run-release-build\.mjs/);
   assert.match(prepare, /\.pawshop-release/);
+  assert.match(prepare, /create-release-manifest\.mjs/);
+  assert.match(prepare, /verify-release-manifest\.mjs/);
+  assert.match(prepare, /source_dir\/_commerce\/scripts\/verify-tracked-release\.mjs/);
+  assert.doesNotMatch(prepare, /node "\$staging_dir\/_commerce\/scripts\/(?:create|verify)-release/);
   assert.match(prepare, /unsafe_source_path=\$\(find "\$source_dir" \\\( ! -user root -o -perm \/022 \\\)/);
   assert.match(prepare, /unsafe_release_path=\$\(find "\$release_dir" \\\( ! -user root -o -perm \/022 \\\)/);
   assert.match(prepare, /flock -n 9/);
@@ -91,6 +103,21 @@ test('commerce release preparation builds an immutable candidate without activat
   assert.match(prepare, /npm_config_globalconfig="\$empty_npmrc"/);
   assert.match(prepare, /temporary artifacts were removed/);
   assert.doesNotMatch(prepare, /systemctl|current_link|commerce\.env|db:migrate|PAWSHOP_RELEASE_ACTIVATION_CONFIRMED/);
+});
+
+test('reviewed runtime installation remains dormant and refuses existing files', () => {
+  assert.match(installer, /\/srv\/pawshop-commerce\/releases\/\$PAWSHOP_RELEASE_ID/);
+  assert.match(installer, /systemctl is-active --quiet/);
+  assert.match(installer, /systemctl is-enabled/);
+  assert.match(installer, /systemctl daemon-reload/);
+  assert.match(installer, /flock -n 9/);
+  assert.match(installer, /expected_enabled=static/);
+  assert.match(installer, /source_dir\/_commerce\/scripts\/verify-release-manifest\.mjs/);
+  assert.match(installer, /No commerce unit was started or enabled/);
+  assert.doesNotMatch(installer, /systemctl (start|restart|enable)/);
+  assert.match(trackedVerifier, /spawnSync\('\/usr\/bin\/git'/);
+  assert.match(trackedVerifier, /'ls-tree'/);
+  assert.match(trackedVerifier, /modified during build/);
 });
 
 test('manual rollback requires a retained exact release and schema compatibility gate', () => {
