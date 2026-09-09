@@ -187,6 +187,11 @@ Medusa 2.19 自带简体中文与英文界面。登录后可直接打开侧栏�
 
 ## 商务后台原子发布与回滚（尚未启用）
 
+首次部署或后续升级都先运行 `prepare-commerce-release.sh`。它只从固定、干净且
+root 管理的 `/srv/pawshop-source` 构建指定完整 commit，产出 root 只读的候选版本；
+不会改动 `current` 链接，不会安装、启动或启用任何 systemd 单元，也不会读取生产
+密钥或运行数据库迁移。候选版本准备成功不等于可以激活。
+
 `ops/commerce/deploy-commerce.sh` 只接受固定在 `/srv/pawshop-source`、由 root 管理且
 当前干净的 Git checkout 完整 commit SHA。Git 检查、归档、tar、npm 生命周期和构建
 全部由无法读取生产密钥的 `pawshop-build` 执行，root 只负责固定路径、所有权、
