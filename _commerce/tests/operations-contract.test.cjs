@@ -201,6 +201,8 @@ test('production identity provisioning is private, fail-closed, and keeps OSS in
   assert.match(identityProvisioner, /REDISCLI_AUTH="\$redis_password"/);
   assert.match(identityProvisioner, /CRITICAL: identity rollback could not be verified/);
   assert.match(identityProvisioner, /runuser -u postgres -- psql[\s\S]*< "\$sql_file"/);
+  assert.match(identityProvisioner, /^\\connect pawshop$/m);
+  assert.doesNotMatch(identityProvisioner, /^\\\\connect pawshop$/m);
   assert.match(identityProvisioner, /app_role_created=1/);
   assert.match(identityProvisioner, /recovery-secrets\.txt/);
   assert.match(identityProvisioner, /validate_system_account pawshop \/var\/lib\/pawshop/);

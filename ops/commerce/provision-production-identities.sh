@@ -210,7 +210,7 @@ cat > "$work_dir/create-database.sql" <<'EOF'
 CREATE DATABASE pawshop OWNER pawshop TEMPLATE template0 ENCODING 'UTF8';
 EOF
 cat > "$work_dir/configure-database.sql" <<'EOF'
-\\connect pawshop
+\connect pawshop
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT CONNECT ON DATABASE pawshop TO pawshop_backup;
 GRANT USAGE ON SCHEMA public TO pawshop_backup;
