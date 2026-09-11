@@ -43,7 +43,7 @@ fi
 if [[ ! -d $release || -L $release || ! -f $release/.pawshop-release || -L $release/.pawshop-release ]] ||
    [[ $(stat -c '%u:%g:%a' -- "$release") != '0:0:755' ]] ||
    [[ $(<"$release/.pawshop-release") != "$PAWSHOP_RELEASE_ID" ]] ||
-   find "$release" \( ! -user root -o -perm /022 \) -print -quit | grep -q .; then
+   find "$release" \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit | grep -q .; then
   echo 'The requested prepared release is missing or not immutable.' >&2
   exit 1
 fi

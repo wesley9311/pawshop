@@ -209,7 +209,7 @@ chmod 0644 "$staging_dir/.pawshop-release.json"
 mv -- "$staging_dir" "$release_dir"
 prepared=1
 
-unsafe_release_path=$(find "$release_dir" \( ! -user root -o -perm /022 \) -print -quit)
+unsafe_release_path=$(find "$release_dir" \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit)
 if [[ ! -d $release_dir || -L $release_dir || ! -f $release_dir/.pawshop-release ||
       ! -f $release_dir/.pawshop-release.json || -L $release_dir/.pawshop-release.json ]] ||
    [[ $(stat -c '%u:%g:%a' -- "$release_dir") != '0:0:755' ]] ||

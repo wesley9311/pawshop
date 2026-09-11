@@ -35,7 +35,7 @@ if [[ ! -d $target || -L $target || ! -f $target/.pawshop-release || -L $target/
   echo 'The requested retained release is missing or has an invalid identity marker.' >&2
   exit 1
 fi
-if find "$target" \( ! -user root -o -perm /022 \) -print -quit | grep -q .; then
+if find "$target" \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit | grep -q .; then
   echo 'The requested retained release must remain root-owned and non-writable by group or others.' >&2
   exit 1
 fi

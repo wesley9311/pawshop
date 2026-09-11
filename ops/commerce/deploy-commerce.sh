@@ -100,7 +100,7 @@ if [[ ! -d $release_dir || -L $release_dir || ! -f $release_dir/.pawshop-release
    [[ $(stat -c '%u:%g:%a' -- "$release_dir") != '0:0:755' ]] ||
    [[ $(stat -c '%u:%g:%a' -- "$release_dir/.pawshop-release") != '0:0:644' ]] ||
    [[ $(<"$release_dir/.pawshop-release") != "$PAWSHOP_RELEASE_ID" ]] ||
-   find "$release_dir" \( ! -user root -o -perm /022 \) -print -quit | grep -q .; then
+   find "$release_dir" \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit | grep -q .; then
   echo 'The exact prepared release is missing or no longer immutable.' >&2
   exit 1
 fi

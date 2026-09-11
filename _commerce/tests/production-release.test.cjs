@@ -86,7 +86,10 @@ test('commerce release preparation builds an immutable candidate without activat
   assert.match(prepare, /source_dir\/_commerce\/scripts\/verify-tracked-release\.mjs/);
   assert.doesNotMatch(prepare, /node "\$staging_dir\/_commerce\/scripts\/(?:create|verify)-release/);
   assert.match(prepare, /unsafe_source_path=\$\(find "\$source_dir" \\\( ! -user root -o -perm \/022 \\\)/);
-  assert.match(prepare, /unsafe_release_path=\$\(find "\$release_dir" \\\( ! -user root -o -perm \/022 \\\)/);
+  assert.match(prepare, /unsafe_release_path=\$\(find "\$release_dir" \\\( ! -user root -o \\\( ! -type l -a -perm \/022 \\\) \\\)/);
+  for (const releaseConsumer of [installer, deploy, rollback]) {
+    assert.match(releaseConsumer, /! -user root -o \\\( ! -type l -a -perm \/022 \\\)/);
+  }
   assert.match(prepare, /flock -n 9/);
   assert.match(prepare, /trap on_exit EXIT/);
   assert.match(prepare, /release_root_validated/);
@@ -126,7 +129,7 @@ test('manual rollback requires a retained exact release and schema compatibility
   assert.match(rollback, /mv -Tf -- .*current_link/);
   assert.match(rollback, /trap restore_previous ERR INT TERM/);
   assert.match(rollback, /CRITICAL: rollback failed and restoration was not verified/);
-  assert.match(rollback, /! -user root -o -perm \/022/);
+  assert.match(rollback, /! -user root -o \\\( ! -type l -a -perm \/022 \\\)/);
   assert.doesNotMatch(rollback, /rm -rf|db:migrate/);
 });
 
