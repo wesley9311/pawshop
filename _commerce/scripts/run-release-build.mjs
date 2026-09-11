@@ -40,7 +40,7 @@ const child = spawn('/usr/bin/npm', ['run', 'build:production'], {
   cwd: projectRoot,
   env: {
     HOME: '/var/cache/pawshop-build', LANG: 'C.UTF-8', PATH: '/usr/bin:/bin',
-    NODE_OPTIONS: '--max-old-space-size=1024',
+    NODE_OPTIONS: '--max-old-space-size=1536',
     npm_config_cache: '/var/cache/pawshop-build/npm',
     npm_config_userconfig: '/dev/null', npm_config_globalconfig: npmGlobalConfig,
     ...buildEnv,

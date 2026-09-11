@@ -216,7 +216,7 @@ PostgreSQL, Redis, database migration and commerce activation have not been perf
 - PostgreSQL and Redis are restricted to IPv4 loopback and bounded to 128 MB shared
   buffers / 40 connections and 96 MB cache respectively. Medusa is constrained to a
   768 MB V8 heap, 1 GB memory-high threshold and 1200 MB systemd hard limit; release
-  builds use a 1024 MB heap cap.
+  builds use a 1536 MB heap cap.
 - A temporary, collision-checked `policy-rc.d` prevents package maintainer scripts
   from starting data services before their private configuration is installed. Both
   success and failure paths remove it, and failure containment covers package setup.

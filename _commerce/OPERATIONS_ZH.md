@@ -79,7 +79,7 @@ npm --prefix _commerce run restore:verify-real
 17 与 Redis，并把两个数据服务限制到 IPv4 回环地址。针对 2 GB 套餐，PostgreSQL
 使用 128 MB shared buffers 和最多 40 个连接，Redis 上限 96 MB；Medusa 运行时
 使用 768 MB V8 heap、1 GB memory high 与 1200 MB hard limit，发布构建 heap 上限
-为 1024 MB。Node 二进制是固定版本，不由 Ubuntu 自动更新；每次升级必须更新哈希、
+为 1536 MB。Node 二进制是固定版本，不由 Ubuntu 自动更新；每次升级必须更新哈希、
 重跑测试并重新审查。该脚本不会创建数据库业务角色、运行迁移、生成备份或对象存储
 密钥，也不会安装或启用 Medusa systemd 单元。
 

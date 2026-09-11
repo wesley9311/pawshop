@@ -65,7 +65,7 @@ test('commerce activation consumes an immutable prepared release and verified ev
   assert.match(build, /validateProductionEnvironment/);
   assert.doesNotMatch(build, /commerce\.env|readFileSync/);
   assert.match(build, /HOME: '\/var\/cache\/pawshop-build'/);
-  assert.match(build, /NODE_OPTIONS: '--max-old-space-size=1024'/);
+  assert.match(build, /NODE_OPTIONS: '--max-old-space-size=1536'/);
   assert.match(build, /npmGlobalConfig = '\/etc\/pawshop-build\/npmrc-empty'/);
   assert.match(build, /npmGlobalConfigStat\.isSymbolicLink\(\)/);
   assert.match(build, /npmGlobalConfigStat\.uid !== 0/);
