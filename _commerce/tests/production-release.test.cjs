@@ -18,6 +18,7 @@ const evidenceVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-re
 const releaseManifest = readFileSync(resolve(root, '_commerce/scripts/release-manifest.cjs'), 'utf8');
 const trackedVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-tracked-release.mjs'), 'utf8');
 const languagePage = readFileSync(resolve(root, '_commerce/src/admin/routes/language/page.tsx'), 'utf8');
+const { buildProductionEnvironment } = require('../scripts/production-environment-builder.cjs');
 
 function fixture() {
   return `${requiredFields.map(field => `${field}=${field === 'PAWSHOP_INFRA_TOPOLOGY' ? 'single-host-private' : 'fixture'}`).join('\n')}\n`;
@@ -44,6 +45,39 @@ test('production environment file ownership is exact', () => {
     { uid: 501 }, { gid: 20 }, { mode: 0o100644 },
     { isFile: () => false }, { isSymbolicLink: () => true },
   ]) assert.throws(() => assertProductionEnvironmentFileStat({ ...valid, ...mutation }, 991));
+});
+
+test('production environment builder fixes topology and keeps migrations disabled', () => {
+  const source = buildProductionEnvironment({
+    internalSource: [
+      'DATABASE_URL=postgresql://pawshop:private@127.0.0.1:5432/pawshop?sslmode=disable',
+      'REDIS_URL=redis://pawshop:private@127.0.0.1:6379',
+      `JWT_SECRET=${'a'.repeat(64)}`,
+      `COOKIE_SECRET=${'b'.repeat(64)}`,
+      '',
+    ].join('\n'),
+    accessKeySource: 'fixture-access-key\n',
+    secretKeySource: 'fixture-secret-value\n',
+  });
+  const parsed = parseProductionEnvironmentFile(source);
+  assert.equal(parsed.PAWSHOP_MIGRATIONS_CONFIRMED, '0');
+  assert.equal(parsed.PAWSHOP_MODE, 'production-admin-only');
+  assert.equal(parsed.STOREFRONT_ORIGIN, 'https://pawlivora.com');
+  assert.equal(parsed.ADMIN_ORIGIN, 'http://127.0.0.1:9000');
+  assert.equal(parsed.S3_BUCKET, 'pawlivora-products-us-west-1');
+  assert.equal(parsed.S3_DISABLE_ACL, '1');
+  for (const bad of ['two lines\nsecret\n', ' leading', 'quote"value', 'short']) {
+    assert.throws(() => buildProductionEnvironment({
+      internalSource: bad === 'short' ? 'invalid' : [
+        'DATABASE_URL=postgresql://pawshop:private@127.0.0.1:5432/pawshop?sslmode=disable',
+        'REDIS_URL=redis://pawshop:private@127.0.0.1:6379',
+        `JWT_SECRET=${'a'.repeat(64)}`,
+        `COOKIE_SECRET=${'b'.repeat(64)}`,
+      ].join('\n'),
+      accessKeySource: 'fixture-access-key\n',
+      secretKeySource: bad === 'short' ? 'fixture-secret-value\n' : bad,
+    }));
+  }
 });
 
 test('commerce activation consumes an immutable prepared release and verified evidence', () => {

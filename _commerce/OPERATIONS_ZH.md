@@ -212,6 +212,19 @@ root 管理的 `/srv/pawshop-source` 构建指定完整 commit，产出 root 只
 当前这套严格环境文件和主机预检只支持已经评审的 `single-host-private` 单机私有拓扑；
 未来改为托管数据库或托管 TLS 时，必须先扩展并重新审查字段契约，不能直接改变量绕过。
 
+RAM 商品媒体 AccessKey 由所有者完成安全核身并分别存入 root-only 文件后，使用固定
+脚本生成一次生产环境文件：
+
+```bash
+sudo -n bash /srv/pawshop-source/ops/commerce/provision-production-environment.sh
+```
+
+脚本只接受 `/etc/pawshop/internal-secrets.env`、`/etc/pawshop/oss-access-key-id` 和
+`/etc/pawshop/oss-secret-access-key` 三个权限严格的输入，不会 `source` 或执行其中内容，
+也不会在输出中打印密钥。若 `/etc/pawshop/commerce.env` 已存在会直接拒绝覆盖，密钥轮换
+必须另做协调审查。成功生成后仍固定 `PAWSHOP_MIGRATIONS_CONFIRMED=0`，不会启动服务；
+只有后续真实备份恢复、迁移及发布证据全部通过后才进入激活阶段。
+
 发布脚本绝不自动运行数据库迁移。每次上线前必须先完成加密备份、真实恢复验证、
 迁移审查，并确认新旧版本与当前数据库 schema 的兼容边界；只有完成这些步骤后才可
 设置一次性的 `PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1`。手动回退使用

@@ -21,6 +21,7 @@ const backupService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-bac
 const restoreService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-restore-verify.service'), 'utf8');
 const hostBootstrap = readFileSync(resolve(root, '..', 'ops/commerce/bootstrap-ubuntu-host.sh'), 'utf8');
 const identityProvisioner = readFileSync(resolve(root, '..', 'ops/commerce/provision-production-identities.sh'), 'utf8');
+const environmentProvisioner = readFileSync(resolve(root, '..', 'ops/commerce/provision-production-environment.sh'), 'utf8');
 
 test('real backup is encrypted and plaintext is removed', () => {
   assert.match(backup, /aes-256-cbc/);
@@ -229,4 +230,16 @@ test('offsite sync is versioned, read-back verified, credential isolated, and ne
   assert.match(backupService, /^LoadCredential=backup-s3-secret-key:/m);
   assert.match(backupService, /ExecStartPost=.*sync-production-backups\.mjs/);
   assert.doesNotMatch(backupService, /BACKUP_S3_ACCESS_KEY|BACKUP_S3_SECRET/);
+});
+
+test('production environment provisioning is atomic, exact, and activation-free', () => {
+  assert.match(environmentProvisioner, /set \+x/);
+  assert.match(environmentProvisioner, /internal-secrets\.env/);
+  assert.match(environmentProvisioner, /oss-access-key-id/);
+  assert.match(environmentProvisioner, /oss-secret-access-key/);
+  assert.match(environmentProvisioner, /write-production-environment\.mjs/);
+  assert.match(environmentProvisioner, /Existing commerce\.env requires an explicit credential-rotation review/);
+  assert.match(environmentProvisioner, /install -o root -g pawshop -m 0640/);
+  assert.match(environmentProvisioner, /migrations disabled/);
+  assert.doesNotMatch(environmentProvisioner, /systemctl|db:migrate|source .*\.env|PAWSHOP_RELEASE_ACTIVATION_CONFIRMED/);
 });

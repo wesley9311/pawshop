@@ -249,6 +249,21 @@ and verify that exact clean checkout but cannot modify it. Medusa, commerce data
 roles, Redis ACL credentials, migrations, backup activation, customer APIs and
 payments remain inactive.
 
+## Production environment assembly gate — 2026-09-13
+
+- Added a root-only, one-time environment provisioner that reads the existing
+  database/Redis/JWT/cookie secrets and two separately stored OSS credentials without
+  evaluating either file as shell code.
+- The environment builder emits only the exact approved field set, fixes the public
+  storefront and loopback-only admin origins, binds product media to the reviewed
+  US West OSS bucket, disables per-object ACL headers and writes
+  `PAWSHOP_MIGRATIONS_CONFIRMED=0`.
+- Inputs must be nonsymlink regular files with exact ownership and permissions. The
+  generated file is validated before an atomic root/service-group installation, and
+  any existing `commerce.env` stops the operation for a separate rotation review.
+- This step does not migrate a database, start or enable Medusa, expose the admin,
+  collect customer information or enable payments.
+
 ## Fail-closed release evidence slice — 2026-09-09
 
 - Prepared candidates now include their reviewed commerce operations files and a
