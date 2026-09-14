@@ -235,4 +235,32 @@ sudo -n bash /srv/pawshop-source/ops/commerce/provision-production-environment.s
 当前阿里云轻量服务器已升级为控制台标称 2 GB 的套餐；Ubuntu 实测
 `MemTotal: 1651800 kB`，因此主机门槛使用至少 `1600000 kB` 的系统报告值，同时
 仍会拒绝原 1 GB 套餐。40 GB 云盘已完成分区和 ext4 在线扩容，扩容前分区表保存在
-服务器 root 私有目录。首次原子激活前仍必须完成主机预检、真实备份/恢复及对象存储证据。
+服务器 root 私有目录。
+
+### 首次生产后台激活顺序
+
+以下步骤必须针对同一个完整 Git SHA，不能跳步，也不能把示例确认变量长期写进环境文件。
+商品、顾客、订单和支付的公网接口在这轮始终保持关闭。
+
+1. 在干净且 root 所有的 `/srv/pawshop-source` 更新到待发布 SHA，执行
+   `prepare-commerce-release.sh`，再用 `verify-release-manifest.mjs` 取得该候选的
+   `RELEASE_CONTENT_SHA256`。
+2. 明确设置一次性 `PAWSHOP_FIRST_MIGRATION_CONFIRMED=1`，运行
+   `run-first-production-migration.sh`。它只接受空生产数据库并保持服务未启动。
+3. 确认对象存储备份桶已开启版本控制、至少 90 天保留策略，且备份 RAM 凭据无删除权限；
+   明确设置一次性 `PAWSHOP_FIRST_BACKUP_RESTORE_CONFIRMED=1`，运行
+   `run-first-production-backup-restore.sh RELEASE_ID RELEASE_CONTENT_SHA256`。成功标准包含
+   加密备份、指定版本完整回读、隔离 PostgreSQL 恢复和临时集群删除。
+4. 运行 `provision-production-owner-credentials.mjs owner@pawlivora.com`。凭据只写入
+   `/root/pawshop-production-owner-credentials.json`（0600），密码不进入命令参数或日志。
+5. 只有两份证据均通过后，明确设置一次性
+   `PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1` 并运行 `deploy-commerce.sh`。首次启动失败会
+   恢复无 `current` 链接状态，并把迁移门禁重新关闭。
+6. 明确设置一次性 `PAWSHOP_PRODUCTION_ADMIN_FINALIZATION_CONFIRMED=1`，运行
+   `finalize-production-admin.sh RELEASE_ID`。它必须完成真实管理员登录以及商品、订单、顾客
+   管理接口验证，随后才启用开机自启和每日加密异地备份定时器。
+
+运营者查看首次生成的后台账号时，应在服务器私有终端执行
+`sudo less /root/pawshop-production-owner-credentials.json`，不得截图、提交 Git、粘贴到聊天或
+存入浏览器同步笔记。完成首次登录后应尽快在密码管理器中保存，并在支持的后台安全设置中
+启用 MFA；支付接入仍需另行评审和真实沙箱/小额闭环验证。

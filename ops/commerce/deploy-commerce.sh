@@ -33,6 +33,8 @@ next_link="/srv/pawshop-commerce/.current.${PAWSHOP_RELEASE_ID}.$$"
 lock_file=/run/lock/pawshop-commerce-deploy.lock
 previous_target=
 activated=0
+gate_promoted=0
+release_content_sha256=
 
 exec 9>"$lock_file"
 flock -n 9 || { echo 'Another PawShop commerce release operation is active.' >&2; exit 1; }
@@ -68,6 +70,14 @@ rollback() {
     fi
   else
     restored=1
+  fi
+  if [[ $restored == 1 && $gate_promoted == 1 ]]; then
+    if /usr/bin/node "$release_dir/_commerce/scripts/write-production-migration-gate.mjs" \
+      "$release_dir" "$PAWSHOP_RELEASE_ID" "$release_content_sha256" rollback-disable; then
+      gate_promoted=0
+    else
+      restored=0
+    fi
   fi
   cleanup
   if [[ $restored == 1 ]]; then
@@ -131,6 +141,16 @@ if [[ -L $current_link ]]; then
 elif [[ -e $current_link ]]; then
   echo 'The commerce current path must be absent or a validated symbolic link.' >&2
   exit 1
+fi
+if [[ ! -L $current_link ]]; then
+  /usr/bin/node "$release_dir/_commerce/scripts/write-production-migration-gate.mjs" \
+    "$release_dir" "$PAWSHOP_RELEASE_ID" "$release_content_sha256" enable
+  gate_promoted=1
+else
+  grep -qx 'PAWSHOP_MIGRATIONS_CONFIRMED=1' /etc/pawshop/commerce.env || {
+    echo 'An existing production release requires the migration gate to remain enabled.' >&2
+    exit 1
+  }
 fi
 cleanup
 activated=1

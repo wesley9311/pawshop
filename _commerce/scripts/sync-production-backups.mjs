@@ -25,7 +25,8 @@ assertBackupKeyStat(lstatSync(backupKeyFile), process.getgid());
 const backupKey = readBackupKey(backupKeyFile);
 
 const credentialsDir = resolve(process.env.CREDENTIALS_DIRECTORY || '');
-if (credentialsDir !== '/run/credentials/pawshop-backup.service') {
+if (credentialsDir !== '/run/credentials/pawshop-backup.service' &&
+    !/^\/run\/credentials\/pawshop-first-backup-[0-9a-f]{12}\.service$/.test(credentialsDir)) {
   throw new Error('Backup object storage credentials must come from the systemd credential directory.');
 }
 function credential(name) {

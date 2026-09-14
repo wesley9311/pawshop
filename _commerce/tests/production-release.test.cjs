@@ -17,8 +17,22 @@ const build = readFileSync(resolve(root, '_commerce/scripts/run-release-build.mj
 const evidenceVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-release-evidence.mjs'), 'utf8');
 const releaseManifest = readFileSync(resolve(root, '_commerce/scripts/release-manifest.cjs'), 'utf8');
 const trackedVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-tracked-release.mjs'), 'utf8');
+const firstMigration = readFileSync(resolve(root, 'ops/commerce/run-first-production-migration.sh'), 'utf8');
+const migrationRunner = readFileSync(resolve(root, '_commerce/scripts/run-first-production-migration.mjs'), 'utf8');
+const migrationWriter = readFileSync(resolve(root, '_commerce/scripts/write-production-migration-evidence.mjs'), 'utf8');
+const backupEvidenceWriter = readFileSync(resolve(root, '_commerce/scripts/write-production-backup-restore-evidence.mjs'), 'utf8');
+const firstBackupRestore = readFileSync(resolve(root, 'ops/commerce/run-first-production-backup-restore.sh'), 'utf8');
+const backupPointerReader = readFileSync(resolve(root, '_commerce/scripts/read-production-backup-pointer.mjs'), 'utf8');
+const offsiteSync = readFileSync(resolve(root, '_commerce/scripts/sync-production-backups.mjs'), 'utf8');
+const firstBackupRunner = readFileSync(resolve(root, '_commerce/scripts/run-first-production-backup.mjs'), 'utf8');
+const migrationGateWriter = readFileSync(resolve(root, '_commerce/scripts/write-production-migration-gate.mjs'), 'utf8');
+const ownerProvisioner = readFileSync(resolve(root, '_commerce/scripts/provision-production-owner-credentials.mjs'), 'utf8');
+const ownerCreator = readFileSync(resolve(root, '_commerce/scripts/create-production-owner.mjs'), 'utf8');
+const ownerVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-production-owner-login.mjs'), 'utf8');
+const finalizer = readFileSync(resolve(root, 'ops/commerce/finalize-production-admin.sh'), 'utf8');
 const languagePage = readFileSync(resolve(root, '_commerce/src/admin/routes/language/page.tsx'), 'utf8');
 const { buildProductionEnvironment } = require('../scripts/production-environment-builder.cjs');
+const medusaUserCommand = require('../node_modules/@medusajs/medusa/dist/commands/user.js').default;
 
 function fixture() {
   return `${requiredFields.map(field => `${field}=${field === 'PAWSHOP_INFRA_TOPOLOGY' ? 'single-host-private' : 'fixture'}`).join('\n')}\n`;
@@ -90,6 +104,9 @@ test('commerce activation consumes an immutable prepared release and verified ev
   assert.match(deploy, /trap rollback ERR INT TERM/);
   assert.match(deploy, /systemctl restart pawshop-commerce\.service/);
   assert.match(deploy, /CRITICAL: activation failed and automatic restoration was not verified/);
+  assert.match(deploy, /write-production-migration-gate\.mjs/);
+  assert.match(deploy, /rollback-disable/);
+  assert.match(deploy, /gate_promoted/);
   assert.doesNotMatch(deploy, /db:migrate|npm (ci|prune)|git_readonly archive|commerce\.env.*source|source .*commerce\.env/);
   assert.match(evidenceVerifier, /migration\.json/);
   assert.match(evidenceVerifier, /backup-restore\.json/);
@@ -106,6 +123,66 @@ test('commerce activation consumes an immutable prepared release and verified ev
   assert.match(build, /npmGlobalConfigStat\.size !== 0/);
   assert.match(build, /npm_config_userconfig: '\/dev\/null'/);
   assert.match(build, /npm_config_globalconfig: npmGlobalConfig/);
+});
+
+test('first activation changes the migration gate atomically and can fail closed', () => {
+  assert.match(migrationGateWriter, /verify-release-evidence\.mjs/);
+  assert.match(migrationGateWriter, /assertProductionEnvironmentFileStat/);
+  assert.match(migrationGateWriter, /parseProductionEnvironmentFile/);
+  assert.match(migrationGateWriter, /PAWSHOP_MIGRATIONS_CONFIRMED/);
+  assert.match(migrationGateWriter, /O_EXCL \| constants\.O_NOFOLLOW/);
+  assert.match(migrationGateWriter, /fsyncSync/);
+  assert.match(migrationGateWriter, /renameSync/);
+  assert.doesNotMatch(migrationGateWriter, /source .*commerce|\. .*commerce/);
+});
+
+test('first production migration is exact-release, empty-database, and fail-closed', () => {
+  assert.match(firstMigration, /PAWSHOP_FIRST_MIGRATION_CONFIRMED/);
+  assert.match(firstMigration, /production database is not empty/);
+  assert.match(firstMigration, /runuser -u pawshop/);
+  assert.match(firstMigration, /run-first-production-migration\.mjs/);
+  assert.match(firstMigration, /write-production-migration-evidence\.mjs/);
+  assert.match(firstMigration, /verify-release-manifest\.mjs/);
+  assert.match(firstMigration, /verify-tracked-release\.mjs/);
+  assert.match(firstMigration, /PAWSHOP_MIGRATIONS_CONFIRMED=0/);
+  assert.doesNotMatch(firstMigration, /source .*commerce\.env|\. .*commerce\.env/);
+  assert.match(migrationRunner, /parseProductionEnvironmentFile/);
+  assert.match(migrationRunner, /process\.getuid\(\) === 0/);
+  assert.match(migrationRunner, /\['db:migrate'\]/);
+  assert.match(migrationWriter, /migration\.json/);
+  assert.match(migrationWriter, /0o444/);
+  assert.match(migrationWriter, /already exists and cannot be replaced/);
+  assert.match(migrationWriter, /if \(lock !== undefined\)/);
+  assert.match(migrationWriter, /assertMigrationEvidence/);
+});
+
+test('backup evidence requires authenticated offsite and isolated restore records', () => {
+  assert.match(backupEvidenceWriter, /offsiteReceiptIsValid/);
+  assert.match(backupEvidenceWriter, /backupManifestHmac/);
+  assert.match(backupEvidenceWriter, /assertRestoreVerification/);
+  assert.match(backupEvidenceWriter, /assertBackupRestoreEvidence/);
+  assert.match(backupEvidenceWriter, /Production backup target does not match the exact migrated commerce database/);
+  assert.match(backupEvidenceWriter, /manifest\.value\.source_database !== migration\.value\.database/);
+  assert.match(backupEvidenceWriter, /backup-restore\.json/);
+  assert.match(backupEvidenceWriter, /already exists and cannot be replaced/);
+  assert.doesNotMatch(backupEvidenceWriter, /S3_SECRET|secretAccessKey: process\.env/);
+  assert.match(firstBackupRestore, /PAWSHOP_FIRST_BACKUP_RESTORE_CONFIRMED/);
+  assert.match(firstBackupRestore, /systemd-run --quiet --wait --collect/);
+  assert.match(firstBackupRestore, /LoadCredential=backup-s3-access-key/);
+  assert.match(firstBackupRestore, /pawshop-restore-verify\.service/);
+  assert.match(firstBackupRestore, /write-production-backup-restore-evidence\.mjs/);
+  assert.match(firstBackupRestore, /verify-tracked-release\.mjs/);
+  assert.match(firstBackupRestore, /for installed in restore-verify-production\.mjs backup-integrity\.cjs/);
+  assert.match(firstBackupRestore, /cmp -s "\$release\/_commerce\/scripts\/\$installed"/);
+  assert.match(firstBackupRestore, /trusted source must be the exact clean release commit/);
+  assert.match(firstBackupRestore, /Commerce activation remains disabled/);
+  assert.doesNotMatch(firstBackupRestore, /source .*backup|\. .*backup/);
+  assert.match(backupPointerReader, /process\.getuid\(\) !== 0/);
+  assert.match(backupPointerReader, /manifest_file/);
+  assert.match(offsiteSync, /pawshop-first-backup-\[0-9a-f\]\{12\}/);
+  assert.match(firstBackupRunner, /backup-production\.mjs/);
+  assert.match(firstBackupRunner, /sync-production-backups\.mjs/);
+  assert.match(firstBackupRunner, /exact immutable release/);
 });
 
 test('commerce release preparation builds an immutable candidate without activation', () => {
@@ -173,4 +250,37 @@ test('owner admin exposes an explicit Simplified Chinese and English switch', ()
   assert.match(languagePage, /简体中文/);
   assert.match(languagePage, /English/);
   assert.match(languagePage, /不会被自动翻译/);
+});
+
+test('production owner credentials stay out of argv and service-readable files', () => {
+  assert.equal(typeof medusaUserCommand, 'function');
+  assert.match(ownerProvisioner, /randomBytes\(24\)/);
+  assert.match(ownerProvisioner, /O_EXCL \| constants\.O_NOFOLLOW/);
+  assert.match(ownerProvisioner, /password was not printed/);
+  assert.match(ownerCreator, /pawshop-production-owner-credentials\.json/);
+  assert.match(ownerCreator, /process\.setgroups/);
+  assert.match(ownerCreator, /process\.setgid/);
+  assert.match(ownerCreator, /process\.setuid/);
+  assert.match(ownerCreator, /password: credentials\.password/);
+  assert.match(ownerCreator, /require\(commandPath\)\.default/);
+  assert.match(ownerCreator, /provider_identity/);
+  assert.match(ownerCreator, /auth_identity/);
+  assert.match(ownerCreator, /partial or conflicting/);
+  assert.doesNotMatch(ownerCreator, /'user'.*'-p'|execFileSync\([^\n]+password/);
+  assert.match(ownerVerifier, /\/auth\/user\/emailpass/);
+  assert.match(ownerVerifier, /\/admin\/users\/me/);
+  assert.match(ownerVerifier, /\/admin\/products/);
+  assert.match(ownerVerifier, /\/admin\/orders/);
+  assert.match(ownerVerifier, /\/admin\/customers/);
+  assert.doesNotMatch(ownerVerifier, /console\.log\([^\n]*(?:token|password|credentials)/);
+  assert.match(finalizer, /PAWSHOP_PRODUCTION_ADMIN_FINALIZATION_CONFIRMED/);
+  assert.match(finalizer, /create-production-owner\.mjs/);
+  assert.match(finalizer, /verify-production-owner-login\.mjs/);
+  assert.match(finalizer, /run-production-admin-verification\.mjs/);
+  assert.match(finalizer, /systemctl enable pawshop-commerce\.service pawshop-backup\.timer/);
+  assert.match(finalizer, /pawshop-commerce-deploy\.lock/);
+  assert.match(finalizer, /rollback_enablement/);
+  assert.match(finalizer, /CRITICAL: production admin persistence finalization failed/);
+  assert.match(finalizer, /systemctl is-enabled --quiet pawshop-backup\.timer && restored=0/);
+  assert.match(finalizer, /Public customer registration, checkout, and payment remain closed/);
 });

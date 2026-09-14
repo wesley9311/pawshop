@@ -281,7 +281,18 @@ payments remain inactive.
   plus backup/isolated-restore receipts chained to the same release digest before
   switching `current`.
 
-The receipt generators and exact-release migration stage are intentionally not
-implemented in this slice. Therefore the activation gate currently fails closed;
-this commit is safe to prepare or install dormant, but not to activate. Commerce
-tests pass 51/51 and the public Store/customer/payment boundaries remain closed.
+The first production activation implementation is now a tested candidate, but has
+not yet been executed on the host. It verifies the immutable release and clean
+trusted source, proves the database is empty before the first migration, and records
+root-only migration evidence. It then requires an encrypted backup uploaded to
+versioned object storage and read back, a successful restore into a temporary
+isolated PostgreSQL cluster, and an exact evidence chain before activation.
+
+The activation path atomically promotes the migration gate only after that evidence
+passes and returns it to the fail-closed state if the first service activation is
+rolled back. Production owner credentials are generated into a root-only file; the
+password is never placed in a process argument or printed by the tooling. Final
+acceptance requires a real owner login plus authenticated product, order and customer
+management requests, then enables service persistence and the daily encrypted backup
+timer. Public Store APIs, customer registration, checkout and payments remain closed
+throughout this admin-only milestone.

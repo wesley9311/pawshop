@@ -7,6 +7,10 @@ const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { releaseFiles, contentSha256, sha256, assertReleaseManifest } = require('../scripts/release-manifest.cjs');
 const { assertMigrationEvidence, assertBackupRestoreEvidence } = require('../scripts/release-evidence.cjs');
+const { migrationEvidence, migrationSet } = require('../scripts/first-production-migration.cjs');
+const {
+  assertRestoreVerification, backupRestoreEvidence,
+} = require('../scripts/first-production-backup-evidence.cjs');
 
 test('prepared release manifest detects content, mode, and symlink-target tampering', () => {
   const root = mkdtempSync(join(tmpdir(), 'pawshop-release-'));
@@ -65,4 +69,67 @@ test('release evidence contracts bind migration and restore to exact content', (
   assert.doesNotThrow(() => assertBackupRestoreEvidence(restored, releaseId));
   assert.throws(() => assertMigrationEvidence({ ...migration, release_id: '0'.repeat(40) }, releaseId));
   assert.throws(() => assertBackupRestoreEvidence({ ...restored, migration_set_sha256: 'nope' }, releaseId));
+});
+
+test('migration set digest is deterministic and evidence stays exact-release bound', () => {
+  const manifest = {
+    schema: 'pawshop-prepared-release-v1', release_id: 'a'.repeat(40),
+    files: [
+      { path: '_commerce/node_modules/pkg/migrations/002.js', type: 'file', sha256: '2'.repeat(64) },
+      { path: '_commerce/README.md', type: 'file', sha256: '9'.repeat(64) },
+      { path: '_commerce/node_modules/pkg/migrations/001.js', type: 'file', sha256: '1'.repeat(64) },
+    ],
+  };
+  const first = migrationSet(manifest);
+  const second = migrationSet({ ...manifest, files: [...manifest.files].reverse() });
+  assert.deepEqual(first, second);
+  assert.deepEqual(first.entries.map(entry => entry.path), [
+    '_commerce/node_modules/pkg/migrations/001.js',
+    '_commerce/node_modules/pkg/migrations/002.js',
+  ]);
+  assert.match(first.sha256, /^[0-9a-f]{64}$/);
+  const evidence = migrationEvidence({
+    releaseId: manifest.release_id, releaseContentSha256: 'b'.repeat(64),
+    migrationSetSha256: first.sha256, completedAt: '2026-09-14T00:00:00.000Z',
+  });
+  assert.doesNotThrow(() => assertMigrationEvidence(evidence, manifest.release_id));
+  assert.throws(() => migrationSet({ ...manifest, files: [] }));
+  assert.throws(() => migrationEvidence({ ...evidence, releaseId: 'bad' }));
+});
+
+test('backup evidence binds exact migration bytes and isolated restore bytes', () => {
+  const manifest = {
+    source_database: 'pawshop', sha256: 'e'.repeat(64),
+  };
+  const verification = {
+    schema: 'pawshop-production-restore-verification-v1',
+    verified_at: '2026-09-14T00:05:00.000Z', source_database: 'pawshop',
+    encrypted_backup_sha256: manifest.sha256,
+    critical_table_counts: {
+      customers: 0, images: 0, orders: 0, owner_users: 0, products: 0, variants: 0,
+    },
+    isolated_cluster_removed: true,
+  };
+  assert.doesNotThrow(() => assertRestoreVerification(verification, manifest));
+  assert.throws(() => assertRestoreVerification({ ...verification, isolated_cluster_removed: false }, manifest));
+  const migrationSource = '{"migration":"exact"}\n';
+  const restoreSource = `${JSON.stringify(verification)}\n`;
+  const evidence = backupRestoreEvidence({
+    releaseId: 'a'.repeat(40), releaseContentSha256: 'b'.repeat(64),
+    migrationSource, migrationSetSha256: 'c'.repeat(64),
+    backupManifestFile: 'pawshop_production_20260914T000000000Z.manifest.json',
+    encryptedBackupSha256: manifest.sha256,
+    restoreVerificationFile: 'verification-1.json', restoreVerificationSource: restoreSource,
+    restoreVerifiedAt: verification.verified_at,
+  });
+  assert.doesNotThrow(() => assertBackupRestoreEvidence(evidence, 'a'.repeat(40)));
+  assert.notEqual(evidence.migration_receipt_sha256,
+    backupRestoreEvidence({ ...{
+      releaseId: 'a'.repeat(40), releaseContentSha256: 'b'.repeat(64),
+      migrationSource: `${migrationSource} `, migrationSetSha256: 'c'.repeat(64),
+      backupManifestFile: 'pawshop_production_20260914T000000000Z.manifest.json',
+      encryptedBackupSha256: manifest.sha256,
+      restoreVerificationFile: 'verification-1.json', restoreVerificationSource: restoreSource,
+      restoreVerifiedAt: verification.verified_at,
+    } }).migration_receipt_sha256);
 });
