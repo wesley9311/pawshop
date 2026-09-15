@@ -18,6 +18,10 @@ The incomplete second catalog item is preserved in a private local operations
 backup outside the website directory until its English copy, images, per-SKU
 pricing and logistics data have been verified.
 
+店主查看生产服务器、OSS、数据库、备份、凭据边界和最终验收入口时，使用
+[`PRODUCTION_HANDOFF_ZH.md`](PRODUCTION_HANDOFF_ZH.md) 作为中文总索引；该文件不包含
+任何密码、AccessKey 或客户明文。
+
 ## Local development
 
 ```bash
