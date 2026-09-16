@@ -14,7 +14,7 @@
 | SECURITY | **PASS** | check:security 通过（**CSP 现覆盖全部 10 个页面**并由回归强制）；git 密钥模式零命中；.env.example 全占位符；**生产 HSTS 已补齐（AR-6）**；`www`→apex 已规范化（AR-7）。生产渗透面（Cookie flags 实测、Rate limit）= UNVERIFIED。依赖漏洞见 RISK-2/AR-15 |
 | PRODUCTION_ENV | **PASS（静态站）/ UNVERIFIED（commerce）** | 展示站生产验证通过；commerce 生产 env 未安装（`/etc/pawshop/commerce.env` 不存在），激活链未执行 |
 | DATABASE | **PASS（本地）/ UNVERIFIED（生产）** | 本地 PG 17 运行中、迁移已应用、测试通过；生产库未创建、首次迁移未执行 |
-| BACKUP | **PASS（本地）/ UNVERIFIED（异地+生产）** | 本地 `backup:real` exit 0（AES-256 + manifest）；OSS 异地备份无真实凭据与上传证据；生产每日备份 timer 未安装 |
+| BACKUP | **PASS（本地）/ UNVERIFIED（异地+生产）** | 本地 `backup:real` exit 0（AES-256 + manifest）。**2026-09-16 进展**：`/etc/pawshop-backup/backup-offsite.env` 已写入（两个闸门故意留空以 fail-closed）；备份单元对 postgres 的依赖从**空壳** `postgresql.service` 改为真实的 `postgresql@17-main.service`（⚙️ 纠正：空壳单元 `ExecStart=/bin/true`，依赖它等于没有任何保证，并非"inactive 起不来"）。**仍缺**：备份 RAM 凭据（只有店主能在阿里云建）+ commerce release 激活；生产每日备份 timer 仍未启用——设计上必须先做出一次通过「离线回读 + 隔离恢复演练」的加密备份，之后才允许激活商务后台 |
 | RESTORE | **PASS（本地演练）** | `restore:verify-real` exit 0：隔离库恢复、关键数据哈希校验、临时库清理确认（`pawshop_restore_%` 计数=0）。生产隔离恢复服务未演练 |
 | ROLLBACK | **PASS（脚本级）/ UNVERIFIED（生产演练）** | 展示站：deploy-static.sh 内建失败回滚；commerce：rollback-commerce.sh 有 DB 兼容门禁+原子切换，但生产从未演练回滚 |
 | MONITORING | **PASS** | `pawshop-monitor.timer` **已于 2026-09-16 在生产主机安装并启用**（enabled+active，每 5 分钟；实测调度运行 **12/12 通过**，状态文件写入正常）。为摆脱对商务激活的依赖，单元改为从 `/usr/local/libexec/pawshop` 运行（见 RUNBOOK §9.1）。**告警通道适配层同日补齐**：飞书/Slack/Telegram/generic 四家方言 + 厂商域名钉住 + 「HTTP 200 但内部报错 = 未投递」判定 + 抑制窗口不再误报为告警故障，单测 12/12、端到端投递实测 10/10（`npm run test:alert-delivery`）。**剩余：仍缺一个真实 webhook（当前 log-only，不会主动通知任何人），只等店主提供 URL（OWNER_ACTIONS_ZH §1 / RUNBOOK §9.3）；commerce 与备份新鲜度两项检查为临时显式跳过，须在商务激活后删除（RUNBOOK §9.2）** |

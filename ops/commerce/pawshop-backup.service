@@ -1,7 +1,10 @@
 [Unit]
 Description=PawShop encrypted PostgreSQL backup
-After=postgresql.service
-Requires=postgresql.service
+# postgresql.service is a stub (ExecStart=/bin/true, no cluster management), so
+# depending on it would order the backup against nothing and let a backup run
+# while the cluster is down. Depend on the real cluster instance instead.
+After=postgresql@17-main.service
+Requires=postgresql@17-main.service
 
 [Service]
 Type=oneshot

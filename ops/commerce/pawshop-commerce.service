@@ -1,8 +1,10 @@
 [Unit]
 Description=PawShop private Medusa commerce admin
-After=network-online.target postgresql.service redis-server.service
+# postgresql.service is a stub (ExecStart=/bin/true): ordering against it proved
+# nothing and would let the app start with the cluster down. Use the real instance.
+After=network-online.target postgresql@17-main.service redis-server.service
 Wants=network-online.target
-Requires=postgresql.service redis-server.service
+Requires=postgresql@17-main.service redis-server.service
 
 [Service]
 Type=simple

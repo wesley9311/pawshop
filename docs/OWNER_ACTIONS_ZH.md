@@ -101,12 +101,14 @@ Webhook URL 等同于"能往你频道里发消息"的写入凭据，看到它的
 
 **现状**：`pawshop-backup.timer` 是 `disabled`，而且**即使启用也会失败**——有四处硬阻塞。库现在是空的（0 张表），所以暂时没有数据可丢，但**必须在开放下单前修好**。
 
-| 阻塞 | 内容 | 谁能修 |
+| 阻塞 | 内容 | 状态 |
 | --- | --- | --- |
-| ① | 单元 `WorkingDirectory=/srv/pawshop-commerce/current/_commerce`，而 commerce 未激活，该路径不存在 | **我**（与监控同样的解耦思路） |
-| ② | `/etc/pawshop-backup/backup-offsite.env` 缺失 | **我**（桶名/前缀/保留期文档里已有既定值，你确认即可） |
-| ③ | `LoadCredential` 需要 `/etc/pawshop-backup/backup-s3-access-key` 与 `backup-s3-secret-key`，都缺失 | **只有你能做**（要在你的阿里云账号里建 RAM 用户） |
-| ④ | 单元 `Requires=postgresql.service`，而该 meta 单元是 `inactive`（真正跑的是 `postgresql@17-main.service`） | **我** |
+| ① | 单元 `WorkingDirectory=/srv/pawshop-commerce/current/_commerce`，而 commerce release 未激活 | **我**——随 release 准备/激活一起解决（与 A5 同源） |
+| ② | `/etc/pawshop-backup/backup-offsite.env` 缺失 | ✅ **2026-09-16 已由我写好**（`root:pawshop-backup 0640`）。端点/区域/桶/保留期已定；两个"闸门"变量**故意留空**，等拿到凭据实测后再打开——留空会让离线同步 fail-closed 并明确报错，而不是把备份静默传进一个保护措施未验证的桶。 |
+| ③ | `LoadCredential` 需要的 `/etc/pawshop-backup/backup-s3-access-key`、`backup-s3-secret-key` 缺失 | **只有你能做**（要在你的阿里云账号里建 RAM 用户）——见下面两种方式 |
+| ④ | 单元 `Requires=postgresql.service` | ✅ **2026-09-16 已由我修复** → `postgresql@17-main.service`。顺带纠正一个说法：`postgresql.service` 并不是"inactive 所以起不来"，它是个**空壳单元**（`ExecStart=/bin/true`），依赖它等于**没有任何保证**；真正的集群单元是 `postgresql@17-main.service`。 |
+
+> **为什么 ③ 卡着"激活后台"**：顺序是**设计强制的**——`run-first-production-backup-restore.sh` 只接受"已迁移、未激活"状态，要求先做出一次通过「离线回读 + 隔离恢复演练」的加密备份，**之后**才允许激活。所以 ③ 不只是一条备份设置，它在激活的关键路径上。
 
 ### 2.1 你在阿里云要做的（约 5 分钟）
 
@@ -128,6 +130,22 @@ Webhook URL 等同于"能往你频道里发消息"的写入凭据，看到它的
 
 > 更安全的替代方案：用 STS 临时凭证 + 角色。那需要我先在主机侧加装 AssumeRole 支持，属于额外工作，**当前设计用的是长期 AccessKey + 严格前缀权限**。你如果想升级到 STS，说一声。
 
+### 2.1A 两种把权限交给我的方式（你选一种）
+
+**方式一 · 你自己建（最小权限，最稳）**
+按上面 6 步在控制台建 `pawshop-backup-writer`，把 AccessKey ID + Secret 按 §1.4 交给我。我拿到后：修 ① → 跑首次加密备份 → OSS 精确版本回读 → 隔离恢复演练 → 记录证据 → 启用定时器。**你花约 5 分钟。**
+
+**方式二 · 我全程自己做（你一步都不用点）**
+建一个**临时** RAM 用户（例：`pawshop-agent-temp`），临时授予 `AliyunOSSFullAccess` + `AliyunRAMFullAccess`，把它的 AccessKey 按 §1.4 交给我。我会：
+
+1. 自己创建 `pawshop-backup-writer`、写最小权限策略、生成 AccessKey，并**直接写进主机 root-only 文件**——Secret 不会出现在聊天、截图或 Git 里；
+2. 顺手把 §3 的三条 OSS 生命周期规则也配好（不再需要你点控制台）；
+3. 做完**立刻删除这个临时用户并确认失效**（你也可以在控制台再确认一次）。
+
+**代价**：在它存在的这段时间里，权限远大于最终需要。所以越短越好——你说"可以了"我就一次跑完，中途不做别的事。
+
+> 我的建议是**方式二**，因为它让「备份凭据 + 生命周期规则 + 激活前置」一次收口，而最终留在主机上的仍然只是最小权限的那把 key。若你更在意"任何时刻都不存在超额权限"，就走方式一。
+
 ### 2.2 我做剩下的（拿到上面两样之后）
 
 ①④ 修单元依赖 → 写 `backup-offsite.env` → 用 root-only 的 `LoadCredential` 注入凭证（不落盘到别的文件、不进 Git）→ 手动跑一次备份 → 做**加密备份 + OSS 精确版本回读** → 再跑**隔离恢复演练**（恢复到临时库、核对表数量、删除临时库）→ 记录证据到 `/var/lib/pawshop-release-evidence/<sha>` → 才启用定时器。
@@ -146,7 +164,9 @@ Webhook URL 等同于"能往你频道里发消息"的写入凭据，看到它的
 
 ⛔ **绝对不要**创建一条覆盖整个 Bucket 的 90 天删除规则——那会把月度和年度归档一起清掉。
 
-**归属**：规则本身**我能配置**（我有管理通道），但"到底该保留多久"是你的合规判断。你只需要确认上面三个数字；如果你对财税留存年限有不同要求（有些类目要求更长），现在告诉我，我按你说的设。
+**归属**：规则本身**我能配置**——前提是有一把能管 OSS 的凭据（走 §2.1A 方式二我就能自己配完；走方式一则你在控制台点，或把 §2.1 那把备份 key 的权限临时加一条 `oss:PutBucketLifecycle` 由我配完再撤掉）。但"到底该保留多久"是你的合规判断。你只需要确认上面三个数字；如果你对财税留存年限有不同要求（有些类目要求更长），现在告诉我，我按你说的设。
+
+> ⚠️ 已实测：主机上那把**给商务运行时用的 OSS key 管不了这些**——它连 `ListBuckets` 和读 `?lifecycle` 都被拒（`403 AccessDenied`），说明它是严格按对象前缀收窄的。所以生命周期规则确实需要另一把凭据，不是我没找对入口。
 
 ---
 
