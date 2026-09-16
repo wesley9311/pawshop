@@ -1,7 +1,7 @@
 # PawShop 未完成清单与操作顺序
 
 更新：2026-09-16（WorkBuddy 第五轮）
-配套阅读：`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
+配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
 **Agent** = 可自主执行并验证；**店主** = 必须本人（身份、协议、账号归属、付款）；**共同** = Agent 执行、店主在场确认。
@@ -25,7 +25,7 @@
 
 | # | 项 | 级别 | 归属 | 说明与前置条件 |
 | --- | --- | --- | --- | --- |
-| A1 | **告警 webhook 未配置** | P1 | 店主 → Agent | 监控目前是 **log-only**：失败只写 journal 与本地 state，不会主动通知任何人。需要一个 HTTPS webhook（飞书/Slack/Telegram 机器人均可）。你把 URL 给我，我一条命令接入并做投递验证。**不要把 webhook URL 直接贴到聊天里**——它等同于一个写入凭据；请让我在服务器上交互式写入。 |
+| A1 | **告警 webhook 未配置** | P1 | 店主 → Agent | 监控目前是 **log-only**：失败只写 journal 与本地 state，不会主动通知任何人。**2026-09-16 已补齐通道适配层**：飞书/Slack/Telegram/generic 四家的报文方言、厂商域名钉住、以及"HTTP 200 但内部报错 = 未投递"的判定都已实现，并有本地端到端实测（`npm run test:alert-delivery`，10/10）。**现在只剩你要给我一个 URL 这一步**——获取方式与逐条点击步骤见 `docs/OWNER_ACTIONS_ZH.md` §1，接入步骤见 `docs/RUNBOOK.md` §9.3。**不要把 webhook URL 直接贴到聊天里**：它等同于一个写入凭据。 |
 | A2 | **加密备份链未启用** | **P0** | 共同 | `pawshop-backup.timer` 存在但 disabled，且现在**即使启用也会失败**，有四处硬阻塞：<br>① `pawshop-backup.service` 的 `WorkingDirectory=/srv/pawshop-commerce/current/_commerce` —— commerce release 未激活，该路径不存在；<br>② `/etc/pawshop-backup/backup-offsite.env` 缺失；<br>③ `LoadCredential` 需要的 `/etc/pawshop-backup/backup-s3-access-key`、`backup-s3-secret-key` 缺失；<br>④ 单元 `Requires=postgresql.service`，而该 meta 单元是 `inactive`（真正在跑的是 `postgresql@17-main.service`）。<br>**当前后果：生产库没有任何加密备份。** 库现在是空的（见 A4）所以暂时无数据可丢，但**必须在开放下单前解决**。 |
 | A3 | 监控有两项**临时跳过** | P1 | Agent | `/etc/pawshop-monitor/monitoring.env` 里 `PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS=1` 与 `PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1`。前者让 3 项 commerce 检查记为"显式跳过"，后者让备份新鲜度检查跳过。**commerce 激活并启用备份后必须删掉这两行**，否则真实的 commerce 宕机与备份中断会被掩盖。删掉后监控应变成 12/12 且全部为真实检查。 |
 | A4 | 生产库 `pawshop` 存在但**空** | 提示 | Agent | 库已创建，但 `public` schema **0 张表**——首次迁移从未执行。这正是"目前没有可丢数据"的原因。 |

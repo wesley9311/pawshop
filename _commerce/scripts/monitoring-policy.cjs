@@ -13,6 +13,24 @@ const MIN_TLS_DAYS = 14;
 const MIN_DISK_FREE_PERCENT = 10;
 const ALERT_SUPPRESSION_MINUTES = 30;
 
+// Alert channels speak different dialects, so the payload is built per channel.
+// "generic" keeps the raw pawshop-monitor-alert-v1 JSON for an internal endpoint;
+// the chat providers only accept their own message schema and would reject the
+// raw payload (Slack: invalid_payload, Feishu: non-zero code, Telegram: chat_id
+// and text missing). Sending the raw payload to a chat webhook therefore looks
+// like a working alert channel while silently delivering nothing.
+const ALERT_PROVIDERS = Object.freeze(['generic', 'slack', 'feishu', 'telegram']);
+const DEFAULT_ALERT_PROVIDER = 'generic';
+const ALERT_TEXT_MAX_CHARS = 1500;
+
+// Each provider's webhook is pinned to its vendor host. A mistyped or swapped
+// alert URL is otherwise a silent way to send host status to the wrong place.
+const ALERT_PROVIDER_HOSTS = Object.freeze({
+  slack: ['hooks.slack.com'],
+  feishu: ['open.feishu.cn', 'open.larksuite.com'],
+  telegram: ['api.telegram.org'],
+});
+
 // Monitoring exit codes: 0 healthy, 1 checks failed, 2 alerting itself is broken.
 const EXIT_CODES = Object.freeze({
   healthy: 0,
@@ -72,6 +90,12 @@ function validateMonitoringConfig(env) {
 
   // A webhook may carry a per-channel path (and therefore a token), so it is
   // validated in place and never rewritten or logged.
+  const providerValue = env.PAWSHOP_MONITOR_ALERT_PROVIDER;
+  const alertProvider = providerValue === undefined || providerValue === '' ? DEFAULT_ALERT_PROVIDER : String(providerValue);
+  if (!ALERT_PROVIDERS.includes(alertProvider)) {
+    throw new Error(`PAWSHOP_MONITOR_ALERT_PROVIDER must be one of: ${ALERT_PROVIDERS.join(', ')}.`);
+  }
+
   const webhookUrl = env.PAWSHOP_MONITOR_ALERT_WEBHOOK;
   let alertWebhook = null;
   if (webhookUrl !== undefined && webhookUrl !== '') {
@@ -83,7 +107,21 @@ function validateMonitoringConfig(env) {
     }
     if (parsed.protocol !== 'https:') throw new Error('PAWSHOP_MONITOR_ALERT_WEBHOOK must use https.');
     if (parsed.username || parsed.password) throw new Error('PAWSHOP_MONITOR_ALERT_WEBHOOK must not contain credentials.');
+    const allowedHosts = ALERT_PROVIDER_HOSTS[alertProvider];
+    if (allowedHosts && !allowedHosts.includes(parsed.hostname)) {
+      throw new Error(`PAWSHOP_MONITOR_ALERT_WEBHOOK must point at ${allowedHosts.join(' or ')} for the ${alertProvider} provider.`);
+    }
     alertWebhook = webhookUrl;
+  } else if (alertProvider !== DEFAULT_ALERT_PROVIDER) {
+    // A channel that is declared but has no endpoint is a half-configured alert
+    // path; fail closed rather than silently monitoring without an alarm.
+    throw new Error('PAWSHOP_MONITOR_ALERT_PROVIDER requires PAWSHOP_MONITOR_ALERT_WEBHOOK to be set.');
+  }
+
+  const chatIdValue = env.PAWSHOP_MONITOR_TELEGRAM_CHAT_ID;
+  const telegramChatId = chatIdValue === undefined || chatIdValue === '' ? null : String(chatIdValue).trim();
+  if (alertProvider === 'telegram' && alertWebhook !== null && !telegramChatId) {
+    throw new Error('PAWSHOP_MONITOR_TELEGRAM_CHAT_ID must be set when the telegram provider is used.');
   }
 
   const databaseHost = env.PAWSHOP_MONITOR_DATABASE_HOST || '127.0.0.1';
@@ -95,6 +133,8 @@ function validateMonitoringConfig(env) {
     storefrontOrigin,
     commerceOrigin,
     alertWebhook,
+    alertProvider,
+    telegramChatId,
     databaseHost,
     databasePort: requirePositiveInt(env.PAWSHOP_MONITOR_DATABASE_PORT, 'PAWSHOP_MONITOR_DATABASE_PORT', 5432),
     redisPort: requirePositiveInt(env.PAWSHOP_MONITOR_REDIS_PORT, 'PAWSHOP_MONITOR_REDIS_PORT', 6379),
@@ -219,6 +259,74 @@ function buildAlertPayload(summary, now, storefrontOrigin) {
   });
 }
 
+// Chat channels need a readable message, not the machine payload. Check names are
+// kept verbatim so an alert always matches the journal and the state file.
+function formatAlertText(payload) {
+  if (!payload || typeof payload !== 'object') throw new Error('An alert payload is required.');
+  const failing = payload.status !== 'recovered';
+  const lines = [
+    failing
+      ? `[PawShop 告警] ${payload.failed}/${payload.checked} 项检查失败`
+      : `[PawShop 恢复] ${payload.checked}/${payload.checked} 项检查全部通过`,
+    `时间(UTC): ${payload.at}`,
+    `站点: ${payload.storefront}`,
+  ];
+  if (failing) {
+    lines.push(`失败项: ${(payload.failing || []).join(', ')}`);
+    for (const detail of payload.details || []) {
+      lines.push(`- ${detail.name}: ${detail.detail || 'no detail'}`);
+    }
+  }
+  lines.push('主机排查: journalctl -u pawshop-monitor.service -n 50');
+  return lines.join('\n').slice(0, ALERT_TEXT_MAX_CHARS);
+}
+
+function parseJsonObject(text) {
+  if (typeof text !== 'string' || text.length === 0) return null;
+  try {
+    const parsed = JSON.parse(text.slice(0, 20000));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// Feishu answers HTTP 200 with a non-zero code when it dislikes the message, so
+// the status line alone would report a delivered alert that never arrived.
+function feishuAccepted(bodyText) {
+  const parsed = parseJsonObject(bodyText);
+  if (parsed === null) return false;
+  return parsed.code === 0 || parsed.StatusCode === 0;
+}
+
+function telegramAccepted(bodyText) {
+  const parsed = parseJsonObject(bodyText);
+  return parsed !== null && parsed.ok === true;
+}
+
+function buildAlertRequest(config, payload) {
+  if (!config || typeof config !== 'object') throw new Error('Alert configuration is required.');
+  const provider = config.alertProvider || DEFAULT_ALERT_PROVIDER;
+  const headers = Object.freeze({ 'content-type': 'application/json', 'user-agent': 'pawshop-monitor/1' });
+  if (provider === 'generic') return { headers, body: JSON.stringify(payload) };
+  const text = formatAlertText(payload);
+  if (provider === 'slack') return { headers, body: JSON.stringify({ text }) };
+  if (provider === 'feishu') return { headers, body: JSON.stringify({ msg_type: 'text', content: { text } }) };
+  if (provider === 'telegram') {
+    if (!config.telegramChatId) throw new Error('Telegram alerts require PAWSHOP_MONITOR_TELEGRAM_CHAT_ID.');
+    return { headers, body: JSON.stringify({ chat_id: String(config.telegramChatId), text, disable_web_page_preview: true }) };
+  }
+  throw new Error(`Unsupported alert provider: ${provider}`);
+}
+
+// Delivery is only accepted when the provider itself acknowledges the message.
+function alertDeliveryAccepted(provider, status, bodyText) {
+  if (!Number.isInteger(status) || status <= 0 || status >= 400) return false;
+  if (provider === 'feishu') return feishuAccepted(bodyText);
+  if (provider === 'telegram') return telegramAccepted(bodyText);
+  return true;
+}
+
 function formatLogLine(level, message, now) {
   const normalized = String(level).toUpperCase();
   if (!['DEBUG', 'INFO', 'WARN', 'ERROR'].includes(normalized)) throw new Error('Unsupported log level.');
@@ -226,16 +334,22 @@ function formatLogLine(level, message, now) {
 }
 
 module.exports = {
+  ALERT_PROVIDERS,
+  ALERT_TEXT_MAX_CHARS,
   DEFAULT_MAX_AGE_HOURS,
   EXIT_CODES,
   MIN_DISK_FREE_PERCENT,
   MIN_TLS_DAYS,
   REQUIRED_SECURITY_HEADERS,
   adminRouteRequiresAuth,
+  alertDeliveryAccepted,
   backupAgeHours,
   buildAlertPayload,
+  buildAlertRequest,
   checkResult,
   daysUntilExpiry,
+  feishuAccepted,
+  formatAlertText,
   formatLogLine,
   missingSecurityHeaders,
   nextAlertState,
@@ -243,5 +357,6 @@ module.exports = {
   shouldDispatchAlert,
   storeRouteIsClosed,
   summarize,
+  telegramAccepted,
   validateMonitoringConfig,
 };

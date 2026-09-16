@@ -17,7 +17,7 @@
 | BACKUP | **PASS（本地）/ UNVERIFIED（异地+生产）** | 本地 `backup:real` exit 0（AES-256 + manifest）；OSS 异地备份无真实凭据与上传证据；生产每日备份 timer 未安装 |
 | RESTORE | **PASS（本地演练）** | `restore:verify-real` exit 0：隔离库恢复、关键数据哈希校验、临时库清理确认（`pawshop_restore_%` 计数=0）。生产隔离恢复服务未演练 |
 | ROLLBACK | **PASS（脚本级）/ UNVERIFIED（生产演练）** | 展示站：deploy-static.sh 内建失败回滚；commerce：rollback-commerce.sh 有 DB 兼容门禁+原子切换，但生产从未演练回滚 |
-| MONITORING | **PASS** | `pawshop-monitor.timer` **已于 2026-09-16 在生产主机安装并启用**（enabled+active，每 5 分钟；实测调度运行 **12/12 通过**，状态文件写入正常）。为摆脱对商务激活的依赖，单元改为从 `/usr/local/libexec/pawshop` 运行（见 RUNBOOK §9.1）。**剩余：告警 webhook 未配置（当前 log-only，不会主动通知任何人）；commerce 与备份新鲜度两项检查为临时显式跳过，须在商务激活后删除（RUNBOOK §9.2）** |
+| MONITORING | **PASS** | `pawshop-monitor.timer` **已于 2026-09-16 在生产主机安装并启用**（enabled+active，每 5 分钟；实测调度运行 **12/12 通过**，状态文件写入正常）。为摆脱对商务激活的依赖，单元改为从 `/usr/local/libexec/pawshop` 运行（见 RUNBOOK §9.1）。**告警通道适配层同日补齐**：飞书/Slack/Telegram/generic 四家方言 + 厂商域名钉住 + 「HTTP 200 但内部报错 = 未投递」判定 + 抑制窗口不再误报为告警故障，单测 12/12、端到端投递实测 10/10（`npm run test:alert-delivery`）。**剩余：仍缺一个真实 webhook（当前 log-only，不会主动通知任何人），只等店主提供 URL（OWNER_ACTIONS_ZH §1 / RUNBOOK §9.3）；commerce 与备份新鲜度两项检查为临时显式跳过，须在商务激活后删除（RUNBOOK §9.2）** |
 | STAGING | **FAIL（不存在）** | 无 staging 环境；本地 dev 即最接近 production-like 的环境（回环 PG/Redis + admin-only 门禁） |
 | PRODUCTION_DEPLOY | **PASS（展示站）/ FAIL（commerce）** | 展示站线上可用，`verify:production` exit 0；**`verify:production:strict` 亦 PASS**（HSTS max-age 15552000s；www→apex 301）——两项主机侧缺口已于 2026-09-16 修复；**当前线上 release `6dce5a4`**（含 sitemap 与隐私声明修订；原子切换 + 边界探测通过；`a74aab3`、`012666fc…` 等 7 个 release 保留可回滚），线上真实浏览器 0 CSP 违规；commerce 生产部署未发生（Medusa 未激活，`/srv/pawshop-commerce/current` 不存在） |
 

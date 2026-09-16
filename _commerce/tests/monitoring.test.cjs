@@ -5,9 +5,11 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const {
-  EXIT_CODES, REQUIRED_SECURITY_HEADERS, adminRouteRequiresAuth, backupAgeHours, buildAlertPayload,
-  checkResult, daysUntilExpiry, formatLogLine, missingSecurityHeaders, nextAlertState, redactUrl,
-  shouldDispatchAlert, storeRouteIsClosed, summarize, validateMonitoringConfig,
+  ALERT_PROVIDERS, ALERT_TEXT_MAX_CHARS, EXIT_CODES, REQUIRED_SECURITY_HEADERS,
+  adminRouteRequiresAuth, alertDeliveryAccepted, backupAgeHours, buildAlertPayload, buildAlertRequest,
+  checkResult, daysUntilExpiry, feishuAccepted, formatAlertText, formatLogLine, missingSecurityHeaders,
+  nextAlertState, redactUrl, shouldDispatchAlert, storeRouteIsClosed, summarize, telegramAccepted,
+  validateMonitoringConfig,
 } = require('../scripts/monitoring-policy.cjs');
 
 const root = resolve(__dirname, '..');
@@ -117,6 +119,106 @@ test('alerting suppresses repeats, reports recovery, and carries no secret mater
   assert.equal(nextAlertState(recentFailing, failing, now, false).last_alert_at, recentFailing.last_alert_at);
   // Exit codes are a tested contract: 0 healthy, 1 checks failed, 2 alerting broken.
   assert.deepEqual(EXIT_CODES, { healthy: 0, checksFailed: 1, alertDeliveryFailed: 2 });
+});
+
+test('alert payloads are translated into each channel dialect', () => {
+  const now = new Date('2026-09-16T09:00:00Z');
+  const summary = summarize([
+    checkResult('commerce_health', false, 'commerce health returned 503'),
+    checkResult('store_api_closed', true),
+  ]);
+  const payload = buildAlertPayload(summary, now, 'https://pawlivora.com');
+
+  // generic keeps the machine payload so an internal endpoint loses nothing.
+  const generic = JSON.parse(buildAlertRequest({ alertProvider: 'generic' }, payload).body);
+  assert.equal(generic.schema, 'pawshop-monitor-alert-v1');
+  assert.deepEqual(buildAlertRequest({ alertProvider: 'generic' }, payload).headers['content-type'], 'application/json');
+
+  // Slack rejects anything without a top-level text field.
+  const slack = JSON.parse(buildAlertRequest({ alertProvider: 'slack' }, payload).body);
+  assert.deepEqual(Object.keys(slack), ['text']);
+
+  // Feishu requires msg_type + content.text; Telegram requires chat_id + text.
+  const feishu = JSON.parse(buildAlertRequest({ alertProvider: 'feishu' }, payload).body);
+  assert.equal(feishu.msg_type, 'text');
+  assert.equal(typeof feishu.content.text, 'string');
+  const telegram = JSON.parse(buildAlertRequest({ alertProvider: 'telegram', telegramChatId: '12345' }, payload).body);
+  assert.equal(telegram.chat_id, '12345');
+  assert.equal(telegram.disable_web_page_preview, true);
+  assert.throws(() => buildAlertRequest({ alertProvider: 'telegram' }, payload));
+
+  // The readable text keeps the machine check names and stays bounded.
+  const text = formatAlertText(payload);
+  assert.match(text, /\[PawShop 告警\] 1\/2 项检查失败/);
+  assert.match(text, /commerce_health/);
+  assert.match(text, /https:\/\/pawlivora\.com/);
+  assert.ok(text.length <= ALERT_TEXT_MAX_CHARS);
+  const recovered = formatAlertText(buildAlertPayload(summarize([checkResult('disk_space', true)]), now, 'https://pawlivora.com'));
+  assert.match(recovered, /\[PawShop 恢复\]/);
+  assert.doesNotMatch(text, /secret|password|token|authorization|cookie/i);
+  assert.throws(() => formatAlertText(null));
+  assert.throws(() => buildAlertRequest(null, payload));
+});
+
+test('each channel webhook is pinned to its vendor host', () => {
+  assert.deepEqual([...ALERT_PROVIDERS], ['generic', 'slack', 'feishu', 'telegram']);
+  const base = {
+    PAWSHOP_MONITOR_STOREFRONT_ORIGIN: 'https://pawlivora.com',
+    PAWSHOP_MONITOR_COMMERCE_ORIGIN: 'http://127.0.0.1:9000',
+  };
+  const slack = validateMonitoringConfig({ ...base, PAWSHOP_MONITOR_ALERT_PROVIDER: 'slack', PAWSHOP_MONITOR_ALERT_WEBHOOK: 'https://hooks.slack.com/services/T/B/X' });
+  assert.equal(slack.alertProvider, 'slack');
+  const feishu = validateMonitoringConfig({ ...base, PAWSHOP_MONITOR_ALERT_PROVIDER: 'feishu', PAWSHOP_MONITOR_ALERT_WEBHOOK: 'https://open.feishu.cn/open-apis/bot/v2/hook/abc' });
+  assert.equal(feishu.alertProvider, 'feishu');
+  const telegram = validateMonitoringConfig({
+    ...base,
+    PAWSHOP_MONITOR_ALERT_PROVIDER: 'telegram',
+    PAWSHOP_MONITOR_ALERT_WEBHOOK: 'https://api.telegram.org/bot123:abc/sendMessage',
+    PAWSHOP_MONITOR_TELEGRAM_CHAT_ID: '  -100123  ',
+  });
+  assert.equal(telegram.telegramChatId, '-100123');
+
+  for (const mutation of [
+    { PAWSHOP_MONITOR_ALERT_PROVIDER: 'email' },
+    { PAWSHOP_MONITOR_ALERT_PROVIDER: 'slack' },
+    { PAWSHOP_MONITOR_ALERT_PROVIDER: 'slack', PAWSHOP_MONITOR_ALERT_WEBHOOK: 'https://evil.example.com/services/T/B/X' },
+    { PAWSHOP_MONITOR_ALERT_PROVIDER: 'feishu', PAWSHOP_MONITOR_ALERT_WEBHOOK: 'https://evil.example.com/open-apis/bot/v2/hook/abc' },
+    { PAWSHOP_MONITOR_ALERT_PROVIDER: 'telegram', PAWSHOP_MONITOR_ALERT_WEBHOOK: 'https://evil.example.com/bot123/sendMessage', PAWSHOP_MONITOR_TELEGRAM_CHAT_ID: '1' },
+    { PAWSHOP_MONITOR_ALERT_PROVIDER: 'telegram', PAWSHOP_MONITOR_ALERT_WEBHOOK: 'https://api.telegram.org/bot123:abc/sendMessage' },
+  ]) {
+    assert.throws(() => validateMonitoringConfig({ ...base, ...mutation }), undefined, JSON.stringify(mutation));
+  }
+  // A declared channel without an endpoint must fail closed, not monitor silently.
+  assert.throws(() => validateMonitoringConfig({ ...base, PAWSHOP_MONITOR_ALERT_PROVIDER: 'feishu' }));
+});
+
+test('a chat channel that answers 200 with an error code counts as a failed delivery', () => {
+  // The exact trap: Feishu and Telegram report application errors inside a 200.
+  assert.equal(alertDeliveryAccepted('feishu', 200, '{"code":0,"msg":"success"}'), true);
+  assert.equal(alertDeliveryAccepted('feishu', 200, '{"StatusCode":0,"StatusMessage":"success"}'), true);
+  assert.equal(alertDeliveryAccepted('feishu', 200, '{"code":9499,"msg":"param invalid"}'), false);
+  assert.equal(alertDeliveryAccepted('feishu', 200, '<html>gateway</html>'), false);
+  assert.equal(alertDeliveryAccepted('telegram', 200, '{"ok":true}'), true);
+  assert.equal(alertDeliveryAccepted('telegram', 200, '{"ok":false,"description":"chat not found"}'), false);
+  assert.equal(alertDeliveryAccepted('telegram', 200, '{"ok":false}'), false);
+  assert.equal(alertDeliveryAccepted('slack', 200, 'ok'), true);
+  assert.equal(alertDeliveryAccepted('slack', 400, 'invalid_payload'), false);
+  assert.equal(alertDeliveryAccepted('generic', 202, ''), true);
+  assert.equal(alertDeliveryAccepted('generic', 500, 'boom'), false);
+  assert.equal(alertDeliveryAccepted('generic', 0, ''), false);
+  assert.equal(feishuAccepted('{"code":0}'), true);
+  assert.equal(telegramAccepted('{"ok":true}'), true);
+  assert.equal(telegramAccepted('not json'), false);
+
+  // The runner must use the provider-aware request and acceptance contract.
+  assert.match(monitor, /buildAlertRequest\(config, payload\)/);
+  assert.match(monitor, /alertDeliveryAccepted\(config\.alertProvider, response\.status, bodyText\)/);
+  assert.doesNotMatch(monitor, /alert webhook rejected the payload with status/);
+  // An alert deliberately held back by the repeat window is not a broken channel:
+  // only an attempted delivery may report the alerting path as failed.
+  assert.match(monitor, /const alertDeliveryFailed = dispatchResult\.attempted && !dispatchResult\.dispatched/);
+  assert.doesNotMatch(monitor, /const alertDeliveryFailed = dispatchResult\.configured/);
+  assert.match(monitor, /attempted: true, \.\.\.\(await dispatchAlert\(buildAlertPayload/);
 });
 
 test('monitor runner bounds every call and never logs secret material', () => {

@@ -16,6 +16,7 @@ AccessKey、客户明文、供应商隐私资料或支付凭据。
 | 想了解的内容 | 查阅入口 |
 | --- | --- |
 | **接下来还有哪些没做完、按什么顺序做** | `docs/REMAINING_WORK.md` |
+| **只有店主本人能做的事（链接、点击步骤、交付方式）** | `docs/OWNER_ACTIONS_ZH.md` |
 | 网站目前能做什么、哪些功能仍关闭 | `README.md` |
 | 可执行的生产命令（发布/回滚/改 nginx/门禁） | `docs/RUNBOOK.md` |
 | 对抗审查发现与处置（AR-1 ~ AR-15） | `docs/ADVERSARIAL_REVIEW.md` |
@@ -51,8 +52,10 @@ AccessKey、客户明文、供应商隐私资料或支付凭据。
   文件 `/root/pawshop-production-owner-credentials.json` **不存在**。
 - **生产库 `pawshop` 已创建但是空的**：`public` schema **0 张表**，首次迁移从未执行。
   所以目前确实**没有可丢的业务数据**。
-- **告警 webhook 未配置**：监控是 **log-only**，失败只写 journal 与本地 state，
-  不会主动通知任何人。
+- **告警 webhook 仍未配置**：监控目前是 **log-only**，失败只写 journal 与本地 state，不会主动通知任何人。
+  适配层已于 2026-09-16 补齐（飞书/Slack/Telegram/generic 四家方言 + 厂商域名钉住 + "HTTP 200 但内部报错=未投递"判定，
+  端到端实测 10/10 通过，`cd _commerce && npm run test:alert-delivery` 可复跑），**只差店主提供 URL**——
+  获取步骤见 `docs/OWNER_ACTIONS_ZH.md` §1，接入与验证见 `docs/RUNBOOK.md` §9.3。
 - 监控里有两项**临时跳过**（commerce 三项 + 备份新鲜度），commerce 激活后必须去掉。
 - OSS 三条生命周期规则、异地备份配置、生产定时器仍未最终落地。
 
@@ -208,6 +211,8 @@ release 激活后才存在——依赖方向是反的，所以 2026-09-16 改为
 | `www` 不再跳转 apex | `verify:production:strict` | nginx 里的 `if ($host = www...)` 是否仍在 |
 | **想知道主机有没有出事** | `journalctl -u pawshop-monitor.service -n 50` | `/var/lib/pawshop-monitor/alert-state.json` |
 | 监控报告失败 | journal 里的 `check <name> failed (…)` | 按失败项查对应系统；注意两项 skip 是临时状态 |
+| **告警收不到，日志说 `did not accept…`** | `monitoring.env` 里 `PAWSHOP_MONITOR_ALERT_PROVIDER` 是否与 webhook 站点匹配 | 按 `docs/RUNBOOK.md` §9.3 的方言表逐项核对；四家方言可本地复跑验证 |
+| **告警整轮没发但检查确实失败** | journal 里是否写着 `alert suppressed by the repeat window` | 那是 30 分钟去重窗口的**刻意静默**，不是故障；状态见 `/var/lib/pawshop-monitor/alert-state.json` |
 | 监控没在跑 | `systemctl list-timers pawshop-monitor.timer` | `systemctl is-enabled pawshop-monitor.timer` |
 | 后台打不开 | SSH 隧道、`pawshop-commerce.service` | Medusa 日志与回环端口；**先确认 `current` 链接是否存在** |
 | 商品图片失败 | 商品媒体 Bucket 和 RAM 权限 | `/etc/pawshop/commerce.env` 配置 |

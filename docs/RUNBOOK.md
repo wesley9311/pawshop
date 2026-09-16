@@ -139,9 +139,9 @@ PAWSHOP_MONITOR_STATE_FILE=/tmp/pawshop-monitor-state.json \
   node scripts/monitor-production.mjs
 ```
 
-退出码：`0` 全部健康；`1` 有检查失败；`2` 检查失败且告警投递也失败。
+退出码：`0` 全部健康；`1` 有检查失败；`2` **已尝试投递、但告警通道没有接受**。注意区分：被去重窗口抑制的那一轮是 `1` 而不是 `2`——"刻意不发"不等于"告警坏了"（该缺陷已于 2026-09-16 修正）。
 
-告警通道：`PAWSHOP_MONITOR_ALERT_WEBHOOK`（HTTPS，可选）。未配置时 fail-closed：只在日志中记录 WARN，绝不假装已告警。相同告警签名 30 分钟内去重；恢复时发送一次 recovery。告警载荷只含检查名、状态与指标，不含任何秘密或响应体。
+告警通道（2026-09-16 补齐通道适配，见 §9.3）：由 `PAWSHOP_MONITOR_ALERT_PROVIDER` 指定通道类型，`PAWSHOP_MONITOR_ALERT_WEBHOOK` 指定 HTTPS 地址，两者都可选。未配置时 fail-closed：只记录 WARN，绝不假装已告警。相同告警签名 30 分钟内去重；恢复时发送一次 recovery。告警正文只含检查名、状态与指标，不含任何秘密、环境值或响应体。
 
 **执行状态：定时器已于 2026-09-16 由 WorkBuddy 在生产主机安装并验证通过**（`pawshop-monitor.timer` enabled+active，实测 16:30:13 一次调度运行 **12/12 通过**）。以下为执行记录、验证与回滚。
 
@@ -199,6 +199,52 @@ PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1
 **回滚整个监控**：`systemctl disable --now pawshop-monitor.timer`（保留单元与配置，随时可再启用）。
 
 日志纪律：可区分 DEBUG/INFO/WARN/ERROR；**永不**记录密码、token、完整 session、数据库 secret、客户明文。
+
+### 9.3 告警通道适配与投递验证（2026-09-16 新增）
+
+**为什么需要适配层**：三家聊天平台的机器人**只接受各自的消息结构**，而监控原来发的是自定义 JSON（`pawshop-monitor-alert-v1`）。直接把 URL 填进去会得到一个"看起来通了、其实一条都没送到"的告警通道：
+
+| 通道 | 期望的请求体 | 原样发自定义 JSON 的结果 |
+| --- | --- | --- |
+| Slack Incoming Webhook | `{"text": "..."}` | HTTP 400 `invalid_payload` |
+| 飞书自定义机器人 | `{"msg_type":"text","content":{"text":"..."}}` | **HTTP 200 + `code` 非 0**（最难发现的一种失败） |
+| Telegram Bot API | `{"chat_id": ..., "text": ...}` | HTTP 400 `Bad Request` |
+| 内部端点（generic） | 原始 v1 JSON | 正常（保持向后兼容） |
+
+因此现在按 `PAWSHOP_MONITOR_ALERT_PROVIDER` 生成对应报文，并且**投递是否成功以对方确认为准**：飞书要求 `code=0`（或 v1 的 `StatusCode=0`），Telegram 要求 `ok=true`，其余以 HTTP 状态为准。**HTTP 200 但内部报错，一律判为未投递 → 退出码 2**，不会再被记成"已投递"。
+
+每一家的 webhook 还被**钉在厂商域名上**（`hooks.slack.com` / `open.feishu.cn`、`open.larksuite.com` / `api.telegram.org`），写错或被换掉的地址会在启动时直接报错，而不是把主机状态发到别处。自定义或自建端点请用 `generic`。
+
+**本地端到端复跑（不需要生产主机、不需要真实 URL）**
+
+```bash
+cd _commerce
+npm run test:alert-delivery     # 10 项判定全绿；把上述四家的报文逐条打到收端上核对
+```
+
+该夹具会起一个真 HTTPS 接收端，按四家的真实应答（含"200 + 错误码"陷阱）回包，并用 `dns-stub.mjs` 只把厂商域名解析到本地，**webhook URL 仍保留真实域名**，所以域名钉住策略照样生效。它证明的是"方言与判定正确"，**不**证明"你的通道存在"。
+
+**拿到真实 webhook 之后的接入步骤（生产主机，root）**
+
+```bash
+# 1) 只追加这两行（不要整份覆盖），并保持 owner/权限不变
+#    PAWSHOP_MONITOR_ALERT_PROVIDER=feishu|slack|telegram|generic
+#    PAWSHOP_MONITOR_ALERT_WEBHOOK=https://...
+#    （telegram 另需 PAWSHOP_MONITOR_TELEGRAM_CHAT_ID=<chat id>）
+install -o root -g pawshop -m 0640 monitoring.env.new /etc/pawshop-monitor/monitoring.env
+
+# 2) 语法自检：配置错误必须在启动阶段就炸，而不是跑一轮才发现
+sudo -u pawshop env $(grep -v '^#' /etc/pawshop-monitor/monitoring.env | xargs) \
+  /usr/bin/node /usr/local/libexec/pawshop/monitor-production.mjs
+
+# 3) 真实投递验证：制造一次必定失败（证书阈值不可能满足），确认对方真的收到
+sudo systemctl start pawshop-monitor.service
+journalctl -u pawshop-monitor.service -n 20 --no-pager -o cat | grep -E "alert webhook|monitoring (passed|failed)"
+```
+
+第 3 步要求日志出现 `alert webhook accepted the payload` **且**你在自己的频道里看到那条消息——两者缺一都不算通过（这就是"真实投递验证"）。如果日志是 `did not accept the payload (status 200)`，说明报文或通道类型不对，按 §9.3 表逐项核对。
+
+**Webhook URL 的安全交接**：URL 等同于一个写入凭据（拿到就能往你的频道发消息），所以**不要贴到聊天里**。交付方式二选一：① 由店主在服务器上交互式写入（用 `read -s` 或编辑器，避免进 shell 历史）；② 存到本地文件后由 Agent 读取并 `scp` 上去。写入后不要 `git add`、不要截图。
 
 ## 10. 主机侧安全缺口修复（生产主机，root）
 

@@ -2,11 +2,13 @@
 //
 // Read-only checks over the public storefront, the loopback-only commerce
 // runtime, the private data services, the backup freshness and the host disk.
-// Alerts go to a generic HTTPS webhook; when no webhook is configured the run
-// is log-only (fail-closed: monitoring never silently pretends to alert).
+// Alerts go to an HTTPS webhook, formatted for the configured channel
+// (generic JSON, Slack, Feishu or Telegram); when no webhook is configured the
+// run is log-only (fail-closed: monitoring never silently pretends to alert).
 //
-// Never logs or transmits credentials, headers, response bodies or customer
-// data. Bounded timeout on every network and subprocess call.
+// Never logs or transmits credentials, headers or customer data. Provider
+// response bodies are read to confirm acceptance and are never logged or stored.
+// Bounded timeout on every network and subprocess call.
 
 import { execFileSync } from 'node:child_process';
 import { statfsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
@@ -17,7 +19,8 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  EXIT_CODES, adminRouteRequiresAuth, backupAgeHours, buildAlertPayload, checkResult, daysUntilExpiry,
+  EXIT_CODES, adminRouteRequiresAuth, alertDeliveryAccepted, backupAgeHours, buildAlertPayload,
+  buildAlertRequest, checkResult, daysUntilExpiry,
   formatLogLine, missingSecurityHeaders, nextAlertState, redactUrl, shouldDispatchAlert,
   storeRouteIsClosed, summarize, validateMonitoringConfig,
 } = require('./monitoring-policy.cjs');
@@ -266,15 +269,25 @@ async function dispatchAlert(payload) {
     log('WARN', 'alert webhook is not configured; alert recorded locally only');
     return { dispatched: false, configured: false };
   }
+  let request;
+  try {
+    request = buildAlertRequest(config, payload);
+  } catch (error) {
+    log('ERROR', `alert payload could not be built: ${error.message}`);
+    return { dispatched: false, configured: true };
+  }
   try {
     const response = await fetch(config.alertWebhook, {
       method: 'POST',
       signal: AbortSignal.timeout(config.timeoutMs),
-      headers: { 'content-type': 'application/json', 'user-agent': 'pawshop-monitor/1' },
-      body: JSON.stringify(payload),
+      headers: request.headers,
+      body: request.body,
     });
-    if (response.status >= 400) {
-      log('ERROR', `alert webhook rejected the payload with status ${response.status}`);
+    // Chat providers answer HTTP 200 with an error code in the body, so the body
+    // decides acceptance too. It is read once, never logged and never stored.
+    const bodyText = await response.text().catch(() => '');
+    if (!alertDeliveryAccepted(config.alertProvider, response.status, bodyText)) {
+      log('ERROR', `alert webhook did not accept the payload (status ${response.status})`);
       return { dispatched: false, configured: true };
     }
     log('INFO', 'alert webhook accepted the payload');
@@ -304,9 +317,14 @@ const summary = summarize(results);
 const stateFile = process.env.PAWSHOP_MONITOR_STATE_FILE || join('/var/lib/pawshop-monitor', 'alert-state.json');
 const previousState = readAlertState(stateFile);
 const dispatch = shouldDispatchAlert(previousState, summary, now, config.alertSuppressionMinutes);
-let dispatchResult = { dispatched: false, configured: Boolean(config.alertWebhook) };
+// "attempted" is what separates a suppressed alert from a broken one: a run that
+// deliberately stays quiet inside the suppression window must not report the
+// alerting path as broken.
+let dispatchResult = { attempted: false, dispatched: false, configured: Boolean(config.alertWebhook) };
 if (dispatch) {
-  dispatchResult = await dispatchAlert(buildAlertPayload(summary, now, config.storefrontOrigin));
+  dispatchResult = { attempted: true, ...(await dispatchAlert(buildAlertPayload(summary, now, config.storefrontOrigin))) };
+} else if (config.alertWebhook) {
+  log('INFO', 'alert suppressed by the repeat window; the failure is still recorded');
 }
 try {
   mkdirSync(dirname(stateFile), { recursive: true });
@@ -322,6 +340,6 @@ if (summary.failed === 0) {
   log('INFO', `monitoring passed ${summary.passed}/${summary.total} checks`);
   process.exit(EXIT_CODES.healthy);
 }
-const alertDeliveryFailed = dispatchResult.configured && !dispatchResult.dispatched;
+const alertDeliveryFailed = dispatchResult.attempted && !dispatchResult.dispatched;
 log('ERROR', `monitoring failed ${summary.failed}/${summary.total} checks: ${summary.failing.join(', ')}`);
 process.exit(alertDeliveryFailed ? EXIT_CODES.alertDeliveryFailed : EXIT_CODES.checksFailed);
