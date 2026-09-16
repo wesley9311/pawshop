@@ -118,12 +118,47 @@ PAWSHOP_ROLLBACK_COMPATIBLE=1 \
 
 **必须人工审批**：删除生产 DB、破坏性 migration、删除 Storage/Backup、修改 IAM/支付账户、任何不可逆数据操作、生产 commerce 激活链的每一步。
 
-## 9. 监控（当前缺失，TODO）
+## 9. 监控与告警
 
-最低要求（未实现，列为上线前 P1）：
-- uptime monitoring（外部探针 pawlivora.com）
-- 5xx / API 错误率与延迟
-- DB 连通性、备份 timer 成功/失败告警
-- 证书到期检测
+实现：`_commerce/scripts/monitor-production.mjs`（策略层 `monitoring-policy.cjs` 可单测），systemd 定时器 `pawshop-monitor.timer`（每 5 分钟），配置 `/etc/pawshop-monitor/monitoring.env`（root:pawshop 0640，无 Secret）。
+
+覆盖的 12 项检查：公网站 HTTPS 可用性、首字节延迟、安全响应头、HTTP→HTTPS 重定向、证书剩余天数（默认 ≥14 天）、commerce 健康、Store 路由关闭不变量、admin 未鉴权必须 401、PostgreSQL 回环连通、Redis 回环连通、备份新鲜度（默认 ≤36 小时）、根盘剩余空间（默认 ≥10%）。
+
+```bash
+# 手动运行（只读）
+sudo systemctl start pawshop-monitor.service
+journalctl -u pawshop-monitor.service -n 50 --no-pager
+
+# 本地冒烟（不依赖 systemd）
+cd _commerce
+PAWSHOP_MONITOR_STOREFRONT_ORIGIN=https://pawlivora.com \
+PAWSHOP_MONITOR_COMMERCE_ORIGIN=http://127.0.0.1:9000 \
+PAWSHOP_MONITOR_DATABASE_PORT=54329 \
+PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1 \
+PAWSHOP_MONITOR_STATE_FILE=/tmp/pawshop-monitor-state.json \
+  node scripts/monitor-production.mjs
+```
+
+退出码：`0` 全部健康；`1` 有检查失败；`2` 检查失败且告警投递也失败。
+
+告警通道：`PAWSHOP_MONITOR_ALERT_WEBHOOK`（HTTPS，可选）。未配置时 fail-closed：只在日志中记录 WARN，绝不假装已告警。相同告警签名 30 分钟内去重；恢复时发送一次 recovery。告警载荷只含检查名、状态与指标，不含任何秘密或响应体。
+
+安装定时器（生产主机，root）：
+
+```bash
+install -o root -g root -m 0644 ops/commerce/pawshop-monitor.service /etc/systemd/system/
+install -o root -g root -m 0644 ops/commerce/pawshop-monitor.timer /etc/systemd/system/
+install -d -o pawshop -g pawshop -m 0700 /var/lib/pawshop-monitor
+install -o root -g pawshop -m 0640 ops/commerce/monitoring.env.example /etc/pawshop-monitor/monitoring.env   # 填入真实值后
+systemctl daemon-reload && systemctl enable --now pawshop-monitor.timer
+```
+
+**待补（容器/主机侧，Agent 不做）**：线上当前缺少 `Strict-Transport-Security`。在 Nginx 站点配置的 `server` 块（HTTPS 监听）中加入：
+
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+```
+
+先确认所有子域都已启用 HTTPS，再加 `includeSubDomains`；确认后再逐步启用 `preload` 与 HSTS 提交。改完 `nginx -t` 通过再 reload，随后用监控的 `storefront_security_headers` 检查确认转绿。
 
 日志纪律：可区分 DEBUG/INFO/WARN/ERROR；**永不**记录密码、token、完整 session、数据库 secret、客户明文。

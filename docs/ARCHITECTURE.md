@@ -31,7 +31,7 @@ PawShop 由两个独立部署单元组成，之间**当前没有任何运行时�
 
 ## 3. 商务后端（单元 B，admin-only 地基）
 
-- **框架**：Medusa.js 2.19.0，双模式配置（`_commerce/medusa-config.ts` + `src/lib/local-policy.cjs` / production policy）。
+- **框架**：Medusa.js 2.21.0（2026-09-16 由 2.19.0 升级），双模式配置（`_commerce/medusa-config.ts` + `src/lib/local-policy.cjs` / production policy）。
 - **模式门禁**：`PAWSHOP_MODE` = `local-admin-only`（本地）或 `production-admin-only`（生产）；Store 与 Customer API 无条件 503，直到店主单独批准开放。
 - **本地运行**：`scripts/run-local.mjs` 读取 `~/Documents/PawShop_Private/development/commerce.env`（仓库外私有），绑定 127.0.0.1:9000。
 - **生产运行**：`scripts/run-production.mjs` 要求 TLS PG/Redis、独立 secret、HTTPS storefront origin、回环 admin origin；systemd 以无特权 `pawshop` 用户运行，768MB V8 堆 / 1200MB 硬限。
@@ -59,7 +59,22 @@ PawShop 由两个独立部署单元组成，之间**当前没有任何运行时�
 
 `.github/workflows/quality.yml`：PR / push main 触发；根目录 `npm ci + build + check`，`_commerce` `npm ci + test + check:types + build:ci`（fixture env）。本机已全部复现通过。
 
-## 6. 已知架构限制（如实记录）
+## 6. 生产监控（2026-09-16 新增）
+
+```
+pawshop-monitor.timer（每 5 分钟）
+  └─ pawshop-monitor.service（oneshot, User=pawshop, 加固）
+       └─ _commerce/scripts/monitor-production.mjs
+            ├─ monitoring-policy.cjs   ← 纯策略：配置校验/阈值/去重/载荷（可单测）
+            ├─ 12 项只读检查（公网 HTTPS/延迟/安全头/重定向/TLS 到期、
+            │   commerce 健康、store 关闭不变量、admin 未鉴权 401、
+            │   PG/Redis 回环、备份新鲜度、磁盘空间）
+            └─ 告警：可选 HTTPS webhook；未配置则 fail-closed 本地日志
+```
+
+配置 `/etc/pawshop-monitor/monitoring.env`（root:pawshop 0640，无 Secret），告警状态 `/var/lib/pawshop-monitor/alert-state.json`。退出码 0 健康 / 1 检查失败 / 2 告警投递失败。相同告警签名 30 分钟去重，恢复时报告一次。
+
+## 7. 已知架构限制（如实记录）
 
 1. 展示站与 commerce 后端尚未集成（刻意的上线门禁，不是缺陷）。
 2. 生产 Redis 处于 pre-ACL 状态；Medusa 激活前必须完成专用 ACL 凭据门禁。
