@@ -153,56 +153,60 @@ install -o root -g pawshop -m 0640 ops/commerce/monitoring.env.example /etc/paws
 systemctl daemon-reload && systemctl enable --now pawshop-monitor.timer
 ```
 
-## 10. 主机侧安全缺口修复（生产主机，root；Agent 不执行）
+## 10. 主机侧安全缺口修复（生产主机，root）
 
-2026-09-16 对抗审查（`docs/ADVERSARIAL_REVIEW.md`）确认线上存在两项主机侧缺口。仓库内已提供**机器校验**（`npm run verify:production:strict`），修好后该命令应转为通过。
+2026-09-16 对抗审查（`docs/ADVERSARIAL_REVIEW.md`）确认线上存在两项主机侧缺口。仓库内提供**机器校验** `npm run verify:production:strict`。
 
-### 10.1 缺 `Strict-Transport-Security`（AR-6）
+**执行状态：AR-6 与 AR-7 已于 2026-09-16 由 WorkBuddy 在生产主机执行并验证通过**——`verify:production:strict` 已由 FAIL 转为 PASS（`HSTS max-age 15552000s; www redirects to the apex origin`）。以下保留执行记录、验证命令与回滚方式。
 
-现状实测：`https://pawlivora.com/` 只返回 `X-Content-Type-Options` 与 `X-Frame-Options`，无 HSTS。
-
-在 Nginx 站点配置中**已存在 `add_header` 的那个 `server` 块**（HTTPS 监听，`listen 443 ssl`）内加入一行——务必与已有的 `add_header` 放在同一块：Nginx 的 `add_header` 在子级作用域内**不继承**，放到别的 `location` 里会导致既有的 nosniff / X-Frame-Options 失效。
-
-```nginx
-# 先不含 includeSubDomains：只有确认所有子域都已启用 HTTPS 后再加。
-add_header Strict-Transport-Security "max-age=15552000" always;
-```
-
-```bash
-nginx -t && systemctl reload nginx
-curl -sI https://pawlivora.com/ | grep -i strict-transport-security   # 应命中
-curl -sI https://pawlivora.com/ | grep -iE 'x-(content-type-options|frame-options)'  # 既有头必须仍在
-cd ~/pawshop && PAWSHOP_HTTPS_ORIGIN=https://pawlivora.com PAWSHOP_HTTP_ORIGIN=http://pawlivora.com npm run verify:production:strict
-```
-
-确认全部子域均为 HTTPS 后，再把值升级为 `"max-age=31536000; includeSubDomains"`，最后才考虑 `preload` 与 HSTS 预加载列表提交。
-
-**回滚**：删除该行 → `nginx -t` → `systemctl reload nginx`。HSTS 一旦被浏览器缓存，在 `max-age` 到期前无法通过服务端撤销；因此 `max-age` 从 180 天起步。
-
-### 10.2 `www` 未规范化到 apex（AR-7）
-
-现状实测：`https://www.pawlivora.com/` 返回 **200** 且与 apex 内容 MD5 完全一致（`29aaa54af4011c159782ba4df983b5f2`）→ 同一内容由两个主机名提供，构成重复内容。
-
-为 `www` 单列一个 server 块做永久重定向（证书需覆盖 `www`，实测其 HTTPS 已可用）：
+- 主机：`47.254.26.124`（阿里云 SWAS，Ubuntu 24.04，nginx 1.24.0，托管 `pawlivora.com` + `www`，两者解析到同一 IP）
+- 改动文件：`/etc/nginx/sites-available/pawshop`
+- 改动前备份：`/root/pawshop-nginx-pawshop.bak-20260916T070651Z`（sha256 `4b239578…` → 改动后 `b4b816f2…`）
+- 实际改动（4 行，加在 HTTPS 内容 `server` 块内、既有 `add_header` 之后）：
 
 ```nginx
-server {
-  listen 443 ssl;
-  server_name www.pawlivora.com;
-  # 复用现有 apex 证书路径
-  ssl_certificate     /etc/letsencrypt/live/pawlivora.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/pawlivora.com/privkey.pem;
-  return 301 https://pawlivora.com$request_uri;
-}
+  add_header Strict-Transport-Security "max-age=15552000" always;
+  if ($host = www.pawlivora.com) {
+    return 301 https://pawlivora.com$request_uri;
+  }
 ```
+
+### 10.1 缺 `Strict-Transport-Security`（AR-6）—— 已修复
+
+**为什么必须与已有 `add_header` 同块**：Nginx 的 `add_header` 在子级作用域内**不继承**——只要某个 `location` 自己写了 `add_header`，该 `location` 就不再继承上级的头。本配置的 `location = /admin.html`、`location = /dashboard.html`、`location = /account.html`、`location /` 均未自定义 `add_header`，所以放在 `server` 级可正确下发到所有响应（含 404）。
+
+验证（2026-09-16 实测，外部与本机 `--resolve` 双向确认）：
 
 ```bash
-nginx -t && systemctl reload nginx
-curl -sI https://www.pawlivora.com/ | head -3   # 期望 301，Location: https://pawlivora.com/
-cd ~/pawshop && PAWSHOP_HTTPS_ORIGIN=https://pawlivora.com PAWSHOP_HTTP_ORIGIN=http://pawlivora.com npm run verify:production:strict
+curl -sI https://pawlivora.com/ | grep -i strict-transport-security   # Strict-Transport-Security: max-age=15552000
+curl -sI https://pawlivora.com/ | grep -iE 'x-(content-type-options|frame-options)'  # 既有两头仍在
+PAWSHOP_HTTPS_ORIGIN=https://pawlivora.com PAWSHOP_HTTP_ORIGIN=http://pawlivora.com npm run verify:production:strict
 ```
 
-**回滚**：撤回该 server 块（或恢复原 `server_name` 列表）→ `nginx -t` → `systemctl reload nginx`。
+**回滚**：删除该 `add_header` 行 → `nginx -t` → `systemctl reload nginx`。注意 HSTS 一旦被浏览器缓存，在 `max-age` 到期前**无法通过服务端撤销**，因此 `max-age` 从 180 天起步、且**先不含** `includeSubDomains`。确认全部子域均为 HTTPS 后才升级为 `"max-age=31536000; includeSubDomains"`，最后才考虑 `preload` 与预加载列表提交。
+
+### 10.2 `www` 未规范化到 apex（AR-7）—— 已修复
+
+原状：`https://www.pawlivora.com/` 返回 **200** 且与 apex 内容 MD5 一致（`29aaa54a…`）→ 同一内容由两个主机名提供，构成重复内容。根因两条：HTTPS 内容块的 `server_name` 同时列出 `pawlivora.com` 与 `www.pawlivora.com`；80 端口块的重定向用 `$host`，把 `www` 原样保留了下来。
+
+**实际采用做法**：没有新增独立 `server` 块，而是在既有 HTTPS 内容块内加一个 server 级 `if ($host = www.pawlivora.com) { return 301 https://pawlivora.com$request_uri; }`。理由：
+
+1. 改动最小（1 行），避免新增块时 `listen [::]:443 ssl ipv6only=on` 在同端口重复声明导致的选项冲突；
+2. 与 certbot 自己在 80 端口块生成的 `if ($host = …)` 模式一致，`certbot renew` 时不会被插件改写；
+3. server 级 `if` 在 rewrite 阶段**先于** location 匹配执行，因此经 `www` 访问 `/admin.html` 也会先跳到 apex、再由 apex 返回 404——门禁不被绕过（已实测 `admin_status=404`）。
+
+验证（2026-09-16 实测）：
+
+```bash
+curl -sI https://pawlivora.com/          # 200 + HSTS + X-Content-Type-Options + X-Frame-Options
+curl -sI https://www.pawlivora.com/      # 301, Location: https://pawlivora.com/
+curl -sI http://pawlivora.com/           # 301, Location: https://pawlivora.com/
+curl -so /dev/null -w '%{http_code}\n' https://pawlivora.com/admin.html   # 404（门禁仍在）
+```
+
+**已知小瑕疵（已接受）**：`http://www.pawlivora.com/` 需两跳（`→ https://www → https://apex`），因为 80 端口块属 certbot 托管行，本轮未改动。HTTPS 侧已是**单跳**，搜索引擎抓取到的规范 URL 命中单跳，无实质 SEO 损失。若要收敛为一跳，把 80 端口块中 `$host = www.pawlivora.com` 那条的 `https://$host$request_uri` 改成 `https://pawlivora.com$request_uri` 即可（证书 SAN 已覆盖 `www`，安全）。
+
+**回滚**：删除该 `if` 块 → `nginx -t` → `systemctl reload nginx`；或整体 `cp -a` 还原备份文件。
 
 ### 10.3 首页与 sitemap（AR-9 / AR-10，需先决策再动）
 
@@ -213,7 +217,7 @@ cd ~/pawshop && PAWSHOP_HTTPS_ORIGIN=https://pawlivora.com PAWSHOP_HTTP_ORIGIN=h
 1. 让 `/` 直接返回首页内容而不跳转（`location = / { try_files /PawShop.html =404; }`），此时 `/` 与 `/PawShop.html` 需通过 `canonical` 明确其一为规范 URL；
 2. 保持现状，仅补 `sitemap.xml` 并在其中只列 apex + `/PawShop.html` 的规范形式。
 
-方案选定后再补 `sitemap.xml` 与 `canonical`，并把 `sitemap.xml` 加入 `ops/deploy-static.sh` 的 `public_paths`、在 `robots.txt` 中以 `Sitemap:` 声明。**顺序上建议先做 10.2，再定 10.3**，避免把规范主机选择固化进 sitemap。
+方案选定后再补 `sitemap.xml` 与 `canonical`，并把 `sitemap.xml` 加入 `ops/deploy-static.sh` 的 `public_paths`、在 `robots.txt` 中以 `Sitemap:` 声明。**10.2 已于 2026-09-16 完成（规范主机已确定为 apex），因此现在可以安全地把 apex 固化进 sitemap 与 canonical。**
 
 
 日志纪律：可区分 DEBUG/INFO/WARN/ERROR；**永不**记录密码、token、完整 session、数据库 secret、客户明文。

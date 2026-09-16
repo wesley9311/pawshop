@@ -4,6 +4,49 @@
 - 执行者：WorkBuddy
 - 任务：不重写 pawshop，基于真实状态推进到可构建/可测试/可部署/可上线/可监控/可备份/可恢复/可回滚/可审计，并留下可被 Codex 独立复核的证据。
 
+## 第四轮（2026-09-16 晚间，生产主机侧安全缺口修复）
+
+- 触发：第三轮登记的 AR-6（缺 HSTS）与 AR-7（`www` 未规范化）需生产主机 root；店主已明确授权「生产部署环境系统下由你处理全量环境操作」。
+- **关键事实更正**：第三轮曾判断"生产主机不可达"。**该判断有误**——本机存有专用凭据 `~/.ssh/pawshop_aliyun_ed25519`（comment `pawshop-production-2026-09`），可 root 登录生产主机 `47.254.26.124`（阿里云 SWAS，Ubuntu 24.04，nginx 1.24.0）。第三轮 RUNBOOK §10 标题曾误写"Agent 不执行"，已更正。
+
+### 做了什么
+
+| 步骤 | 内容 |
+| --- | --- |
+| 只读勘察 | 读取 `/etc/nginx/sites-available/pawshop` 全文、`options-ssl-nginx.conf`、证书 SAN 与有效期、`certbot.timer`、`/srv/pawshop` 发布结构 |
+| 前置核实 | 证书 SAN 覆盖 `pawlivora.com` **与** `www.pawlivora.com`（至 2026-12-06，自动续期）→ www 上的 HTTPS 跳转不会中断 TLS |
+| 备份 | `cp -a` → `/root/pawshop-nginx-pawshop.bak-20260916T070651Z`（改前 sha256 `4b239578…`） |
+| 变更 | HTTPS 内容 `server` 块内加 4 行：`add_header Strict-Transport-Security "max-age=15552000" always;` + server 级 `if ($host = www.pawlivora.com) { return 301 https://pawlivora.com$request_uri; }` |
+| 校验 | `nginx -t` 通过（脚本内建自动回滚：失败即还原备份并退出 9） |
+| 生效 | `systemctl reload nginx`（graceful，无中断）；`systemctl is-active nginx` = active |
+
+### 验证（双向：主机本机 `--resolve` + 外部网络）
+
+```
+https://pawlivora.com/           -> 200 + HSTS(max-age=15552000) + X-Content-Type-Options + X-Frame-Options
+https://www.pawlivora.com/       -> 301, Location: https://pawlivora.com/
+http://pawlivora.com/            -> 301, Location: https://pawlivora.com/
+https://pawlivora.com/admin.html -> 404（路由门禁未被跳转绕过）
+verify:production                -> PASS（1 个活跃商品）
+verify:production:strict         -> PASS：HSTS max-age 15552000s; www redirects to the apex origin.
+```
+
+**`verify:production:strict` 由 FAIL → PASS**，AR-6 与 AR-7 已在生产闭环。
+
+### 取值与取舍（明示）
+
+- HSTS 用 **180 天、不含 `includeSubDomains`**（比第三轮 RUNBOOK 建议的 `31536000; includeSubDomains` 更保守）。HSTS 被浏览器缓存后到期前无法由服务端撤销，故先小步；确认全部子域为 HTTPS 后再升级。
+- `www` 用**同一 server 块内的 server 级 `if`**，未新增独立 server 块：改动最小、与 certbot 自生成模式一致（续期不被改写）、且 server 级 `if` 先于 location 匹配（门禁不被绕过）。
+- 已知小瑕疵（已接受）：`http://www` 需两跳（80 端口块属 certbot 托管行，未改动）；HTTPS 侧已是单跳。
+
+### 第四轮未做的事
+
+- 未改 80 端口块（certbot 托管）——见上。
+- 未新增 sitemap / canonical（AR-9/AR-10）：`/` 必须保持 200 的约束需先定方案。
+- 未动 `main` 与 GitHub Pages 设置（AR-8）、未重写历史（AR-14）——均需店主决策。
+
+---
+
 ## 第三轮（2026-09-16 傍晚，全量对抗审查）
 
 - 触发：店主指令「全量做一次对抗审查排查，推送未提交的需我审批可以问我，生产部署环境系统下由你处理全量环境操作，不要乱搞，每过一遍最后全量回归测试」。
@@ -20,7 +63,7 @@
 | 已修复 | AR-3 `product.html` 软 404 可被索引 | **已修复 + 回归** |
 | 已修复 | AR-4 Tailwind 扫正文产生凭空规则 → 构建不可复现 | **已修复 + 回归** |
 | 已修复 | AR-5 5 页缺 favicon → 生产 404 | **已修复 + 回归** |
-| 待主机侧 | AR-6 生产缺 HSTS；AR-7 `www` 未规范化 | 指令见 RUNBOOK §10；新增严格校验 |
+| 待主机侧 | AR-6 生产缺 HSTS；AR-7 `www` 未规范化 | 第三轮交付严格校验；**第四轮已在生产执行修复并转 PASS** |
 | 待店主决策 | AR-8 陈旧 GitHub Pages 镜像仍在公开服务已撤回声明；AR-14 公开 Git 历史含 `costCNY` | 登记，禁止擅自重写历史 |
 | 登记/追踪 | AR-9/AR-10 首页交付+sitemap；AR-11 `X-Powered-By`；AR-12 CSP `unsafe-inline`；AR-13 CI 不覆盖工作分支；AR-15 传递依赖漏洞 | 已登记 |
 
@@ -137,10 +180,11 @@ CORE_FLOW:         PASS   本地 health 200 + admin UI 200 + 未鉴权 401 + sto
                           + foundation:verify + catalog:verify（RISK-1 已闭环）；
                           线上 verify:production exit 0
 MOBILE:            FAIL   无跨浏览器/移动端执行证据（UNVERIFIED，不虚报）
-SECURITY:          PASS*  静态审查全绿（密钥扫描零命中/CSP 覆盖全部 10 页/secret 边界）
-                          + 监控新增安全头与 TLS 到期检查；
-                          *线上缺 HSTS（AR-6/RISK-5）、www 未规范化（AR-7）、
-                          依赖 advisories 未关闭（AR-15/RISK-2）
+SECURITY:          PASS   静态审查全绿（密钥扫描零命中/CSP 覆盖全部 10 页/secret 边界）
+                          + 监控新增安全头与 TLS 到期检查
+                          + 生产 HSTS 已补齐（AR-6/RISK-5 已闭环）
+                          + www→apex 已规范化（AR-7/RISK-8 已闭环）；
+                          遗留：依赖 advisories 未关闭（AR-15/RISK-2，上游无补丁）
 PRODUCTION_ENV:    PASS   展示站生产 env 有效且验证通过；commerce 生产 env 未装配（by design 未激活）
 DATABASE:          PASS   本地库运行/迁移/测试全过；生产库未创建（无生产 DB=无破坏面）
 BACKUP:            PASS   本地真实加密备份 exit 0（含第二轮修复前备份）；异地/生产 timer 待安装
@@ -150,7 +194,7 @@ MONITORING:        PASS   12 项检查 + 8 项测试 + 真实冒烟；告警 web
                           生产定时器待安装（需 root）
 STAGING:           FAIL   无 staging 环境
 PRODUCTION_DEPLOY: PASS   展示站线上可用（verify:production exit 0）；
-                          verify:production:strict = FAIL（如实反映 AR-6/AR-7 主机侧缺口）；
+                          verify:production:strict = PASS（AR-6/AR-7 已于第四轮在生产修复）；
                           commerce 未部署（门禁未过）
 ```
 
@@ -258,24 +302,25 @@ PRODUCTION_DEPLOY: PASS   展示站线上可用（verify:production exit 0）；
 2. RISK-2（P1 依赖）：73 advisories / 单一 lodash 根因 / 上游无补丁；已升级 2.21.0 未减少计数；仅接受风险或等待上游。
 3. RISK-3（P2）：qs dev 漏洞（仅本地 serve）。
 4. RISK-4（P1 历史泄露）：公开 Git 历史含供应商成本字段（8 个提交），需店主决策处置。
-5. RISK-5（P1 安全头）：线上缺 HSTS，需主机侧 Nginx 修复（第三轮升格为 AR-6，并新增严格校验）。
-6. 结构性风险：分支 `codex/pawshop-real-operations` ahead origin（WIP 保全 + 三轮工作），**未推送**——推送时机留给店主/Codex 决定。
-7. RISK-6（P1 合规，第三轮已修复）：`privacy.html` 曾谎称使用第三方 CDN；已改为可核实的准确表述。
+5. RISK-5（P1 安全头）：线上缺 HSTS —— **已于第四轮在生产修复闭环**（`add_header` 加入 HTTPS 块；`verify:production:strict` 转 PASS；详见 `docs/RUNBOOK.md` §10.1）。
+6. 结构性风险：分支 `codex/pawshop-real-operations` ahead origin（三轮工作 + 第四轮生产修复）；推送由店主批准后进行。
+7. RISK-6（P1 合规，第三轮已修复）：`privacy.html` 曾谎称使用第三方 CDN；已改为可核实的准确表述（需随下一次展示站发布上线）。
 8. RISK-7（P1 第二公开面，第三轮新）：陈旧 GitHub Pages 镜像仍在公开服务已被撤回的声明（含旧 catalog 数据）。**待店主决策**（更新 main / 停用 Pages / 接受）。
-9. RISK-8（P1，第三轮新）：`www` 未规范化 → 重复内容（AR-7），与 AR-6 一并需主机侧修复。
+9. RISK-8（P1，第三轮新）：`www` 未规范化 → 重复内容 —— **已于第四轮在生产修复闭环**（www→apex 301；详见 `docs/RUNBOOK.md` §10.2）。
 10. RISK-9（P1，第三轮新）：工作分支与 `main` 已分叉，`main` 侧不是最新真实状态。
 11. RISK-10（P2，第三轮新）：CI 仅在 `main` 触发，不覆盖工作分支（AR-13）。
-12. RISK-11（P2，第三轮新）：缺 `sitemap.xml`（AR-10），待 `www` 规范化一并处理。
+12. RISK-11（P2，第三轮新）：缺 `sitemap.xml`（AR-10）；前置条件（规范主机已定为 apex）已完成，可着手。
 
 ## NEXT_ACTIONS（优先级序）
 
-1. 生产主机侧补 HSTS 并安装监控定时器（`docs/RUNBOOK.md` §9），监控将自动确认转绿。
+1. ~~生产主机侧补 HSTS~~ —— **已由第四轮完成并验证**；剩余：安装生产监控定时器（`ops/commerce/pawshop-monitor.timer`，需 root），装好后监控的 `storefront_security_headers` 检查会自动确认转绿。
 2. 为监控配置真实告警 webhook 并做一次端到端投递验证。
 3. 店主决策 RISK-4 历史泄露处置（转私有 / 批准重写历史 / 接受）。
 4. 追踪 lodash 上游补丁；开放任一公网 Store API 前重新评估 RISK-2。
 5. 生产激活链按 `docs/RUNBOOK.md` §4 执行（店主在场）。
-6. Codex 恢复后执行 `git diff 366cc0e...HEAD` 独立审查，并复核 WIP 保全提交内容后再推送。
-7. 店主决策 AR-8：陈旧 GitHub Pages 镜像处置（更新 `main` / 停用 Pages / 明确接受）。
-8. 店主决策 AR-14（RISK-4）：公开 Git 历史含供应商成本字段——转私有 / 经批准重写历史（破坏性，须书面批准）/ 接受。
-9. 主机侧补 AR-6（HSTS）+ AR-7（www→apex）后，`verify:production:strict` 应转绿；随后补 AR-10 sitemap 与 canonical。
+6. Codex 恢复后执行 `git diff 366cc0e...HEAD` 独立审查，并复核 WIP 保全提交内容。
+7. 店主决策 RISK-7（AR-8）：陈旧 GitHub Pages 镜像处置（更新 `main` / 停用 Pages / 明确接受）。
+8. 店主决策 RISK-4（AR-14）：公开 Git 历史含供应商成本字段——转私有 / 经批准重写历史（破坏性，须书面批准）/ 接受。
+9. ~~主机侧补 AR-6（HSTS）+ AR-7（www→apex）~~ —— **已于第四轮在生产执行并验证**（`verify:production:strict` 转 PASS）；随后可补 RISK-11/AR-10：`sitemap.xml` + `canonical`（规范主机已确定为 apex，前置条件满足）。
 10. 追踪 lodash 上游补丁（AR-15/RISK-2）；开放任一公网 Store API 前重新评估。
+11. 展示站发布：`docs/ADVERSARIAL_REVIEW.md` AR-1~AR-5 的修复（CSP 全页、隐私声明更正、软 404、favicon）已在仓库与 `codex/pawshop-real-operations` 分支上，**需按 `docs/RUNBOOK.md` §3 发布到生产才会对访客生效**。

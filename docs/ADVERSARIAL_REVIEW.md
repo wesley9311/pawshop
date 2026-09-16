@@ -28,7 +28,7 @@
 |---|---|---|
 | 本地开发（Medusa dev / PostgreSQL 54329 / 备份恢复 / 测试） | **完全可控** | 启停服务、跑测试、跑构建、备份+恢复演练、对抗测试 |
 | 生产静态站（`https://pawlivora.com`） | **只读可达** | 响应头、页面状态、内容指纹、TLS 核对 |
-| 生产主机（nginx / systemd / `/etc/pawshop`） | **不可达** | 无 SSH 配置或凭据；仓库亦不管理 nginx 配置。**仅能提供经核实的命令，未执行任何主机侧变更** |
+| 生产主机（nginx / systemd / `/etc/pawshop`） | **可达（root SSH）** | 经店主授权执行主机侧操作：读取 nginx 配置、备份、写入 AR-6/AR-7 修复、`nginx -t` 校验、`systemctl reload nginx`（graceful）、双向验证。凭据为 `~/.ssh/pawshop_aliyun_ed25519`（主机 `47.254.26.124`）。**已执行变更，见 §4 AR-6/AR-7** |
 | GitHub（Pages 设置 / 分支保护） | **不可达** | `gh` CLI 未安装；无法从本环境修改 Pages 配置 |
 | 生产数据库 | **不存在** | commerce 未激活，无生产库可写；本轮对数据库的唯一写入是经店主批准的本地开发库一条 `UPDATE`（见第二轮报告） |
 
@@ -45,11 +45,11 @@
 | AR-3 | P1 | SEO/索引正确性 | **已修复** |
 | AR-4 | P2 | 构建可审计性 | **已修复** |
 | AR-5 | P2 | 前端缺陷 | **已修复** |
-| AR-6 | P1 | 传输安全（HSTS） | 待主机侧修复（已加严格校验） |
-| AR-7 | P1 | 规范主机/重复内容 | 待主机侧修复（已加严格校验） |
+| AR-6 | P1 | 传输安全（HSTS） | **已修复（2026-09-16 生产执行）** |
+| AR-7 | P1 | 规范主机/重复内容 | **已修复（2026-09-16 生产执行）** |
 | AR-8 | P1 | 第二个公开部署面 | 待店主决策 |
 | AR-9 | P2 | 首页交付方式 | 待主机侧优化 |
-| AR-10 | P2 | SEO 基础 | 待与 AR-7 一并处理 |
+| AR-10 | P2 | SEO 基础 | 待处理（前置条件 AR-7 已完成） |
 | AR-11 | P2 | 信息泄露 | 已登记（影响极低） |
 | AR-12 | P2 | CSP 强度 | 已登记（需重构） |
 | AR-13 | P2 | CI 覆盖 | 已登记 |
@@ -58,7 +58,7 @@
 
 ---
 
-## 4. 已修复项（AR-1 ~ AR-5）
+## 4. 已修复项（AR-1 ~ AR-7）
 
 ### AR-1（P1）CSP 仅覆盖 2 个页面 → 现覆盖全部 10 个页面
 
@@ -112,23 +112,27 @@
 - **修复**：为 5 个页面补齐 `<link rel="icon" href="favicon.svg" type="image/svg+xml">`。
 - **验证**：清零访问日志后重跑浏览器全量检查，**49 次请求中 404 数为 0**，控制台错误清零。
 
+### AR-6（P1）生产缺 `Strict-Transport-Security` —— 已于生产修复
+
+- **证据（修复前）**：`curl -sI https://pawlivora.com/` 只返回 `X-Content-Type-Options: nosniff` 与 `X-Frame-Options: DENY`，**无 HSTS**。缺失 HSTS 意味着首次访问仍可被 SSL-strip 降级。
+- **门禁先行**：新增 `npm run verify:production:strict`（`scripts/verify-production-strict.mjs`），断言 HSTS 存在且 `max-age ≥ 15552000`。修复前实测：`Strict production verification failed: HTTPS root is missing a Strict-Transport-Security max-age directive.`
+- **为何不并入 `verify:production`**：该命令承载"部署是否成功"的语义，把主机侧缺口混进去会污染部署判定。严格校验独立存在，主机修好后即可提升为硬门禁。
+- **修复（2026-09-16，生产主机 root）**：在 `/etc/nginx/sites-available/pawshop` 的 HTTPS 内容 `server` 块内、既有 `add_header` 之后加入 `add_header Strict-Transport-Security "max-age=15552000" always;`。改动前已 `cp -a` 备份至 `/root/pawshop-nginx-pawshop.bak-20260916T070651Z`；经 `nginx -t` 通过后 `systemctl reload nginx`（graceful，无中断）。
+- **修复后实测**：`Strict-Transport-Security: max-age=15552000` 已下发；既有 `X-Content-Type-Options` / `X-Frame-Options` 仍在；`verify:production:strict` **转为 PASS**。
+- **回滚**：删该行 → `nginx -t` → reload。注意 HSTS 被浏览器缓存后，在 `max-age` 到期前无法由服务端撤销，故从 180 天起步、先不含 `includeSubDomains`。
+
+### AR-7（P1）`www` 未规范化 → 重复内容 —— 已于生产修复
+
+- **证据（修复前）**：`https://www.pawlivora.com/` 返回 **200**（非 301/308），且与 apex 内容 **MD5 完全一致**（`29aaa54af4011c159782ba4df983b5f2`）→ 同一内容由两个主机名提供。根因：HTTPS 内容块 `server_name` 同时含 apex 与 `www`；80 端口块重定向用 `$host`，把 `www` 原样保留。
+- **前置核实**：证书 SAN 已覆盖 `pawlivora.com` **与** `www.pawlivora.com`（Let's Encrypt，有效期至 2026-12-06，`certbot.timer` 自动续期）→ 在 www 上做 HTTPS 跳转不会中断 TLS。两主机名均解析到同一 IP `47.254.26.124`。
+- **修复（2026-09-16，生产主机 root）**：在同一 HTTPS 内容块内加 server 级 `if ($host = www.pawlivora.com) { return 301 https://pawlivora.com$request_uri; }`。选此做法（而非新增独立 server 块）是因为改动最小，且与 certbot 自生成的 `if ($host = …)` 模式一致，续期时不会被改写；server 级 `if` 先于 location 匹配，故经 `www` 访问 `/admin.html` 也先跳 apex 再 404，**门禁未被绕过**（实测 `admin_status=404`）。
+- **修复后实测**：`https://www.pawlivora.com/` → `301`，`Location: https://pawlivora.com/`；apex 仍 `200`；`http://pawlivora.com/` → `301` 到 `https://pawlivora.com/`。
+- **已知小瑕疵（已接受）**：`http://www.pawlivora.com/` 需两跳（80 端口块属 certbot 托管行，本轮未改）。HTTPS 侧已是单跳，规范 URL 无实质 SEO 损失。
+- **回滚**：删该 `if` 块 → `nginx -t` → reload；或还原备份文件。
+
 ---
 
-## 5. 待处理项（AR-6 ~ AR-15）
-
-### AR-6（P1）生产缺 `Strict-Transport-Security`
-
-- **证据**：`curl -sI https://pawlivora.com/` 只返回 `X-Content-Type-Options: nosniff` 与 `X-Frame-Options: DENY`，**无 HSTS**。缺失 HSTS 意味着首次访问仍可被 SSL-strip 降级。
-- **已交付**：新增 `npm run verify:production:strict`（`scripts/verify-production-strict.mjs`），断言 HSTS 存在且 `max-age ≥ 15552000`。实测输出：
-  `Strict production verification failed: HTTPS root is missing a Strict-Transport-Security max-age directive.`
-- **为何不改 `verify:production`**：该命令承载"部署是否成功"的语义，把主机侧缺口混进去会污染部署判定。严格校验独立存在，修好后即可提升为硬门禁（或在 CI 中接入）。
-- **修复命令见 `docs/RUNBOOK.md` §9.1**（含 `nginx -t` 校验与回滚）。
-
-### AR-7（P1）`www` 未规范化 → 重复内容
-
-- **证据**：`https://www.pawlivora.com/` 返回 **200**（非 301/308），且与 apex 内容 **MD5 完全一致**（`29aaa54af4011c159782ba4df983b5f2`）→ 同一内容由两个主机名提供。
-- **已交付**：严格校验同时断言 `www` 必须 301/308 到精确的 apex origin。
-- **修复命令见 `docs/RUNBOOK.md` §9.2**。
+## 5. 待处理项（AR-8 ~ AR-15）
 
 ### AR-8（P1，需店主决策）陈旧 GitHub Pages 镜像仍在公开服务已被撤回的声明
 
@@ -301,18 +305,31 @@ npm run build:ci     -> exit 0（backend 4.20s / frontend 12.94s）
 
 ### 生产验证
 
+首次运行（修复前）：
+
 ```
 verify:production         -> PASS（语义未变，1 个活跃商品）
 verify:production:strict  -> FAIL：HTTPS root is missing a Strict-Transport-Security max-age directive.
                              （这是 AR-6 的真实缺口被机器检出，属预期结果）
 ```
 
+主机侧修复 **AR-6 + AR-7** 后重跑（2026-09-16）：
+
+```
+verify:production         -> PASS（1 个活跃商品）
+verify:production:strict  -> PASS：HSTS max-age 15552000s; www redirects to the apex origin.
+curl -sI https://pawlivora.com/        -> 200 + HSTS + X-Content-Type-Options + X-Frame-Options
+curl -sI https://www.pawlivora.com/    -> 301 Location: https://pawlivora.com/
+curl -sI http://pawlivora.com/         -> 301 Location: https://pawlivora.com/
+https://pawlivora.com/admin.html       -> 404（路由门禁未被跳转绕过）
+```
+
 ---
 
 ## 8. 本轮刻意未做的事（及原因）
 
-1. **未修改任何主机侧配置**：生产主机不可达；AR-6/AR-7/AR-9 只交付了经核实的命令。
-2. **未动 `main` 分支、未改 GitHub Pages 设置**：AR-8 涉及公开面的增删，属店主决策；本环境亦无 `gh` CLI。
+1. **未改 80 端口块（certbot 托管行）**：`http://www` 因此保留两跳（`→ https://www → https://apex`）。HTTPS 侧已是单跳，故未为省一跳去改动 certbot 托管内容（详见 AR-7）。
+2. **未动 `main` 分支、未改 GitHub Pages 设置**：AR-8 涉及公开面的增删，属店主决策。
 3. **未重写 Git 历史**：AR-14 受明令禁止。
 4. **未添加 `sitemap.xml`**：其 URL 集合依赖 AR-7/AR-9 尚未做出的规范主机决策（见 AR-10）。
 5. **未重构内联事件处理器**：AR-12 属 P2 重构，且当前无用户数据流，风险低。
@@ -326,7 +343,8 @@ verify:production:strict  -> FAIL：HTTPS root is missing a Strict-Transport-Sec
 | 门禁 | 变化 |
 |---|---|
 | TEST（根） | 14 → **20**（新增严格校验与软 404 行为测试） |
-| SECURITY | CSP 覆盖面 2 → **10 个页面**，并由回归检查强制；隐私声明事实性错误已修正 |
+| SECURITY | CSP 覆盖面 2 → **10 个页面**，并由回归检查强制；隐私声明事实性错误已修正；**生产 HSTS 已补齐（AR-6）** |
 | MOBILE | 仍为 **FAIL**，但本轮首次取得真实浏览器执行证据（Chrome，11 页面功能正确、无 CSP 违规）；跨浏览器/移动视口仍无证据 |
-| SEO | 新增软 404 修复与 favicon 修复；sitemap 与规范主机仍待主机侧处理 |
-| PRODUCTION_DEPLOY | 标准验证 PASS；**新增 `verify:production:strict` 检出 2 项主机侧缺口（HSTS、www 规范化）** |
+| SEO | 新增软 404 修复与 favicon 修复；**`www`→apex 已规范化（AR-7）**；sitemap 与 canonical 待补（AR-10，前置条件已满足） |
+| HOST（新） | AR-6/AR-7 由"待主机侧修复"转为**已在生产执行并验证**；`verify:production:strict` 由 FAIL → **PASS** |
+| PRODUCTION_DEPLOY | 标准验证 PASS；严格验证 **PASS**（修复 2 项主机侧缺口后） |

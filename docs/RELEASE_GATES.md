@@ -1,6 +1,6 @@
 # PawShop 发布门禁（Release Gates）
 
-更新：2026-09-16。原则：**没有执行证据不得 PASS**。所有命令在接管工作区内实际运行过并记录 exit code。
+更新：2026-09-16（含第三轮对抗审查 + 生产主机侧 AR-6/AR-7 修复）。原则：**没有执行证据不得 PASS**。所有命令在接管工作区内实际运行过并记录 exit code。
 
 ## 当前门禁结论
 
@@ -8,18 +8,18 @@
 | --- | --- | --- |
 | BUILD | **PASS** | 根 `npm run build` exit 0；`_commerce` `medusa build` exit 0（Medusa 2.21.0，backend 4.46s / frontend 13.22s，2026-09-16） |
 | TYPECHECK | **PASS** | `_commerce` `tsc --noEmit` exit 0（2.21.0） |
-| TEST | **PASS** | 根 14/14；`_commerce` **70/70**（62 原有 + 8 监控新增；node --test） |
-| CORE_FLOW | **PASS（本地）** | dev server health 200；admin UI 200；未鉴权 admin 401；store 路由关闭；foundation:verify 与 catalog:verify 均通过。线上展示站 `verify:production` exit 0（HTTPS 重定向+安全头+catalog+退役页 404） |
-| MOBILE | **UNVERIFIED** | 存在历史分支 `codex/pawshop-mobile-preview-fix`；本轮未做跨浏览器/移动端布局验证（无浏览器自动化证据） |
-| SECURITY | **PASS（静态部分）** | check:security 通过；git grep 密钥模式零命中；.env.example 全占位符；CSP 存在；监控新增安全头与 TLS 到期检查。新发现线上缺 HSTS（RISK-5，待主机侧修复）。生产渗透面（Cookie flags 实测、Rate limit）= UNVERIFIED。依赖漏洞见 RISK-2 |
+| TEST | **PASS** | 根 **20/20**（第三轮由 14 扩至 20）；`_commerce` **70/70**（62 原有 + 8 监控新增；node --test） |
+| CORE_FLOW | **PASS（本地）** | dev server health 200；admin UI 200；未鉴权 admin 401；store 路由关闭；foundation:verify 与 catalog:verify 均通过。线上展示站 `verify:production` exit 0 |
+| MOBILE | **FAIL（部分）** | 本轮首次取得**真实浏览器执行证据**（无依赖 CDP + headless Chrome，11 页面：功能正确、0 CSP 违规、0 JS 错误、0 HTTP 404）。但**跨浏览器（Safari/Edge）与移动视口仍无证据**，故不 PASS |
+| SECURITY | **PASS** | check:security 通过（**CSP 现覆盖全部 10 个页面**并由回归强制）；git 密钥模式零命中；.env.example 全占位符；**生产 HSTS 已补齐（AR-6）**；`www`→apex 已规范化（AR-7）。生产渗透面（Cookie flags 实测、Rate limit）= UNVERIFIED。依赖漏洞见 RISK-2/AR-15 |
 | PRODUCTION_ENV | **PASS（静态站）/ UNVERIFIED（commerce）** | 展示站生产验证通过；commerce 生产 env 未安装（`/etc/pawshop/commerce.env` 不存在），激活链未执行 |
-| DATABASE | **PASS（本地）/ UNVERIFIED（生产）** | 本地 PG 17 运行中、迁移已应用、62 测试通过；生产库未创建、首次迁移未执行 |
+| DATABASE | **PASS（本地）/ UNVERIFIED（生产）** | 本地 PG 17 运行中、迁移已应用、测试通过；生产库未创建、首次迁移未执行 |
 | BACKUP | **PASS（本地）/ UNVERIFIED（异地+生产）** | 本地 `backup:real` exit 0（AES-256 + manifest）；OSS 异地备份无真实凭据与上传证据；生产每日备份 timer 未安装 |
 | RESTORE | **PASS（本地演练）** | `restore:verify-real` exit 0：隔离库恢复、关键数据哈希校验、临时库清理确认（`pawshop_restore_%` 计数=0）。生产隔离恢复服务未演练 |
 | ROLLBACK | **PASS（脚本级）/ UNVERIFIED（生产演练）** | 展示站：deploy-static.sh 内建失败回滚；commerce：rollback-commerce.sh 有 DB 兼容门禁+原子切换，但生产从未演练回滚 |
 | MONITORING | **PASS** | `pawshop-monitor` 已实现并验证：12 项检查、8 项新单测通过、真实冒烟运行（对 https://pawlivora.com + 本地运行时，10/12 ok）。告警通道为可选 HTTPS webhook，未配置时 fail-closed 本地告警。剩余：定时器需在生产主机安装（需 root） |
 | STAGING | **FAIL（不存在）** | 无 staging 环境；本地 dev 即最接近 production-like 的环境（回环 PG/Redis + admin-only 门禁） |
-| PRODUCTION_DEPLOY | **PASS（展示站）/ FAIL（commerce）** | 展示站线上可用，`verify:production` exit 0；**新增 `verify:production:strict` 检出两项主机侧缺口（HSTS、www 规范化）**，修好后应转 PASS；commerce 生产部署未发生（Medusa 未激活） |
+| PRODUCTION_DEPLOY | **PASS（展示站）/ FAIL（commerce）** | 展示站线上可用，`verify:production` exit 0；**`verify:production:strict` 亦 PASS**（HSTS max-age 15552000s；www→apex 301）——两项主机侧缺口已于 2026-09-16 修复；commerce 生产部署未发生（Medusa 未激活） |
 
 ## 风险登记
 
@@ -44,11 +44,42 @@
 - 影响：供应商成本、供货链接等商业敏感信息对任何克隆者可见；不影响网站运行时安全。
 - 修复选项（**均需店主决策**，Agent 不得自行重写历史）：将仓库转为私有；或经店主批准后使用 `git filter-repo` 重写历史并协调全部克隆方；或评估后接受该风险。
 
-### RISK-5（P1，安全头，**本轮新发现**）：线上缺 `Strict-Transport-Security`
-- 证据：监控 `storefront_security_headers` 检查失败；独立 `curl -sI https://pawlivora.com/` 仅返回 `X-Content-Type-Options: nosniff` 与 `X-Frame-Options: DENY`，HSTS 命中数 0。
-- 影响：浏览器不会强制后续访问使用 HTTPS，首次访问存在被降级劫持的窗口。当前站点不可交易、无登录，风险有限；但接入登录/结账前必须补齐。
-- 修复：在生产主机 Nginx 的 HTTPS `server` 块加 `add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;`（见 `docs/RUNBOOK.md` §9），`nginx -t` 通过后 reload，再由监控确认转绿。仓库不管理 Nginx 配置，需主机侧 root 操作。
+### RISK-5（P1，安全头）：线上缺 `Strict-Transport-Security` —— **已闭环（2026-09-16）**
+- 证据（修复前）：监控 `storefront_security_headers` 检查失败；独立 `curl -sI https://pawlivora.com/` 仅返回 `X-Content-Type-Options: nosniff` 与 `X-Frame-Options: DENY`，HSTS 命中数 0。
+- 影响：浏览器不会强制后续访问使用 HTTPS，首次访问存在被降级劫持的窗口。
+- **处置**：已在生产主机 `/etc/nginx/sites-available/pawshop` 的 HTTPS `server` 块内加入 `add_header Strict-Transport-Security "max-age=15552000" always;`；改动前 `cp -a` 备份至 `/root/pawshop-nginx-pawshop.bak-20260916T070651Z`，`nginx -t` 通过后 `systemctl reload nginx`。
+- 取值说明：采用 **180 天且不含 `includeSubDomains`**（比先前建议的 31536000+includeSubDomains 更保守）。HSTS 被浏览器缓存后，在 `max-age` 到期前无法由服务端撤销；待确认全部子域均为 HTTPS 后再升级。详见 `docs/RUNBOOK.md` §10.1。
+- 验证：`verify:production:strict` → **PASS**（`HSTS max-age 15552000s`）；既有两个安全头仍在。
 
+### RISK-6（P1，合规）：`privacy.html` 曾谎称使用第三方 CDN —— **已修复（第三轮）**
+- 事实：实际为自管主机 nginx + 同源资源，隐私声明却写"由第三方 CDN 托管"，属事实性错误。
+- 处置：改为可核实的准确表述（自管主机 + 同源资源），并如实披露 GitHub Pages 镜像面（含 `i.ibb.co`）。详见 `docs/ADVERSARIAL_REVIEW.md` AR-2。
+- 状态：**仓库已修复；上线上线发布后生效（见下方 DEPLOY 说明）**。
+
+### RISK-7（P1，第二公开面）：陈旧 GitHub Pages 镜像仍在公开服务已被撤回的声明 —— **待店主决策**
+- 事实：`wesley9311.github.io/pawshop/` 由 `origin/main` 自动发布，其 `catalog.json` 仍是**已撤回**的旧数据（stock=100 / originalPrice=39.9 / availability=null），违反项目自身的 `check-security` 契约。
+- 影响：公开面存在与现行声明不一致的内容；镜像上的退役页（admin/dashboard/account）也可访问。
+- 处置选项（**需店主决策**）：更新 `main` 使镜像与现状一致；或停用 GitHub Pages；或明确接受。
+- 备注：无凭据泄露（`admin.html` 为无害占位页，敏感模式命中 0）。
+
+### RISK-8（P1，规范主机/重复内容）：`www` 未规范化到 apex —— **已闭环（2026-09-16）**
+- 证据（修复前）：`https://www.pawlivora.com/` 返回 200 且与 apex 内容 MD5 完全一致（`29aaa54a…`）。
+- **处置**：在 HTTPS 内容 `server` 块内加 server 级 `if ($host = www.pawlivora.com) { return 301 https://pawlivora.com$request_uri; }`。证书 SAN 已覆盖 `www`（Let's Encrypt，至 2026-12-06，自动续期），故跳转不中断 TLS。
+- 验证：`https://www.pawlivora.com/` → `301 Location: https://pawlivora.com/`；apex 仍 200；`/admin.html` 经 www 访问仍最终 404（门禁未被绕过）。
+- 已知小瑕疵（已接受）：`http://www` 需两跳（80 端口块为 certbot 托管行，未改动）。HTTPS 侧为单跳。详见 `docs/RUNBOOK.md` §10.2。
+
+### RISK-9（P1，分支一致性）：工作分支与 `main` 已分叉
+- 事实：`codex/pawshop-real-operations` 领先 `origin/main`，`main` 侧不是最新真实状态（含 GitHub Pages 镜像因此陈旧，见 RISK-7）。
+- 处置：由店主决定合流策略；合流时应同时解决 RISK-7。
+
+### RISK-10（P2，CI 覆盖）：CI 不覆盖工作分支
+- 事实：`.github/workflows/quality.yml` 仅在 `main` 触发，工作分支的推送不会触发云端校验（本地已全量复现通过）。
+- 处置：合流后自然覆盖；如需保护工作分支可扩展触发条件。
+
+### RISK-11（P2，SEO 基础）：缺 `sitemap.xml`
+- 事实：`https://pawlivora.com/sitemap.xml` → 404。
+- 前置条件已满足：RISK-8 已完成，规范主机确定为 apex。
+- 处置：补 `sitemap.xml` + `canonical`，并将其加入 `ops/deploy-static.sh` 的 `public_paths`、在 `robots.txt` 中以 `Sitemap:` 声明。注意 `scripts/production-probe.mjs` 断言 `/` 必须返回 200，故不能用 `return 301` 把 `/` redirect 走（见 `docs/RUNBOOK.md` §10.3）。
 
 ## 上线（开放交易）前必须完成的门禁
 
@@ -59,8 +90,9 @@
 3. 备份 RAM 最小权限用户创建 + 三条 OSS 生命周期规则提交（只匹配各自前缀，禁止全桶 90 天规则）。
 4. 监控与告警落地（uptime、5xx、错误聚合、备份失败告警）。实现已完成，**定时器与告警 webhook 需在生产主机安装配置**。
 5. ~~RISK-1 数据漂移处置~~ —— **已于 2026-09-16 闭环**。
-6. 处置 RISK-5（HSTS）与 RISK-8（www 规范化）——均为主机侧一行/一块配置，命令已备。
-7. 决策 RISK-7（陈旧 Pages 镜像公开服务未验证的折扣声明）。
-8. 支付服务商沙箱测试（成功/失败/退款/webhook/对账）。
-9. 物流、税务、退货地址、隐私条款、客服路由就绪。
-10. Store/Customer API 开放需单独批准（当前无条件 503 是代码级门禁）。
+6. ~~RISK-5（HSTS）与 RISK-8（www 规范化）处置~~ —— **均已于 2026-09-16 在生产主机执行并验证**；`verify:production:strict` 由 FAIL 转 PASS。
+7. ~~RISK-6（隐私声明事实性错误）~~ —— **已修复（第三轮；需随下一次展示站发布上线）**。
+8. 决策 RISK-7（陈旧 Pages 镜像公开服务已撤回声明）与 RISK-9（分支合流）。
+9. 支付服务商沙箱测试（成功/失败/退款/webhook/对账）。
+10. 物流、税务、退货地址、隐私条款、客服路由就绪。
+11. Store/Customer API 开放需单独批准（当前无条件 503 是代码级门禁）。
