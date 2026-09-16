@@ -7,7 +7,7 @@
 ## 基准与范围
 
 - **BASE_COMMIT**：`366cc0e3656eb2259e9f4e4002452f142d20a147`（接管前 HEAD，分支 `codex/pawshop-real-operations`，与 origin 同步）
-- **FINAL_COMMIT**：本报告入库后的 `git rev-parse HEAD`（见仓库当前 HEAD；审计命令：`git diff 366cc0e...HEAD`）
+- **FINAL_COMMIT**：`cf650d2`（审计命令：`git diff 366cc0e...cf650d2`，等价于 `git diff 366cc0e...HEAD`）
 - **WIP 保全提交**：`13616a9` —— Codex 接管时未提交的分层备份收尾工作，原样固化，非 WorkBuddy 创作
 
 ## STACK
@@ -23,6 +23,7 @@
 | 文件 | 变更 |
 | --- | --- |
 | `.gitignore` | 追加 `.workbuddy/`（会话数据目录不入库） |
+| `assets/tailwind.css` | 重新构建产物：移除早期源码遗留的死规则（`.text-red-500` 裸类、`disabled:*` 变体，源码零引用），当前页面使用的规则无变化 |
 | `docs/PROJECT_STATE.md` | 新增：勘察+模块状态总表 |
 | `docs/ARCHITECTURE.md` | 新增：实测架构 |
 | `docs/RELEASE_GATES.md` | 新增：门禁结论+风险登记 |
@@ -35,7 +36,9 @@
 ## COMMITS
 
 1. `13616a9` — WIP 保全（Codex 工作）
-2.（本次提交）— docs + .gitignore（WorkBuddy）
+2. `c2265e0` — docs 六份 + .gitignore（WorkBuddy）
+3. `cf650d2` — tailwind.css 构建产物刷新（WorkBuddy）
+4.（本提交）— 完成报告 FINAL_COMMIT/CHANGED_FILES 精确化（WorkBuddy）
 
 ## 最终门禁结论
 
@@ -143,7 +146,7 @@ PRODUCTION_DEPLOY: PASS   展示站线上可用（verify:production exit 0）；
 2. RISK-2（P1 依赖）：commerce 77 个生产依赖漏洞。
 3. RISK-3（P2）：qs dev 漏洞。
 4. RISK-4（P1 运维）：零监控——线上故障将无告警发现。
-5. 结构性风险：分支 `codex/pawshop-real-operations` ahead origin（含 WIP 保全+docs），**未推送**——推送时机留给店主/Codex 决定。
+5. 结构性风险：分支 `codex/pawshop-real-operations` ahead origin 4 个提交（WIP 保全 + docs + 构建产物 + 报告），**未推送**——推送时机留给店主/Codex 决定。
 
 ## NEXT_ACTIONS（优先级序）
 
