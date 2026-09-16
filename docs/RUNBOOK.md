@@ -93,11 +93,30 @@ PAWSHOP_ROLLBACK_COMPATIBLE=1 \
 | 层 | 触发 | 内容 | 保留 | 状态 |
 | --- | --- | --- | --- | --- |
 | 本地 | 手动 `backup:real` | AES-256 加密 dump + HMAC manifest → `~/Documents/PawShop_Private/development/backups/` | 本地清理保底 7 份 | ✅ 已验证 |
-| 生产每日 | `pawshop-backup.timer` | pg_dump→加密→`/var/backups/pawshop` + OSS `daily/` | 90 天 | 未安装 |
-| 月度 | `pawshop-backup-monthly.timer` | 复用最近已验证日备份 → OSS `monthly/YYYY-MM/` | 12 个月 | 未安装（WIP 保全） |
-| 年度 | `pawshop-backup-yearly.timer` | 复用最近已验证日备份 → OSS `yearly/YYYY/` | 3 年 | 未安装（WIP 保全） |
+| 生产每日 | `pawshop-backup.timer` | pg_dump→加密→`/var/backups/pawshop` + OSS `daily/` | 90 天 | ⏳ **凭据与配置已就绪并实测**；首次备份待 release（§11） |
+| 月度 | `pawshop-backup-monthly.timer` | 复用最近已验证日备份 → OSS `monthly/YYYY-MM/` | 12 个月 | ⏳ 同上（WIP 保全） |
+| 年度 | `pawshop-backup-yearly.timer` | 复用最近已验证日备份 → OSS `yearly/YYYY/` | 3 年 | ⏳ 同上（WIP 保全） |
 
 **密钥纪律**：备份密钥（`backup.key`）绝不与密文同存一处；OSS 运行时凭据无删除权限；丢失密钥=旧备份不可解密。
+
+**离线（OSS）凭据与两条闸门（2026-09-17 完成）**
+
+- RAM 身份 `pawshop-backup-writer` + 策略 `pawshop-backup-writer-policy`：只允许在 `pawlivora-backups-us-west-1/pawshop/database-backups/*` 上 `PutObject` / `GetObject` / `GetObjectVersion`，并**显式拒绝** `DeleteObject*`、`DeleteBucket`、`PutBucketLifecycle`、`PutBucketVersioning`、`PutBucketPolicy`、`PutBucketAcl`、`PutBucketReplication`。
+- 密钥**恰好一把**，写在 `/etc/pawshop-backup/backup-s3-access-key` 与 `backup-s3-secret-key`（`root:root 0600`），只由 `pawshop-backup.service` 通过 `LoadCredential` 读取。
+- 两个闸门是**实测过的**，不是"填个 1"：`PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED=1`（`GetBucketVersioning` → `Status=Enabled`）、`PAWSHOP_BACKUP_S3_DELETE_DISABLED=1`（用该凭据发 `DeleteObject` → **403 AccessDenied**，且读 `?lifecycle` 同样 403）。
+- **凭据自检（换密钥或新环境后跑一次）**：`ops/commerce/verify-offsite-credential.mjs`，在主机上以 root 运行。它打印四行判定（能写、能拿到版本号、能回读且内容一致、`DeleteObject` 必须 403）和一行越权检查，**不打印任何密钥**。
+
+```bash
+# 主机侧（root）。它会写入一个小对象；本凭据故意删不掉它，用管理凭据清理，
+# 或加 PAWSHOP_OFFSITE_CHECK_KEEP=1 让它随 daily 层到期。
+install -o root -g root -m 0555 /srv/pawshop-source/ops/commerce/verify-offsite-credential.mjs \
+  /usr/local/libexec/pawshop/verify-offsite-credential.mjs
+/usr/bin/node /usr/local/libexec/pawshop/verify-offsite-credential.mjs
+```
+
+**2026-09-17 实测记录**：五项全部通过（`PutObject 200` / `HeadObject 200 + versionId` / `GetObject 内容匹配` / `DeleteObject 403 AccessDenied` / 读 `?lifecycle` 403），校验对象随后用管理凭据彻底删除（HEAD 返回 404）。
+
+**OSS 生命周期规则（2026-09-17 写入并回读核对）**：`daily/` 90 天、`monthly/` 365 天、`yearly/` 1095 天，三条各自只匹配自己的前缀；原有一条"全桶清理非当前版本（3 天）"规则予以保留，但**去掉了它的 `Expiration` 元素**——OSS 不允许前缀重叠的规则有同种动作类型（`InvalidRequest: Overlap for same action type Expiration`）。副作用：被生命周期删掉的当前版本留下的删除标记不会自动清理（零字节元数据，不影响数据与费用）。回滚素材：`/root/pawshop-offsite.env.bak-20260917` 与当时的配置导出。
 
 **恢复**：
 - 本地演练：`restore:verify-real`（✅ 2026-09-16 通过，临时库自动清理）。
@@ -141,7 +160,9 @@ PAWSHOP_MONITOR_STATE_FILE=/tmp/pawshop-monitor-state.json \
 
 退出码：`0` 全部健康；`1` 有检查失败；`2` **已尝试投递、但告警通道没有接受**。注意区分：被去重窗口抑制的那一轮是 `1` 而不是 `2`——"刻意不发"不等于"告警坏了"（该缺陷已于 2026-09-16 修正）。
 
-告警通道（2026-09-16 补齐通道适配，见 §9.3）：由 `PAWSHOP_MONITOR_ALERT_PROVIDER` 指定通道类型，`PAWSHOP_MONITOR_ALERT_WEBHOOK` 指定 HTTPS 地址，两者都可选。未配置时 fail-closed：只记录 WARN，绝不假装已告警。相同告警签名 30 分钟内去重；恢复时发送一次 recovery。告警正文只含检查名、状态与指标，不含任何秘密、环境值或响应体。
+告警通道（通道适配见 §9.3）：由 `PAWSHOP_MONITOR_ALERT_CHANNELS` 指定**多条**通道（`provider:https://…` 逗号分隔），单通道的旧写法 `PAWSHOP_MONITOR_ALERT_PROVIDER` + `PAWSHOP_MONITOR_ALERT_WEBHOOK` 仍支持。未配置时 fail-closed：只记录 WARN，绝不假装已告警。相同告警签名 30 分钟内去重；恢复时发送一次 recovery。告警正文只含检查名、状态与指标，不含任何秘密、环境值或响应体。
+
+**执行状态：2026-09-17 已在生产接入飞书 + Slack 双通道并完成真实投递验证**（告警与恢复各一条，四条全部送达）。配置在 `/etc/pawshop-monitor/monitoring.env`（`root:pawshop 0640`），换通道只需改那一行。
 
 **执行状态：定时器已于 2026-09-16 由 WorkBuddy 在生产主机安装并验证通过**（`pawshop-monitor.timer` enabled+active，实测 16:30:13 一次调度运行 **12/12 通过**）。以下为执行记录、验证与回滚。
 
@@ -211,40 +232,84 @@ PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1
 | Telegram Bot API | `{"chat_id": ..., "text": ...}` | HTTP 400 `Bad Request` |
 | 内部端点（generic） | 原始 v1 JSON | 正常（保持向后兼容） |
 
-因此现在按 `PAWSHOP_MONITOR_ALERT_PROVIDER` 生成对应报文，并且**投递是否成功以对方确认为准**：飞书要求 `code=0`（或 v1 的 `StatusCode=0`），Telegram 要求 `ok=true`，其余以 HTTP 状态为准。**HTTP 200 但内部报错，一律判为未投递 → 退出码 2**，不会再被记成"已投递"。
+因此现在按通道生成对应报文（`PAWSHOP_MONITOR_ALERT_CHANNELS` 里每条 `provider:URL` 自带的 provider 决定方言），并且**投递是否成功以对方确认为准**：飞书要求 `code=0`（或 v1 的 `StatusCode=0`），Telegram 要求 `ok=true`，其余以 HTTP 状态为准。**HTTP 200 但内部报错，一律判为未投递 → 退出码 2**，不会再被记成"已投递"。
 
 每一家的 webhook 还被**钉在厂商域名上**（`hooks.slack.com` / `open.feishu.cn`、`open.larksuite.com` / `api.telegram.org`），写错或被换掉的地址会在启动时直接报错，而不是把主机状态发到别处。自定义或自建端点请用 `generic`。
+
+**多通道（2026-09-17 新增）**
+
+```ini
+PAWSHOP_MONITOR_ALERT_CHANNELS=feishu:https://open.feishu.cn/open-apis/bot/v2/hook/XXXX,slack:https://hooks.slack.com/services/<TEAM_ID>/<BOT_ID>/<TOKEN>
+```
+
+- 告警**发往每一条通道**，**任一条被对方确认即算送达**（`exit 1`）；**全部失败**才算"告警系统坏了"（`exit 2`）。
+- 只送达了一部分时，日志会**点名**没确认的通道：`alert reached 1/2 channels; no acknowledgement from: slack`。这条 WARN 是故意的：一条死掉的通道绝不能躲在另一条后面。
+- 每次运行都会记录通道清单（**只有标签，没有 URL**）：`alert channels configured: feishu, slack`。
+- **两种写法不能同时出现**：同时设置 `PAWSHOP_MONITOR_ALERT_CHANNELS` 与 `PAWSHOP_MONITOR_ALERT_WEBHOOK` 会在启动期直接报错（而不是猜一个）。
+- 单通道的旧写法仍然支持（`PAWSHOP_MONITOR_ALERT_PROVIDER` + `PAWSHOP_MONITOR_ALERT_WEBHOOK`），用于只有一条通道的场景。
+- 同一平台可以出现多次，日志里会区分：`feishu`、`feishu#2`。
+
+**消息信封是一条不变量，不要改**（2026-09-17 实测教训）
+
+**所有**消息（告警与恢复）都以 `[PawShop 告警]` 开头，状态写在其后：
+
+```
+[PawShop 告警] 1/12 项检查失败                <- 失败
+[PawShop 告警] 已恢复: 12/12 项检查全部通过      <- 恢复
+```
+
+原因：飞书自定义机器人的"自定义关键词"过滤是**按消息正文匹配**的。实测线上群的过滤词是 `[PawShop 告警]`（含方括号），而恢复通知原来是 `[PawShop 恢复]` 开头 → **飞书返回 HTTP 200 + `code:19024 Key Words Not Found`**。后果是一种最糟的不对称：**告警永远送到、恢复永远送不到**，而且只看状态码会判成"已投递"。
+
+所以：**改文案时，两种消息必须保留同一个前缀**。`_commerce/tests/monitoring.test.cjs` 有一条断言锁住它（`recovery must open with the envelope`）。若关键词过滤被改成别的词，**必须取自这个前缀**（`PawShop` 或 `[PawShop 告警]` 都可以）。
 
 **本地端到端复跑（不需要生产主机、不需要真实 URL）**
 
 ```bash
 cd _commerce
-npm run test:alert-delivery     # 10 项判定全绿；把上述四家的报文逐条打到收端上核对
+npm run test:alert-delivery     # 15 项判定全绿；把四家的报文逐条打到收端上核对
 ```
 
-该夹具会起一个真 HTTPS 接收端，按四家的真实应答（含"200 + 错误码"陷阱）回包，并用 `dns-stub.mjs` 只把厂商域名解析到本地，**webhook URL 仍保留真实域名**，所以域名钉住策略照样生效。它证明的是"方言与判定正确"，**不**证明"你的通道存在"。
+该夹具会起一个真 HTTPS 接收端，按四家的真实应答（含"200 + 错误码"陷阱）回包，并用 `dns-stub.mjs` 只把厂商域名解析到本地，**webhook URL 仍保留真实域名**，所以域名钉住策略照样生效。覆盖场景：单通道四家方言与判定、**双通道全通 / 一通一死 / 全死 / 飞书陷阱被另一条遮住**、抑制窗口，以及"两种写法同时出现必须拒绝启动"。它证明的是"方言与判定正确"，**不**证明"你的通道存在"——后者要靠下面的真实验证。
 
-**拿到真实 webhook 之后的接入步骤（生产主机，root）**
+**真实投递验证（生产主机，root）**
 
 ```bash
-# 1) 只追加这两行（不要整份覆盖），并保持 owner/权限不变
-#    PAWSHOP_MONITOR_ALERT_PROVIDER=feishu|slack|telegram|generic
-#    PAWSHOP_MONITOR_ALERT_WEBHOOK=https://...
-#    （telegram 另需 PAWSHOP_MONITOR_TELEGRAM_CHAT_ID=<chat id>）
+# 1) 目标状态：/etc/pawshop-monitor/monitoring.env 里有一行
+#    PAWSHOP_MONITOR_ALERT_CHANNELS=feishu:...,slack:...
+#    安装时保持 root:pawshop 0640，并先备份旧文件
 install -o root -g pawshop -m 0640 monitoring.env.new /etc/pawshop-monitor/monitoring.env
 
-# 2) 语法自检：配置错误必须在启动阶段就炸，而不是跑一轮才发现
-sudo -u pawshop env $(grep -v '^#' /etc/pawshop-monitor/monitoring.env | xargs) \
-  /usr/bin/node /usr/local/libexec/pawshop/monitor-production.mjs
+# 2) 覆盖项放进 root-only 文件：URL 与覆盖值都不进命令行、不进 shell 历史
+cat > /root/pawshop-verify.env <<'EOF'
+PAWSHOP_MONITOR_MIN_TLS_DAYS=99999
+PAWSHOP_MONITOR_STATE_FILE=/var/lib/pawshop-monitor/verify-alert-state.json
+EOF
+chmod 0600 /root/pawshop-verify.env
 
-# 3) 真实投递验证：制造一次必定失败（证书阈值不可能满足），确认对方真的收到
-sudo systemctl start pawshop-monitor.service
-journalctl -u pawshop-monitor.service -n 20 --no-pager -o cat | grep -E "alert webhook|monitoring (passed|failed)"
+# 3) 用与 systemd 单元完全相同的身份/环境跑一次（故意造一次失败）
+/root/run-monitor-verification.sh /root/pawshop-verify.env; echo "exit=$? 期望 1"
+
+# 4) 再跑一次“恢复正常”，验证恢复通知也能送达（沿用同一个 state 文件）
+printf '%s\n' 'PAWSHOP_MONITOR_STATE_FILE=/var/lib/pawshop-monitor/verify-alert-state.json' \
+  > /root/pawshop-verify-recover.env
+/root/run-monitor-verification.sh /root/pawshop-verify-recover.env; echo "exit=$? 期望 0"
+
+# 5) 收尾：删除覆盖文件与验证用 state（生产的 alert-state.json 全程未被触碰）
+rm -f /root/pawshop-verify.env /root/pawshop-verify-recover.env \
+      /var/lib/pawshop-monitor/verify-alert-state.json
 ```
 
-第 3 步要求日志出现 `alert webhook accepted the payload` **且**你在自己的频道里看到那条消息——两者缺一都不算通过（这就是"真实投递验证"）。如果日志是 `did not accept the payload (status 200)`，说明报文或通道类型不对，按 §9.3 表逐项核对。
+**判定标准**：日志出现 `alert channel <label> accepted the payload`（每条通道各一行）**且**对应频道里真的看到那条消息——两者缺一都不算通过。若出现 `did not accept the payload (status 200)`，那是飞书在说正文没命中关键词（`19024`）或报文形态不对，按本节表格逐项核对。
 
-**Webhook URL 的安全交接**：URL 等同于一个写入凭据（拿到就能往你的频道发消息），所以**不要贴到聊天里**，也**不需要店主交出任何账号**（账号权限远大于一条群机器人 URL，代价不成比例）。交付方式三选一：① 店主在本机复制到剪贴板后由 Agent 用 `pbpaste` 读取（读完清空剪贴板，URL 不落地）；② 存到 `~/.pawshop/alert-webhook.url` 后由 Agent 读取、`scp` 上去并删除本地文件；③ 店主自己在服务器上交互式写入（用 `read -s` 或编辑器，避免进 shell 历史）。写入后不要 `git add`、不要截图。详见 `docs/OWNER_ACTIONS_ZH.md` §1.4。
+**工具**：`ops/commerce/run-monitor-verification.sh`。它以 `setpriv --reuid=pawshop --regid=pawshop` 运行，所以身份、环境与定时器里那次运行一致；额外覆盖来自命令行给出的 root-only env 文件。**不要**为了验证把 URL 拼进命令行——那会同时进 `ps` 和 shell 历史。
+
+**2026-09-17 实测记录**：飞书 + Slack 双通道，告警与恢复各一条，**四条全部送达**（日志四行 `accepted`，店主在群里看到），随后现场清理完毕；验证用的 state 与生产 state 分离。
+
+**接入后的运维注意**
+
+- 恢复通知也会进群（`[PawShop 告警] 已恢复: …`），这是有意的：让你知道"已经好了"，而不是只有坏消息。
+- 30 分钟去重窗口按告警签名生效，**去重状态在各通道之间共享**，所以不会出现"飞书收到一次、Slack 又收到一次"的重复投递。
+- **Webhook URL 的安全交接**：URL 等同于一个写入凭据（拿到就能往你的频道发消息），所以**不要贴到聊天里**，也**不需要店主交出任何账号**（账号权限远大于一条群机器人 URL，代价不成比例）。交付方式三选一：① 店主在本机复制到剪贴板后由 Agent 用 `pbpaste` 读取（读完清空剪贴板，URL 不落地）；② 存到本地文件后由 Agent 读取、`scp` 上去并删除本地文件；③ 店主自己在服务器上交互式写入（用 `read -s` 或编辑器，避免进 shell 历史）。写入后不要 `git add`、不要截图。详见 `docs/OWNER_ACTIONS_ZH.md` §1.4。
 
 ## 10. 主机侧安全缺口修复（生产主机，root）
 
@@ -310,3 +375,49 @@ curl -so /dev/null -w '%{http_code}\n' https://pawlivora.com/admin.html   # 404�
 **`/` 仍保持现状**：`/` 返回 116 字节的 `index.html`（`<meta http-equiv="refresh">` 跳转到 `PawShop.html`）。`scripts/production-probe.mjs` 断言 `/` 返回 **200**，因此**不能**用 `return 301` 把 `/` 重定向走，否则标准验证会失败。
 
 若将来要去掉这次客户端跳转，改用 `location = / { try_files /PawShop.html =404; }` 让 `/` 直接返回首页内容；此时 `/` 与 `/PawShop.html` 内容相同，必须同时补 `canonical` 明确规范 URL，并核对探测脚本与 sitemap 的语义后再发布。
+
+## 11. 商务后台激活序列（关键路径，生产主机，root）
+
+**顺序是设计强制的，不要跳步。** `run-first-production-backup-restore.sh` 只接受"**已迁移、未激活**"状态（`/srv/pawshop-commerce/current` 必须不存在、`pawshop-commerce.service` 必须没在跑、且 `migration.json` 已存在），并要求先产出一份通过「离线精确版本回读 + 隔离恢复演练」的加密备份，**之后**才允许激活。
+
+**前置：待批准的提交必须先推送。** 主机的 `git fetch` 是**匿名**的，且 `run-first-production-migration.sh` / `run-first-production-backup-restore.sh` 都要求 `/srv/pawshop-source` 正好停在 release 提交上（`git rev-parse HEAD` == release ID，且工作树干净）。所以：
+
+```bash
+# 0) 主机取到目标提交（在 Agent 机器上先推送；主机侧 root）
+git -C /srv/pawshop/source fetch --quiet origin
+git -C /srv/pawshop-source fetch --quiet origin
+git -C /srv/pawshop-source checkout --quiet <RELEASE_SHA>    # 必须是已推送的提交
+git -C /srv/pawshop-source status --porcelain                # 必须为空
+```
+
+> ⚠️ **`79a045c` 用不了**：它里面没有 `write-production-backup-restore-evidence.mjs`（首次备份的证据写入器是后来才加的），所以必须准备一个**新** release。
+
+```bash
+# 1) 准备不可变 release（产出 release ID 与内容摘要）
+bash /srv/pawshop-source/ops/commerce/prepare-commerce-release.sh <RELEASE_SHA>
+#    记下输出里的 RELEASE_ID 与 RELEASE_CONTENT_SHA256
+
+# 2) 首次数据库迁移（产出 /var/lib/pawshop-release-evidence/<sha>/migration.json）
+PAWSHOP_RELEASE_ID=<RELEASE_SHA> PAWSHOP_FIRST_MIGRATION_CONFIRMED=1 \
+  bash /srv/pawshop-source/ops/commerce/run-first-production-migration.sh
+
+# 3) 首次加密备份 + 离线回读 + 隔离恢复演练（产出 backup-restore.json）
+PAWSHOP_FIRST_BACKUP_RESTORE_CONFIRMED=1 \
+  bash /srv/pawshop-source/ops/commerce/run-first-production-backup-restore.sh \
+  <RELEASE_SHA> <RELEASE_CONTENT_SHA256>
+
+# 4) 只有 3 成功后才允许激活
+bash /srv/pawshop-source/ops/commerce/deploy-commerce.sh <RELEASE_SHA> <RELEASE_CONTENT_SHA256>
+
+# 5) 激活后：删掉监控里那两行临时跳过，让 12 项检查全部变成真实检查
+#    删 PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS 与 PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS
+#    （见 §9.2），然后启用备份定时器
+systemctl enable --now pawshop-backup.timer
+systemctl list-timers 'pawshop-*' --no-pager
+```
+
+**第 3 步会真正验证备份链**：它跑真实备份 → `sync-production-backups.mjs` 用 `LoadCredential` 注入的凭据上传到 `oss://pawlivora-backups-us-west-1/pawshop/database-backups/daily/` → 精确版本回读比对摘要 → 再把密文恢复到一次性隔离集群并核对。任何一步失败都不会留下"以为有备份"的状态。
+
+**已知会留在桶里的无害对象**：`pawshop/database-backups/daily/.pawshop-credential-check.txt`（约 28 字节，`ops/commerce/verify-offsite-credential.mjs` 自检时写入）。写入它的凭据**故意没有删除权限**（这正是被验证的能力），所以它会随 `daily/` 的 90 天规则自然到期；想立刻清掉就用管理凭据删。
+
+**回滚**：`ops/commerce/rollback-commerce.sh`（切换 `current` 并重启）；监控与告警不依赖 commerce，激活失败不会影响站点与监控。

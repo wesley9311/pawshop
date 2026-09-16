@@ -1,14 +1,15 @@
 # PawShop 生产环境交付与查找手册
 
-更新日期：2026-09-16（WorkBuddy 第五轮，按主机实测重写）
+更新日期：2026-09-17（WorkBuddy 第七轮；告警双通道、备份凭据与 OSS 生命周期均已在主机实测落地）
 
 这份文件是店主与 Codex 查看 PawShop 架构、数据位置、备份、部署和验收状态的**总索引**。
 它可以提交到 GitHub，因为这里只记录路径、责任边界和操作入口，不记录密码、
 AccessKey、客户明文、供应商隐私资料或支付凭据。
 
 > **重要前提**：仓库里的文档是"意图与约定"，**服务器上的实际状态必须用只读命令验证**。
-> 本文件已于 2026-09-16 按主机实测逐条核对；与上一版相比修正了多处路径漂移
-> （上一版只描述了商务树，完全没有记录展示站那棵树）。发现文档与实测不一致时，
+> 本文件已于 2026-09-17 按主机实测逐条核对；与上一版相比修正了多处路径漂移
+> （上一版只描述了商务树，完全没有记录展示站那棵树），并刷新了告警通道、备份凭据与
+> OSS 生命周期的真实落地状态。发现文档与实测不一致时，
 > **以实测为准，并回来改本文件**。
 
 ## 1. 先看哪里
@@ -19,6 +20,7 @@ AccessKey、客户明文、供应商隐私资料或支付凭据。
 | **只有店主本人能做的事（链接、点击步骤、交付方式）** | `docs/OWNER_ACTIONS_ZH.md` |
 | 网站目前能做什么、哪些功能仍关闭 | `README.md` |
 | 可执行的生产命令（发布/回滚/改 nginx/门禁） | `docs/RUNBOOK.md` |
+| **商务后台首次激活的完整顺序（含首次备份+回读+恢复演练）** | `docs/RUNBOOK.md` §11 |
 | 对抗审查发现与处置（AR-1 ~ AR-15） | `docs/ADVERSARIAL_REVIEW.md` |
 | 门禁结论与风险登记（RISK-1 ~ RISK-11） | `docs/RELEASE_GATES.md` |
 | 每轮建设与真实验证结果 | `docs/WORKBUDDY_COMPLETION_REPORT.md` |
@@ -28,7 +30,7 @@ AccessKey、客户明文、供应商隐私资料或支付凭据。
 | 上线前业务、物流、支付和隐私门槛 | `LAUNCH_READINESS.md` |
 | **服务器、OSS、数据和凭据分别在哪里** | **本文件 §3** |
 
-## 2. 当前真实状态（2026-09-16 实测）
+## 2. 当前真实状态（2026-09-17 实测）
 
 ### 已经做到
 
@@ -39,6 +41,19 @@ AccessKey、客户明文、供应商隐私资料或支付凭据。
 - **SEO 基础已补**：`sitemap.xml` 上线且为合法 XML（7 条 URL），`robots.txt` 已声明。
 - **生产监控已上线并运行**：`pawshop-monitor.timer` 每 5 分钟跑一次，实测
   **12/12 通过**，状态文件 `/var/lib/pawshop-monitor/alert-state.json`。
+- **告警已接通两个通道并做过真实投递验证**（2026-09-17）：`monitoring.env` 里
+  `PAWSHOP_MONITOR_ALERT_CHANNELS` 同时配了飞书与 Slack，**告警和恢复各发一条、
+  四条全部送达**（日志四行 `accepted`）。任一通道确认即视为送达，未确认的通道会在
+  日志里被点名（`no acknowledgement from: <label>`），避免"告警静默失败"。
+  适配层覆盖飞书/Slack/Telegram/generic 四家方言，端到端实测 **15/15**。
+- **加密备份链的凭据与闸门已备齐**：备份专用 RAM 身份 `pawshop-backup-writer`
+  已成对写入（`/etc/pawshop-backup/backup-s3-access-key`、`backup-s3-secret-key`，
+  `root:root 0600`），`backup-offsite.env` 已写入并**打开两个闸门**。用真实凭据实测
+  **能写、能精确回读版本、删除被拒（403）、读不了生命周期规则**——运行时账号动不了
+  已有备份。
+- **OSS 生命周期规则已写入并回读核对**：备份桶 4 条规则（`daily/` 90 天、
+  `monthly/` 365 天、`yearly/` 1095 天，各自只匹配自己的前缀；原有"全桶清理非当前版本
+  3 天"规则保留）。
 - 陈旧 GitHub Pages 镜像已停用（返回 404），仓库本体仍为 PUBLIC。
 - 服务器为阿里云美国（硅谷）2 GB，已装 Node 22、PostgreSQL 17、Redis、Nginx 1.24.0。
 - 商品图片桶 `pawlivora-products-us-west-1` 已在商品媒体链路中；数据库备份桶
@@ -46,18 +61,24 @@ AccessKey、客户明文、供应商隐私资料或支付凭据。
 
 ### 还没有做到（详见 `docs/REMAINING_WORK.md`）
 
-- **加密备份链没有在跑**：`pawshop-backup.timer` 为 `disabled`，且即使启用也会因
-  四处硬阻塞而失败（§3.4）。**当前生产库没有任何加密备份。**
+- **本轮改动尚未推送到 GitHub**（唯一的 P0 关键路径阻塞）：所有代码与文档改动都在本地，
+  按店主规矩**推送前先问**。而激活商务后台要求主机源码树停在**已推送**的 release 提交上
+  （主机是匿名 `git fetch`，release 校验又要求 `HEAD == releaseID` 且工作树干净），
+  因此后续激活步骤全部卡在"可以推送"这一句上。
+- **加密备份链还没有真正跑过第一次**：`pawshop-backup.timer` 为 `disabled`。凭据与两个
+  闸门已备齐（见上），**但"能跑"不等于"跑过"**——首份加密备份 + 离线回读 + 隔离恢复
+  演练需要一个已推送的 release（见 `docs/RUNBOOK.md` §11）。**当前生产库仍然没有任何
+  加密备份。**
 - **商务后台尚未首次激活**：`/srv/pawshop-commerce/current` 不存在；店主管理员凭据
   文件 `/root/pawshop-production-owner-credentials.json` **不存在**。
 - **生产库 `pawshop` 已创建但是空的**：`public` schema **0 张表**，首次迁移从未执行。
   所以目前确实**没有可丢的业务数据**。
-- **告警 webhook 仍未配置**：监控目前是 **log-only**，失败只写 journal 与本地 state，不会主动通知任何人。
-  适配层已于 2026-09-16 补齐（飞书/Slack/Telegram/generic 四家方言 + 厂商域名钉住 + "HTTP 200 但内部报错=未投递"判定，
-  端到端实测 10/10 通过，`cd _commerce && npm run test:alert-delivery` 可复跑），**只差店主提供 URL**——
-  获取步骤见 `docs/OWNER_ACTIONS_ZH.md` §1，接入与验证见 `docs/RUNBOOK.md` §9.3。
 - 监控里有两项**临时跳过**（commerce 三项 + 备份新鲜度），commerce 激活后必须去掉。
-- OSS 三条生命周期规则、异地备份配置、生产定时器仍未最终落地。
+- **阿里云里还留着一个已作废的临时 RAM 用户** `pawshop-agent-temp`：接管期用它建好了
+  `pawshop-backup-writer`，随后回收策略让它自己失去了删除自己的权限（`DeleteUser` 返回
+  `409 DeleteConflict`，复核 `GetUser`/`ListAccessKeys` 均 `NoPermission`）。实测它现在对
+  **OSS 管理面、OSS 数据面、RAM 全部 403**，等同于一把废钥匙。删除步骤见
+  `docs/OWNER_ACTIONS_ZH.md` §2.3，约 1 分钟，**不在关键路径上**。
 
 因此，当前**不存在真实顾客订单数据**，也不能把"服务器已安装"理解为"已经可以收款营业"。
 
@@ -108,6 +129,7 @@ AccessKey、客户明文、供应商隐私资料或支付凭据。
 | 生产监控配置 | `/etc/pawshop-monitor/monitoring.env` | `root:pawshop 0640`；不含秘密（webhook 除外） |
 | 监控脚本（发布无关） | `/usr/local/libexec/pawshop/monitor-production.mjs`、`monitoring-policy.cjs` | `root:root 0555` |
 | 监控告警状态 | `/var/lib/pawshop-monitor/alert-state.json` | `pawshop:pawshop 0700` 目录；告警抑制用 |
+| 告警投递验证脚本 | `/root/run-monitor-verification.sh` | `0700 root`；以 `setpriv` 复现 `pawshop` 身份运行，URL 不进命令行/历史 |
 | systemd 单元 | `/etc/systemd/system/pawshop-*.service`、`pawshop-monitor.timer` | 见 §3.4 |
 
 **监控为什么放在 libexec 而不是 release 里**：监控是"商务后台还没上线时就必须存在"的
@@ -129,19 +151,31 @@ release 激活后才存在——依赖方向是反的，所以 2026-09-16 改为
 | Redis | `127.0.0.1:6379` | active，需认证 |
 | 备份配置 | `/etc/pawshop-backup/backup.env` | 存在（仅只读库连接等非秘密项） |
 | 备份密钥 | `/etc/pawshop-backup/backup.key` | 存在；**绝不上传 OSS，丢失后旧备份无法解密** |
-| 异地备份配置 | `/etc/pawshop-backup/backup-offsite.env` | **缺失** |
-| 备份 OSS 凭据 | `/etc/pawshop-backup/backup-s3-access-key`、`backup-s3-secret-key` | **缺失** |
+| 异地备份配置 | `/etc/pawshop-backup/backup-offsite.env` | 存在，`0640 root:pawshop`；**两个闸门已打开** |
+| 备份 OSS 凭据 | `/etc/pawshop-backup/backup-s3-access-key`、`backup-s3-secret-key` | 存在，`root:root 0600`；恰好一把 AccessKey |
+| 离线凭据自检脚本 | `/usr/local/libexec/pawshop/verify-offsite-credential.mjs` | 已装；5 项全过，**不打印密钥** |
 | 本地备份目录 | `/var/backups/pawshop` | 存在，`pawshop-backup:pawshop-backup 0700` |
 | 首次管理员凭据 | `/root/pawshop-production-owner-credentials.json` | **缺失**（后台未激活） |
 | 发布验收证据 | `/var/lib/pawshop-release-evidence/<sha>` | **缺失** |
 
-**启用备份前必须先解决的四处阻塞**（否则 `pawshop-backup.service` 必然失败）：
+**启用备份的四处硬阻塞已于 2026-09-17 全部清除**（原诊断 → 实际处置）：
 
-1. 单元 `WorkingDirectory=/srv/pawshop-commerce/current/_commerce` —— 该链接不存在；
-2. `/etc/pawshop-backup/backup-offsite.env` 缺失；
-3. `LoadCredential` 所需的两个 `backup-s3-*` 文件缺失；
-4. 单元 `Requires=postgresql.service`，而该 meta 单元是 `inactive`（真正在跑的是
-   `postgresql@17-main.service`）。
+1. **首次备份的 `WorkingDirectory`**：原先固定指向 `/srv/pawshop-commerce/current/_commerce`，
+   而该链接要等激活后才存在（依赖方向反了）。现在首次备份流程改用 **release 自身目录**
+   （`--property=WorkingDirectory=$release/_commerce`）运行，不再依赖 `current`。
+2. **`/etc/pawshop-backup/backup-offsite.env` 已写入**，并**打开了两个闸门**。
+   注意：闸门留空或为假时离线同步会 **fail-closed**——这是刻意设计，防止凭据没就位就
+   静默跳过上传。
+3. **`LoadCredential` 所需的两个 `backup-s3-*` 文件已写入**（`root:root 0600`，恰好一把
+   AccessKey），并用真实凭据跑过 5 项自检：`PutObject 200` / `HeadObject 200 + versionId` /
+   `GetObject` 内容比对一致 / **`DeleteObject 403 AccessDenied`** / 读 `?lifecycle` 403。
+   脚本：`ops/commerce/verify-offsite-credential.mjs`（不打印任何密钥）。
+4. **`Requires=postgresql.service` 已改指向真实集群单元**：`postgresql.service` 是个空壳
+   （`ExecStart=/bin/true`），依赖它等于没有任何保证；真正在跑的是
+   `postgresql@17-main.service`。
+
+现在只剩下**首次运行**没有执行——它要求一个**已推送**的 release 提交（见 §2 与
+`docs/RUNBOOK.md` §11），并且**必须排在商务后台激活之前**。
 
 不得用文件管理器批量复制 PostgreSQL 数据目录，也不得手工修改 `commerce.env` 中的
 单个密码而不同步关联服务。所有变更应通过审查过的脚本完成。
@@ -164,11 +198,19 @@ release 激活后才存在——依赖方向是反的，所以 2026-09-16 改为
 精确版本回读的对象保存本地签名收据。运行时备份账号不得拥有删除对象、删除版本、
 修改生命周期或修改 Bucket 策略的权限。
 
-### 3.6 阿里云 RAM 收口现状（2026-09-16）
+### 3.6 阿里云 RAM 收口现状（2026-09-17）
 
 - 旧的 OSS AccessKey 已确认禁用并移入回收站；
 - 新的 OSS AccessKey 保持启用，且此前已通过真实写入/读取/删除测试；
+- **2026-09-17 新增备份专用身份** `pawshop-backup-writer`（策略
+  `pawshop-backup-writer-policy`）：只对备份桶的目标前缀有写入/读取权限，并**显式拒绝
+  删除类动作**（删对象、删版本、改生命周期、改 Bucket 策略）。实测能写能读、
+  **删除 403、读生命周期规则 403**。
 - **没有**永久清空回收站，仍保留可恢复边界。
+- **遗留待清理**：接管期使用的临时用户 `pawshop-agent-temp` 权限已被回收干净
+  （OSS 管理面 / OSS 数据面 / RAM 全部 403），但它把自建策略 detach 之后就再也删不掉
+  自己（`DeleteUser` 返回 `409 DeleteConflict`）。**请在阿里云控制台手工删除**，
+  步骤见 `docs/OWNER_ACTIONS_ZH.md` §2.3（约 1 分钟，不影响任何正在运行的组件）。
 
 ## 4. 顾客隐私会不会进入备份
 
@@ -193,13 +235,17 @@ release 激活后才存在——依赖方向是反的，所以 2026-09-16 改为
 
 | 层级 | 建议保留 | 状态 |
 | --- | --- | --- |
-| 每日加密备份 | 90 天滚动 | 独立前缀和定时任务已实现；**OSS 生命周期待提交；定时器未启用** |
-| 每月完整快照 | 12 个月 | 独立前缀和断电补跑定时任务已实现；**同上** |
-| 年度完整快照 | 暂定 3 年 | 独立前缀和断电补跑定时任务已实现；**同上** |
+| 每日加密备份 | 90 天滚动 | **OSS 生命周期规则已写入并回读核对（2026-09-17）**；定时任务已实现，**首次运行待 release 推送** |
+| 每月完整快照 | 12 个月 | OSS 生命周期规则已写入并回读核对；同上 |
+| 年度完整快照 | 暂定 3 年 | OSS 生命周期规则已写入并回读核对；同上 |
 
 月度和年度任务复用最近一份已加密、已认证的日备份，不会额外生成明文或重复执行
 `pg_dump`；同一月份或年份的重跑只核验已记录的精确 OSS 版本。三条生命周期规则必须
-只匹配各自前缀，禁止创建覆盖整个 Bucket 的 90 天删除规则。数据库规模和费用应每月检查；
+只匹配各自前缀，禁止创建覆盖整个 Bucket 的 90 天删除规则。（实测约束：OSS 不允许
+前缀重叠的规则使用**同一种动作类型**——写入时曾报 `InvalidRequest: Overlap for same
+action type Expiration`。因此原有那条"全桶清理非当前版本 3 天"规则被保留，但**去掉了
+它的 `Expiration` 元素**，只留下非当前版本清理。副作用：被生命周期删掉的当前版本会留下
+删除标记且不会自动清理，属零字节元数据，不影响数据与费用。）数据库规模和费用应每月检查；
 不能为了省钱牺牲最低恢复能力，也不能无依据地永久保存客户隐私。
 
 ## 6. 出现问题时先查什么
@@ -211,13 +257,14 @@ release 激活后才存在——依赖方向是反的，所以 2026-09-16 改为
 | `www` 不再跳转 apex | `verify:production:strict` | nginx 里的 `if ($host = www...)` 是否仍在 |
 | **想知道主机有没有出事** | `journalctl -u pawshop-monitor.service -n 50` | `/var/lib/pawshop-monitor/alert-state.json` |
 | 监控报告失败 | journal 里的 `check <name> failed (…)` | 按失败项查对应系统；注意两项 skip 是临时状态 |
-| **告警收不到，日志说 `did not accept…`** | `monitoring.env` 里 `PAWSHOP_MONITOR_ALERT_PROVIDER` 是否与 webhook 站点匹配 | 按 `docs/RUNBOOK.md` §9.3 的方言表逐项核对；四家方言可本地复跑验证 |
+| **告警收不到，日志说 `did not accept…`** | `monitoring.env` 里 `PAWSHOP_MONITOR_ALERT_CHANNELS` 中各 `provider:` 标签是否与对应 webhook 站点匹配 | 按 `docs/RUNBOOK.md` §9.3 的方言表逐项核对；四家方言与多通道扇出都能本地复跑 |
 | **告警整轮没发但检查确实失败** | journal 里是否写着 `alert suppressed by the repeat window` | 那是 30 分钟去重窗口的**刻意静默**，不是故障；状态见 `/var/lib/pawshop-monitor/alert-state.json` |
+| **只收到一个通道的告警（两通道之一静默）** | journal 里的 `no acknowledgement from: <label>` | 那个通道自身的问题（关键词/权限/URL）。**注意 30 分钟去重窗口**：刚发过就别用生产 state 重试，改用 §9.3 的验证脚本（独立 state）复测 |
 | 监控没在跑 | `systemctl list-timers pawshop-monitor.timer` | `systemctl is-enabled pawshop-monitor.timer` |
 | 后台打不开 | SSH 隧道、`pawshop-commerce.service` | Medusa 日志与回环端口；**先确认 `current` 链接是否存在** |
 | 商品图片失败 | 商品媒体 Bucket 和 RAM 权限 | `/etc/pawshop/commerce.env` 配置 |
-| 每日备份失败 | `pawshop-backup.service` 状态 | **先查 §3.4 的四处阻塞**；再看 `/var/backups/pawshop` |
-| OSS 没有新备份 | 异地配置和 systemd credential | OSS 版本控制、权限与网络 |
+| 每日备份失败 | `pawshop-backup.service` 状态 | §3.4 的四处阻塞已清除；若仍失败，优先查首次运行前置（release 是否已推送）与 `/var/backups/pawshop` |
+| OSS 没有新备份 | `backup-offsite.env` 里两个闸门是否仍为真（留空＝**刻意 fail-closed**，不会静默跳过上传） | systemd credential、OSS 版本控制、权限与网络 |
 | 数据恢复失败 | manifest/HMAC/密文三者是否匹配 | 隔离恢复服务和磁盘空间 |
 | 发布失败 | `/srv/pawshop/releases/` 里的上一版是否仍在 | `readlink -f /srv/pawshop/current` |
 | 数据疑似误删 | 立即停止写操作并保存证据 | 先恢复到隔离库，禁止直接覆盖生产库 |
@@ -242,7 +289,8 @@ release 激活后才存在——依赖方向是反的，所以 2026-09-16 改为
 - 支付成功、失败、取消、重复 webhook、退款和对账测试；
 - 物流、税费、退货地址、隐私条款、客服与事件响应责任人；
 - 域名、服务器、OSS、RAM、支付和邮件等外部账号的归属与恢复方式；
-- **监控告警通道已接通并做过一次真实投递验证**（当前仍缺，见 §2）。
+- **监控告警通道已接通并做过一次真实投递验证**（2026-09-17 完成：飞书 + Slack 双通道，
+  告警与恢复各一条、**四条全部送达**）。
 
 最终交付不是一张"完成"截图，而是代码版本、可复现命令、服务器实际证据、恢复演练、
 店主验收和后续维护入口组成的闭环。
@@ -254,9 +302,11 @@ release 激活后才存在——依赖方向是反的，所以 2026-09-16 改为
 - 阿里云主账号与 MFA 恢复方式；
 - 服务器登录凭据或 SSH 私钥；
 - PawShop 生产管理员账号和恢复方式；
-- OSS 商品媒体与备份 RAM 身份的用途、AccessKey ID、Secret 和轮换日期；
+- 两个 RAM 身份的用途、AccessKey ID、Secret 和轮换日期：① 商品媒体 OSS 身份（读写商品桶）；
+  ② **备份身份 `pawshop-backup-writer`**（只能写/读备份桶目标前缀，**不能删**）；
 - 支付服务商、域名注册商、企业邮箱和社交平台账号；
-- 数据库/Redis/备份密钥的离线恢复副本位置；
+- 数据库/Redis 密码，以及 `/etc/pawshop-backup/backup.key` 的**离线**恢复副本位置
+  （此密钥丢失则旧备份永久无法解密，且**绝不能**和备份放进同一个 OSS 桶）；
 - 经营主体、物流、退货地址和客服负责人的有效资料。
 
 Codex 可以继续维护代码和运行手册，但不能替代店主对账号归属、MFA、离线恢复材料、

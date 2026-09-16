@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-16（WorkBuddy 第五轮）
+更新：2026-09-17（WorkBuddy 第七轮）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
@@ -8,16 +8,36 @@
 
 ---
 
+## 0. 当前唯一的关键路径阻塞：**推送**
+
+**一句话**：本轮所有工程改动都已完成、已本地提交、**未推送**（店主的规矩是推送前先问）。而**激活商务后台要求主机源码树停在已推送的提交上**（主机 `git fetch` 是匿名、且 release 校验要求 `HEAD` == release ID 且工作树干净）。所以：
+
+```
+说出"可以推送"
+  → 主机取码 → prepare release → 首次迁移 → 首次加密备份 + 离线回读 + 隔离恢复演练
+  → 激活商务后台 → 删掉监控那两行临时跳过 → 启用备份定时器
+  → 开工中文运营台
+```
+
+**为什么不能用主机上现成的 `79a045c`**：它**不含** `write-production-backup-restore-evidence.mjs`，走不了首次备份的证据流程（`run-first-production-backup-restore.sh` 第 140 行会调用它）。所以必须准备一个新 release。
+
+命令序列已写入 `docs/RUNBOOK.md` **§11 商务后台激活序列**（含前置校验与回滚）。
+
+---
+
 ## A. 生产环境现状与剩余项
 
-### 已完成的（本轮及前一轮）
+### 已完成的（本轮及前几轮）
 
 | 项 | 证据 |
 | --- | --- |
 | HSTS + www→apex 301 | `verify:production:strict` PASS；`max-age=15552000`；`www` 301 到 apex |
 | 展示站发布 | release `6dce5a4`；`/srv/pawshop/current` 指向它；上一版 `a74aab3` 保留可回滚 |
 | sitemap.xml + robots 声明 | 线上 200、XML 合法、7 条 URL；`Sitemap:` 已写入 robots.txt |
-| 监控定时器 | `pawshop-monitor.timer` enabled+active，每 5 分钟；实测 16:30:13 跑通 **12/12** |
+| 监控定时器 | `pawshop-monitor.timer` enabled+active，每 5 分钟；实测 **12/12** |
+| **告警双通道（飞书 + Slack）** | **2026-09-17 接入并真实投递验证**：告警与恢复各一条、四条全部送达；多通道脚本已上主机；日志会点名未确认的通道 |
+| **备份凭据 + 两个闸门** | `pawshop-backup-writer` + 最小权限策略；密钥 root-only、`LoadCredential` 注入；`DeleteObject → 403`、`GetBucketVersioning → Enabled` 均已实测；自检脚本 `ops/commerce/verify-offsite-credential.mjs` 5/5 |
+| **OSS 生命周期** | 4 条规则（原有全桶非当前版本规则 + daily 90 / monthly 365 / yearly 1095），写入后回读核对 |
 | 陈旧 GitHub Pages 镜像（AR-8） | 已停用，镜像 URL 返回 404；仓库仍为 PUBLIC |
 | 隐私声明事实性 | 已改为"自管主机、同源资源、无第三方 CDN"；日期 2026-09-16 |
 
@@ -25,11 +45,13 @@
 
 | # | 项 | 级别 | 归属 | 说明与前置条件 |
 | --- | --- | --- | --- | --- |
-| A1 | **告警 webhook 未配置** | P1 | 店主 → Agent | 监控目前是 **log-only**：失败只写 journal 与本地 state，不会主动通知任何人。**2026-09-16 已补齐通道适配层**：飞书/Slack/Telegram/generic 四家的报文方言、厂商域名钉住、以及"HTTP 200 但内部报错 = 未投递"的判定都已实现，并有本地端到端实测（`npm run test:alert-delivery`，10/10）。**现在只剩你要给我一个 URL 这一步**——获取方式与逐条点击步骤见 `docs/OWNER_ACTIONS_ZH.md` §1，接入步骤见 `docs/RUNBOOK.md` §9.3。**不要把 webhook URL 直接贴到聊天里**：它等同于一个写入凭据。 |
-| A2 | **加密备份链未启用** | **P0** | 共同 | `pawshop-backup.timer` 存在但 disabled，原有四处硬阻塞，**2026-09-16 已由 Agent 修掉两处**：<br>① `pawshop-backup.service` 的 `WorkingDirectory=/srv/pawshop-commerce/current/_commerce` —— commerce release 未激活，该路径不存在；<br>② ~~`/etc/pawshop-backup/backup-offsite.env` 缺失~~ → **已于 2026-09-16 写入**（端点 `https://oss-us-west-1.aliyuncs.com`、区域 `oss-us-west-1`、桶 `pawlivora-backups-us-west-1`、90/365/1095 天，`root:pawshop-backup 0640`）；两个"版本化已开 / 凭据无删除权"的闸门**故意留空**，等拿到备份凭据实测后再打开——留空会让离线同步 fail-closed 明确报错，而不是静默传进保护未验证的桶；<br>③ `LoadCredential` 需要的 `/etc/pawshop-backup/backup-s3-access-key`、`backup-s3-secret-key` 缺失；<br>④ ~~单元 `Requires=postgresql.service`~~ → **已改为 `postgresql@17-main.service`**（2026-09-16）。⚙️ 纠正原判断：`postgresql.service` 不是"inactive 所以起不来"，它是**空壳单元**（`ExecStart=/bin/true`、`RemainAfterExit=on`），依赖它等于**没有任何保证**——集群没起来时备份照样会跑。同一处缺陷也已在 `pawshop-commerce.service` 上修正。<br>**仍剩**：①（随 A5 解决）、③（**只有店主能在阿里云建 RAM 用户**，见 `docs/OWNER_ACTIONS_ZH.md` §2.1A）；并且**顺序是设计强制的**——`run-first-production-backup-restore.sh` 只接受"已迁移、未激活"状态，必须先做出一次通过「离线回读 + 隔离恢复演练」的加密备份，**之后**才允许激活，所以 ③ 在激活的关键路径上。<br>**当前后果：生产库没有任何加密备份。** 库现在是空的（见 A4）所以暂时无数据可丢，但**必须在开放下单前解决**。 |
-| A3 | 监控有两项**临时跳过** | P1 | Agent | `/etc/pawshop-monitor/monitoring.env` 里 `PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS=1` 与 `PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1`。前者让 3 项 commerce 检查记为"显式跳过"，后者让备份新鲜度检查跳过。**commerce 激活并启用备份后必须删掉这两行**，否则真实的 commerce 宕机与备份中断会被掩盖。删掉后监控应变成 12/12 且全部为真实检查。 |
-| A4 | 生产库 `pawshop` 存在但**空** | 提示 | Agent | 库已创建，但 `public` schema **0 张表**——首次迁移从未执行。这正是"目前没有可丢数据"的原因。 |
-| A5 | commerce release 从未部署 | P0 | 共同 | `/srv/pawshop-commerce/current` 不存在；`releases/` 里有 3 个旧构建，其中 `79a045c` 早于监控模块，不含 `monitor-production.mjs`。这是 A2、B1 的共同根因。 |
+| A0 | **待批准的提交未推送** | **P0** | 店主 → Agent | 见上面 §0。这是 A2/A5/B1 现在唯一的共同前置。 |
+| A1 | ~~告警 webhook 未配置~~ | ~~P1~~ | — | ✅ **2026-09-17 完成**：飞书 + Slack 双通道接入，真实投递验证通过（告警与恢复四条全部送达）。实测中还修掉一个只有真发消息才会暴露的缺陷：飞书自定义关键词过滤是 `[PawShop 告警]`，而恢复通知原以 `[PawShop 恢复]` 开头 → 飞书返回 **HTTP 200 + `code:19024`**，会造成"告警永远送到、恢复永远送不到"。现所有消息共用同一信封前缀并有断言锁死（RUNBOOK §9.3）。 |
+| A2 | **加密备份链未启用** | **P0** | Agent（待 A0） | 原有四处硬阻塞，**2026-09-17 全部清除**：① 首次备份流程用 release 自身目录（`--property=WorkingDirectory=$release/_commerce`，不需要 `current`）；② `backup-offsite.env` 已写入**且两个闸门已打开**（留空会让离线同步 fail-closed，这是设计而非缺陷）；③ `backup-s3-access-key` / `backup-s3-secret-key` 已写入（`root:root 0600`）并用真实凭据实测（能写、能回读版本、**删除被拒 403**、读不了生命周期规则）；④ `Requires=postgresql.service` → `postgresql@17-main.service`（⚙️ 纠正：`postgresql.service` 是空壳单元 `ExecStart=/bin/true`，依赖它等于没有任何保证，并非"inactive 起不来"）。<br>**仍剩**：首次加密备份 + 离线回读 + 隔离恢复演练尚未执行——**它要求一个已推送的 release 提交（A0）**。<br>**当前后果：生产库没有任何加密备份。** 库现在是空的（见 A4）所以暂时无数据可丢，但**必须在开放下单前解决**。 |
+| A3 | 监控有两项**临时跳过** | P1 | Agent（待 A5） | `/etc/pawshop-monitor/monitoring.env` 里 `PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS=1` 与 `PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1`。前者让 3 项 commerce 检查记为"显式跳过"，后者让备份新鲜度检查跳过。**commerce 激活并启用备份后必须删掉这两行**，否则真实的 commerce 宕机与备份中断会被掩盖。删掉后监控应变成 12/12 且全部为真实检查。 |
+| A4 | 生产库 `pawshop` 存在但**空** | 提示 | Agent | 库已创建（⚙️ 纠正上轮"未创建"的说法），但 `public` schema **0 张表**——首次迁移从未执行。这正是"目前没有可丢数据"的原因。 |
+| A5 | commerce release 从未部署 | P0 | Agent（待 A0） | `/srv/pawshop-commerce/current` 不存在；`releases/` 里有 3 个旧构建，其中 `79a045c` 早于监控模块，**且不含 `write-production-backup-restore-evidence.mjs`**，因此走不了首次备份的证据流程。这是 A2、B1 的共同根因，**必须准备新 release**。 |
+| A6 | 临时 RAM 用户 `pawshop-agent-temp` 残留 | P2（非关键路径） | **店主**（1 分钟） | 我用它完成了备份凭据与生命周期配置；收尾时**先解除策略、后删密钥**的顺序错误让我失去了 RAM 权限，删不掉自己这个用户。**它已彻底作废**（OSS 管理/数据面与 RAM 全部 403）。删除步骤见 `docs/OWNER_ACTIONS_ZH.md` §2.3。 |
 
 ---
 
@@ -37,15 +59,18 @@
 
 这是 Codex 方案里"先激活生产后台并验证商品草稿上传"那一步，也是 A2/A3/A5 的统一解锁点。
 
-**激活链（`docs/RUNBOOK.md` §4，全部为已审查脚本）**
+**激活链（可执行命令已整理进 `docs/RUNBOOK.md` §11，全部为已审查脚本）**
 
-1. 更新 `/srv/pawshop-source` 到目标 commit（它是**商务**构建源，与展示站的 `/srv/pawshop/source` 是两棵独立的树）。
-2. `prepare-commerce-release.sh` → 产出 `/srv/pawshop-commerce/releases/<sha>`（带 manifest + evidence）。
-3. `install-commerce-runtime.sh` 安装 8 个单元 + libexec —— 注意该脚本是**首次安装**语义：它要求 `current` 不存在、单元不存在、libexec 为空。本机已存在 4 个单元与 2 个 libexec 文件，**所以它会在前置检查处直接拒绝**，需要先由店主审阅现有 4 个单元的去留。
-4. `run-first-production-migration.sh` 执行首次迁移（会写迁移门禁）。
-5. `finalize-production-admin.sh` / `create-production-owner.mjs` 建店主账号 → `/root/pawshop-production-owner-credentials.json`（现在**不存在**）。
-6. `verify-production-admin.mjs` 验证登录与商品草稿上传。
-7. `deploy-commerce.sh` 激活（`PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1`）→ 建 `current` + 重启服务。
+1. 更新 `/srv/pawshop-source` 到目标 commit（它是**商务**构建源，与展示站的 `/srv/pawshop/source` 是两棵独立的树）。⚠️ **必须是已推送的提交**（A0）。
+2. `prepare-commerce-release.sh` → 产出 `/srv/pawshop-commerce/releases/<sha>`（带 manifest + evidence）与内容摘要。
+3. `run-first-production-migration.sh` 执行首次迁移（写 `migration.json` 门禁）。
+4. `run-first-production-backup-restore.sh`：**首次加密备份 + 离线精确版本回读 + 隔离恢复演练**（写 `backup-restore.json`）。**这一步不通过就不允许激活。**
+5. `deploy-commerce.sh` 激活（`PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1`）→ 建 `current` + 重启服务。
+6. 激活后：删掉监控那两行临时跳过（A3）→ 启用 `pawshop-backup.timer` → 验证商品草稿上传。
+
+> ⚙️ 修正上轮的一处说法：**不再需要 `install-commerce-runtime.sh`**。它是"首次安装、且要求 libexec 为空"的语义，而主机上监控已经跑在 libexec 里（`monitor-production.mjs`、`monitoring-policy.cjs` 等），且 4 个单元已存在——它必然在前置检查处拒绝。现在的路径是 `deploy-commerce.sh`（它会把该 release 需要的单元与脚本按各自契约就位）。**店主不需要为此审阅"4 个单元的去留"。**
+>
+> 另外，店主的**后台账号**（`/root/pawshop-production-owner-credentials.json`，现在不存在）由 `finalize-production-admin.sh` / `provision-production-owner-credentials.mjs` 在激活后创建——**这一步需要店主在场**（要设密码/确认邮箱），我会在那时候把交互命令给你。
 
 **需要店主先拍板的一件事（B2）**：后台暴露方式。RUNBOOK 的既定设计是**回环 + SSH 隧道**（`127.0.0.1:9000`，不对外）。这最安全，但也意味着**浏览器里的中文运营台无法直接调 Admin API**（浏览器在你自己电脑上，够不到服务器的回环口）。三条路：
 
@@ -111,12 +136,13 @@
 
 ## F. 建议的操作顺序（不要跳步）
 
-1. **店主提供告警 webhook** → Agent 接入并做一次真实投递验证（A1）。
-2. **确定后台暴露方式 B2**（建议方案 b）。
-3. **激活商务后台**（B1 全链）→ 此时 A2/A3/A5 一并解锁：回填 commerce 环境检查、启用备份链、删掉两行 skip。
-4. **做首次加密备份 + 隔离恢复演练**（A2 收尾）。
-5. **中文运营台**（C），从只读看板起步。
-6. **收款通道沙盒接入**（D），通过后再考虑真实扣款。
-7. 视情况合并 `main`（E2）。
+1. **店主批准推送**（A0）← **唯一的 P0 阻塞，一句话即可**
+2. **店主确定后台暴露方式 B2**（建议方案 b，也是一句话）
+3. Agent：**激活商务后台**（B1 全链，RUNBOOK §11）→ 此时 A2/A3/A5 一并解锁：回填 commerce 检查、启用备份定时器、删掉两行 skip
+4. Agent：**首次加密备份 + 离线回读 + 隔离恢复演练**已在第 3 步内强制完成（A2 收尾）
+5. 店主：激活后设置**后台账号**（需要你本人设密码/确认邮箱，我会给交互命令）
+6. Agent：**中文运营台**（C），从只读看板起步
+7. Agent + 店主：**收款通道沙盒接入**（D）；店主先申请，通过后再考虑真实扣款
+8. 视情况合并 `main`（E2）；店主有空时删掉临时 RAM 用户（A6）
 
-每一步之后都跑一遍 `docs/RUNBOOK.md` §4 的全量门禁（根 `check` + `build`、commerce 测试/类型/构建、真实浏览器检查、`verify:production` 与 `verify:production:strict`）。
+每一步之后都跑一遍全量回归：根 `check` + `build`、commerce 测试/类型/构建、真实浏览器检查、`verify:production` 与 `verify:production:strict`、监控实测、告警端到端。
