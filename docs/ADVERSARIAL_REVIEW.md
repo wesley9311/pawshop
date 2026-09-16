@@ -47,9 +47,9 @@
 | AR-5 | P2 | 前端缺陷 | **已修复** |
 | AR-6 | P1 | 传输安全（HSTS） | **已修复（2026-09-16 生产执行）** |
 | AR-7 | P1 | 规范主机/重复内容 | **已修复（2026-09-16 生产执行）** |
-| AR-8 | P1 | 第二个公开部署面 | 待店主决策 |
-| AR-9 | P2 | 首页交付方式 | 待主机侧优化 |
-| AR-10 | P2 | SEO 基础 | 待处理（前置条件 AR-7 已完成） |
+| AR-8 | P1 | 第二个公开部署面 | **已修复（2026-09-16）：镜像已停用，返回 404** |
+| AR-9 | P2 | 首页交付方式 | 保持现状（`/` 必须 200，不能服务端重定向） |
+| AR-10 | P2 | SEO 基础 | **已修复（2026-09-16）：`sitemap.xml` 已上线** |
 | AR-11 | P2 | 信息泄露 | 已登记（影响极低） |
 | AR-12 | P2 | CSP 强度 | 已登记（需重构） |
 | AR-13 | P2 | CI 覆盖 | 已登记 |
@@ -58,7 +58,7 @@
 
 ---
 
-## 4. 已修复项（AR-1 ~ AR-7）
+## 4. 已修复项（AR-1 ~ AR-8、AR-10）
 
 > **上线状态**：AR-1~AR-5 的修复已随展示站 release `a74aab3` 于 2026-09-16 正式发布到生产（`/srv/pawshop/current` 已切换，上一 release `012666fc…` 保留可回滚）。线上实测这 7 个页面均返回 200 且带 CSP 与 favicon，软 404 在真实浏览器中为 `noindex`，0 CSP 违规。AR-6/AR-7 属主机配置变更，亦已生效。详见 `docs/WORKBUDDY_COMPLETION_REPORT.md` 第四轮。
 
@@ -134,9 +134,9 @@
 
 ---
 
-## 5. 待处理项（AR-8 ~ AR-15）
+## 5. 待处理项（AR-9、AR-11 ~ AR-15）
 
-### AR-8（P1，需店主决策）陈旧 GitHub Pages 镜像仍在公开服务已被撤回的声明
+### AR-8（P1）陈旧 GitHub Pages 镜像 —— **已修复（2026-09-16）：镜像已停用**
 
 - **证据链**：
 
@@ -156,10 +156,10 @@
   而 `scripts/check-security.mjs` 与 `ops/deploy-static.sh` **都明令禁止** `stock` / `originalPrice` / 非 `prelaunch` 进入公开目录——即该镜像正在公开违反项目自身的数据边界契约。
 - **补充探测（限缩影响面）**：`ops/`、`docs/`、`tests/`、`scripts/`、`package.json`、`PRODUCTION_HANDOFF_ZH.md`、`_commerce/` 在 Pages 上**均为 404**；`README.md`、`config.js`、`safe.js` 为 200。`admin.html` 返回 200，但内容为当前的无害占位页（1859 字节，`pawshop2026` / `github_pat_` / `costCNY` 等敏感模式**零命中**）→ **无凭据泄露**。
 - **影响**：面向美国市场（`config.js` 的 `primaryMarket: 'US'`）公开挂着一个已撤回的折扣/库存声明，属合规风险；同时构成 SEO 重复内容；且该面完全不在任何门禁覆盖内。
-- **修复选项**（均需店主决策，本轮未执行）：
-  1. **把 `main` 更新到已验证状态**（合并工作分支或开 PR）→ Pages 自动重新发布为正确内容。注意：这会让 Pages 与生产一致，但仍保留第二个公开面。
-  2. **关闭 GitHub Pages** → 消除第二个公开面。需 GitHub 仓库设置操作（本环境无 `gh` CLI，无法代办）。
-  3. 维持现状并接受风险（**不推荐**：公开的未验证折扣声明）。
+- **已采用的处置（2026-09-16，方案 2）**：**停用该仓库的 GitHub Pages**。`gh api -X DELETE repos/wesley9311/pawshop/pages`；实测镜像 URL 返回 **404**，仓库本体**仍为 PUBLIC**（不转私有——`main` 的历史里虽有供应商成本字段，但那属商业敏感而非安全/客户数据，且主机 `git fetch` 是匿名的，转私有会立刻打断发布链，详见 AR-14）。
+- **连带修订**：`privacy.html` 原有一句"另有 GitHub Pages 预览镜像、可能加载第三方图片站"，停用后已不成立，**已删除**；隐私声明现在只有一条准确表述（自管主机 + 同源资源 + 无第三方 CDN），通知日期更新为 2026-09-16。
+- **回滚**：`gh api -X POST repos/wesley9311/pawshop/pages -f build_type=legacy -f 'source[branch]=main' -f 'source[path]=/'`。注意 `main` 仍是旧状态，重新启用会立刻恢复陈旧内容，故合流 AR-13/RISK-9 前不建议重开。
+- **未采用的方案**：方案 1（更新 `main`）只是把陈旧内容换成新内容，仍保留两个公开面且需要永久同步；方案 3（接受风险）会让一个美国市场面向的站点继续公开未经验证的折扣声明。
 
 ### AR-9（P2）首页靠客户端 meta 跳转
 
@@ -167,10 +167,13 @@
 - **影响**：SEO 权重传递不如服务端 301；无 JS/禁用刷新时体验差。
 - **注**：这是为兼容 GitHub Pages（无法做服务端重定向）而做的可移植选择，`_config.yml` 亦印证。建议在主机侧改为服务端重写（详见 RUNBOOK §9.3），仓库内保留 meta 兜底。
 
-### AR-10（P2）缺 `sitemap.xml`
+### AR-10（P2）缺 `sitemap.xml` —— **已修复（2026-09-16）**
 
-- **证据**：`https://pawlivora.com/sitemap.xml` → **404**；`robots.txt` 200。
-- **为何本轮未添加**：sitemap 的 URL 集合依赖 AR-7/AR-9 的规范主机与首页决策（`www` vs apex、`/` vs `/PawShop.html`）。在规范化方案确定前提交 sitemap 会把一个即将改变的规范选择固化下来。建议与 AR-7 一并处理。
+- **证据（修复前）**：`https://pawlivora.com/sitemap.xml` → **404**；`robots.txt` 200。
+- **当初为何搁置**：sitemap 的 URL 集合依赖 AR-7 的规范主机决策（`www` vs apex）。AR-7 于 2026-09-16 完成后（`www` 301 到 apex），前置条件解除。
+- **处置**：新增 `sitemap.xml`，只列 apex 上的 7 个已发布页面；`robots.txt` 增加 `Sitemap: https://pawlivora.com/sitemap.xml`；`sitemap.xml` 加入 `ops/deploy-static.sh` 的 `public_paths`（否则不会被发布）。线上实测 **200、`text/xml`、XML 合法、7 条 URL**。
+- **`canonical` 有意未加**：AR-8 停用镜像后，"同一内容多个主机名"的问题面已消失，`canonical` 成为冗余。若将来重新引入第二主机名或镜像，再补。
+- **仍保留的项**：AR-9（`/` 靠客户端 meta 跳转）**未改**——`scripts/production-probe.mjs` 断言 `/` 必须返回 200，服务端 301 会让标准验证失败；如需去掉该跳转，须同步改探测脚本与 sitemap 语义。
 
 ### AR-11（P2）`X-Powered-By: Express` 信息泄露
 

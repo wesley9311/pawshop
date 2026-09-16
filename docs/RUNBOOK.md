@@ -143,15 +143,62 @@ PAWSHOP_MONITOR_STATE_FILE=/tmp/pawshop-monitor-state.json \
 
 告警通道：`PAWSHOP_MONITOR_ALERT_WEBHOOK`（HTTPS，可选）。未配置时 fail-closed：只在日志中记录 WARN，绝不假装已告警。相同告警签名 30 分钟内去重；恢复时发送一次 recovery。告警载荷只含检查名、状态与指标，不含任何秘密或响应体。
 
-安装定时器（生产主机，root）：
+**执行状态：定时器已于 2026-09-16 由 WorkBuddy 在生产主机安装并验证通过**（`pawshop-monitor.timer` enabled+active，实测 16:30:13 一次调度运行 **12/12 通过**）。以下为执行记录、验证与回滚。
+
+### 9.1 为什么要从 `/usr/local/libexec/pawshop` 运行（2026-09-16 修正）
+
+单元原先的 `WorkingDirectory=/srv/pawshop-commerce/current/_commerce` **永远无法满足**：该链接只在商务 release 激活后才存在，而 `releases/` 里现有的 `79a045c` 早于监控模块，**根本不含 `monitor-production.mjs`**。依赖方向是反的——监控是"商务上线前就该存在的安全网"。
+
+同时，`pawshop-monitor.*` **不在任何安装/部署脚本的清单里**（`install-commerce-runtime.sh` 与 `deploy-commerce.sh` 都未列出它），是独立单元，因此改为从固定 libexec 目录运行**不会影响商务部署契约**。改动后 `deploy-commerce.sh` 与 `install-commerce-runtime.sh` 已同步把 `monitor-production.mjs`、`monitoring-policy.cjs` 纳入校验/安装清单，防止主机与 release 漂移。
 
 ```bash
-install -o root -g root -m 0644 ops/commerce/pawshop-monitor.service /etc/systemd/system/
-install -o root -g root -m 0644 ops/commerce/pawshop-monitor.timer /etc/systemd/system/
+# 主机侧（root）——已执行
+git -C /srv/pawshop/source fetch --quiet origin
+git -C /srv/pawshop/source checkout --quiet <目标SHA>          # 必须是已推送的提交
+for s in monitor-production.mjs monitoring-policy.cjs; do
+  install -o root -g root -m 0555 "/srv/pawshop/source/_commerce/scripts/$s" "/usr/local/libexec/pawshop/$s"
+  cmp -s "/srv/pawshop/source/_commerce/scripts/$s" "/usr/local/libexec/pawshop/$s"
+done
+install -d -o root -g pawshop -m 0750 /etc/pawshop-monitor
 install -d -o pawshop -g pawshop -m 0700 /var/lib/pawshop-monitor
-install -o root -g pawshop -m 0640 ops/commerce/monitoring.env.example /etc/pawshop-monitor/monitoring.env   # 填入真实值后
-systemctl daemon-reload && systemctl enable --now pawshop-monitor.timer
+# 写入 monitoring.env（见 §9.2），owner root:pawshop 0640
+for u in pawshop-monitor.service pawshop-monitor.timer; do
+  install -o root -g root -m 0644 "/srv/pawshop/source/ops/commerce/$u" "/etc/systemd/system/$u"
+  cmp -s "/srv/pawshop/source/ops/commerce/$u" "/etc/systemd/system/$u"
+done
+systemctl daemon-reload
+systemctl start pawshop-monitor.service                        # 先单跑一次，确认 Result=success
+systemctl enable --now pawshop-monitor.timer                   # 通过后才启用调度
 ```
+
+**注意**：不要用 `ops/commerce/monitoring.env.example` 直接 `install` 成 `monitoring.env`（示例里含占位注释，且生产需要按 §9.2 增删行）；示例文件仅作字段说明。
+
+验证：
+
+```bash
+systemctl list-timers pawshop-monitor.timer --no-pager
+systemctl show pawshop-monitor.service --property=Result --property=ExecMainExitTimestamp
+journalctl -u pawshop-monitor.service -n 25 --no-pager -o cat | grep -E "monitoring (passed|failed)"
+cat /var/lib/pawshop-monitor/alert-state.json
+```
+
+### 9.2 上线首阶段的临时跳过（**激活商务后必须删除**）
+
+`/etc/pawshop-monitor/monitoring.env` 当前含两行：
+
+```ini
+PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS=1
+PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1
+```
+
+- `SKIP_COMMERCE_CHECKS`：商务后台未激活时，`commerce_health` / `store_api_closed` / `admin_requires_auth` 三项记为"显式跳过"，**每次运行都会打一条 WARN**，检查详情也写明"skipped by explicit configuration"，避免把"跳过"误读成"已验证"。
+- `SKIP_SYSTEMD_CHECKS`：备份链未启用时跳过 `backup_freshness`。
+
+两者都是**临时状态**：商务激活并启用备份后删掉这两行，监控应变成 12/12 且全部为真实检查。**留着会掩盖真实的 commerce 宕机与备份中断。**
+
+**回滚整个监控**：`systemctl disable --now pawshop-monitor.timer`（保留单元与配置，随时可再启用）。
+
+日志纪律：可区分 DEBUG/INFO/WARN/ERROR；**永不**记录密码、token、完整 session、数据库 secret、客户明文。
 
 ## 10. 主机侧安全缺口修复（生产主机，root）
 
@@ -208,16 +255,12 @@ curl -so /dev/null -w '%{http_code}\n' https://pawlivora.com/admin.html   # 404�
 
 **回滚**：删除该 `if` 块 → `nginx -t` → `systemctl reload nginx`；或整体 `cp -a` 还原备份文件。
 
-### 10.3 首页与 sitemap（AR-9 / AR-10，需先决策再动）
+### 10.3 首页与 sitemap（AR-9 / AR-10）
 
-现状：`/` 返回 116 字节的 `index.html`（`<meta http-equiv="refresh">` 跳转到 `PawShop.html`）；`/sitemap.xml` 为 404。
+**sitemap 已于 2026-09-16 完成**（采用"保持现状 + 只补 sitemap"的方案）：新增 `sitemap.xml`，只列 apex 上的 7 个已发布页面；`robots.txt` 增加 `Sitemap:` 行；`sitemap.xml` 已加入 `ops/deploy-static.sh` 的 `public_paths`。线上实测 200、XML 合法、7 条 URL。
 
-**约束（重要）**：`scripts/production-probe.mjs` 断言 `/` 返回 **200**。因此不能用 `return 301` 把 `/` 重定向走，否则标准验证会失败。可选方案：
+**`canonical` 有意未加**：10.2 完成后 `www` 已 301 到 apex，陈旧镜像（AR-8，`wesley9311.github.io/pawshop/`）也已停用返回 404，重复内容面已消失，`canonical` 成为冗余。若将来重新启用任何第二主机名或镜像，再补。
 
-1. 让 `/` 直接返回首页内容而不跳转（`location = / { try_files /PawShop.html =404; }`），此时 `/` 与 `/PawShop.html` 需通过 `canonical` 明确其一为规范 URL；
-2. 保持现状，仅补 `sitemap.xml` 并在其中只列 apex + `/PawShop.html` 的规范形式。
+**`/` 仍保持现状**：`/` 返回 116 字节的 `index.html`（`<meta http-equiv="refresh">` 跳转到 `PawShop.html`）。`scripts/production-probe.mjs` 断言 `/` 返回 **200**，因此**不能**用 `return 301` 把 `/` 重定向走，否则标准验证会失败。
 
-方案选定后再补 `sitemap.xml` 与 `canonical`，并把 `sitemap.xml` 加入 `ops/deploy-static.sh` 的 `public_paths`、在 `robots.txt` 中以 `Sitemap:` 声明。**10.2 已于 2026-09-16 完成（规范主机已确定为 apex），因此现在可以安全地把 apex 固化进 sitemap 与 canonical。**
-
-
-日志纪律：可区分 DEBUG/INFO/WARN/ERROR；**永不**记录密码、token、完整 session、数据库 secret、客户明文。
+若将来要去掉这次客户端跳转，改用 `location = / { try_files /PawShop.html =404; }` 让 `/` 直接返回首页内容；此时 `/` 与 `/PawShop.html` 内容相同，必须同时补 `canonical` 明确规范 URL，并核对探测脚本与 sitemap 的语义后再发布。

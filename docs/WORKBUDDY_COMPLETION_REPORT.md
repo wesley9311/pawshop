@@ -4,6 +4,88 @@
 - 执行者：WorkBuddy
 - 任务：不重写 pawshop，基于真实状态推进到可构建/可测试/可部署/可上线/可监控/可备份/可恢复/可回滚/可审计，并留下可被 Codex 独立复核的证据。
 
+## 第五轮（2026-09-16 深夜，监控落地 + 第二公开面清理 + 手册修订）
+
+本轮回答店主三个问题并落地：①生产主机三项待办的真实状态；②AR-8/AR-14/SEO 的决策；③交付手册的对照修订与剩余清单。
+
+### 1. 三项待办的**诚实**结论
+
+| 项 | 状态 |
+| --- | --- |
+| 补 HSTS | ✅ 已完成（第四轮） |
+| **安装监控定时器** | ⚠️ 第四轮**没有完成** —— 本轮查清原因并真正装上 |
+| 配置告警 webhook 并做投递验证 | ❌ **未完成**：需要一个真实 HTTPS webhook，只能由店主提供；我不能凭空造一个端点 |
+
+**监控为何之前装不上**（这是本轮最有价值的发现）：`pawshop-monitor.service` 的
+`WorkingDirectory=/srv/pawshop-commerce/current/_commerce` **永远无法满足**——该链接只在
+商务 release 激活后才存在，而 `releases/` 里现存的 `79a045c` **早于监控模块，根本不含
+`monitor-production.mjs`**。依赖方向是反的：监控是"商务上线前就该存在的安全网"。
+`pawshop-backup.timer`（已存在但 disabled）被同一个根因阻塞。
+
+**处置**：把监控改为从固定 libexec 目录运行。关键前提是 **`pawshop-monitor.*` 不属于
+商务部署契约**——`install-commerce-runtime.sh` 与 `deploy-commerce.sh` 的单元清单里
+都没有它——所以改动安全。同时把 `monitor-production.mjs`、`monitoring-policy.cjs`
+补进那两个脚本的校验/安装清单，防止主机与 release 漂移。
+
+**实机验证**：`pawshop-monitor.timer` enabled+active，每 5 分钟；实测 16:30:13 一次调度
+运行 **12/12 通过**（`Result=success`）；`/var/lib/pawshop-monitor/alert-state.json`
+写入 `{"status":"healthy"}`。检查明细：storefront 200 / 延迟 / 安全头（HSTS 已在）/
+HTTP→HTTPS 301 / 证书剩 80 天 / 数据库回环 / Redis 回环 / 磁盘 74.4% 空闲。
+
+**新增 `PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS`**：商务未激活时，三项 commerce 检查记录为
+"显式跳过"，**每次运行打一条 WARN**、检查详情写明 skipped，避免把"跳过"误读成"已验证"。
+**这是临时状态，商务激活后必须删除**（连同 `SKIP_SYSTEMD_CHECKS`），否则真实宕机会被掩盖。
+
+### 2. 决策与落地
+
+- **AR-8（陈旧 GitHub Pages 镜像）—— 已停用**。停用前实测镜像 `catalog.json` 仍是已撤回数据
+  （`stock:100`、`originalPrice:39.9`），而线上是 `price 29.9 / availability prelaunch /
+  无 stock 字段`——**两个公开面对着顾客说不同的价**。处置：`gh api -X DELETE …/pages`，
+  镜像 URL 现返回 **404**。**仓库本体保持 PUBLIC**。连带删去 `privacy.html` 里那句已不成立的
+  "另有 GitHub Pages 镜像、可能加载第三方图片站"，隐私声明现在只剩一条准确表述。
+- **AR-14（公开历史含 `costCNY`）—— 维持公开、不重写历史**。泄露是历史提交里的采购成本，
+  非客户数据或凭据；`HEAD` 的 `catalog.json` 已干净且 `check-security.mjs` 已把 `costCNY`
+  列为禁止字段。**不改私有的硬理由**：主机 `git fetch` 是**匿名**的（无 credential helper、
+  无 `/root/.git-credentials`），转私有会立刻打断发布链。
+- **AR-10（sitemap）—— 已上线**。`sitemap.xml` 7 条 URL、XML 合法、**200**；`robots.txt`
+  已声明；已加入 `deploy-static.sh` 的 `public_paths`（否则不会被发布）。
+  `canonical` **有意未加**：AR-7 已让 `www` 301 到 apex、AR-8 又停用了镜像，重复内容面消失。
+- **AR-9 保持不变**：`/` 必须返回 200（探测脚本断言），不能服务端重定向。
+
+### 3. 生产发布
+
+release **`6dce5a4`** 已发布（原子切换 + `nginx -t` + reload + 边界探测通过；上一版
+`a74aab3` 等 7 个 release 保留可回滚）。**发布前逐文件 sha256 核对**：只变 `privacy.html`、
+`robots.txt`，新增 `sitemap.xml`，**`catalog.json` 与 `PawShop.html` 字节一致 → 无内容变更**。
+
+线上实测：7 个页面 + robots + sitemap 全 200，`/admin.html` 仍 404；
+`verify:production` 与 `verify:production:strict` **双 PASS**。
+
+### 4. 文档
+
+- **`PRODUCTION_HANDOFF_ZH.md` 按主机实测重写**。最重要的修正：原版**只描述了商务那棵树**，
+> 完全没有记录展示站那棵树。两棵树互不相干：展示站 = `/srv/pawshop/source` →
+> `/srv/pawshop/releases/` → `/srv/pawshop/current`（`deploy-static.sh`）；商务 =
+> `/srv/pawshop-source` → `/srv/pawshop-commerce/releases/` → `current`（**不存在**，
+> `deploy-commerce.sh`）。新增监控路径、备份四处硬阻塞、两棵树的 origin 同为匿名 fetch 等。
+- **新增 `docs/REMAINING_WORK.md`**：未完成项清单（分级/归属/前置条件）+ 建议操作顺序 +
+> 中文运营台方案意见 + 收款通道操作纪律。
+- 同步更新 `docs/RUNBOOK.md`（§9.1 监控为何迁到 libexec、§9.2 临时跳过、§10.3 sitemap 完成）、
+  `docs/RELEASE_GATES.md`（MONITORING/PRODUCTION_DEPLOY/TEST 行、RISK-7/RISK-11 闭环）、
+  `docs/ADVERSARIAL_REVIEW.md`（AR-8/AR-10 转已修复）。
+
+### 5. 本轮**没有**做（及原因）
+
+- **未配置告警 webhook**：需要店主提供真实 HTTPS 端点。
+- **未启用备份链**：四处硬阻塞（`current` 不存在、`backup-offsite.env` 缺失、
+  两个 `backup-s3-*` 凭据文件缺失、`Requires=postgresql.service` 而该 meta 单元 inactive）。
+  **生产库目前没有任何加密备份**——库是空的所以暂时无数据可丢，但这是**开放下单前的 P0**。
+- **未激活商务后台**：`install-commerce-runtime.sh` 是**首次安装**语义（要求 `current` 不存在、
+  单元不存在、libexec 为空），而本机已有 4 个单元与 2 个 libexec 文件，它会在前置检查处直接
+  拒绝——需先由店主审阅现有 4 个单元的去留。另需先定**后台暴露方式**（建议同源反代，
+  否则中文运营台在浏览器里够不到回环 Admin API）。
+- **未合并 `main`**：建议等商务激活跑通后再合并，避免一次涌入过多变更。
+
 ## 第四轮（2026-09-16 晚间，生产主机侧安全缺口修复）
 
 - 触发：第三轮登记的 AR-6（缺 HSTS）与 AR-7（`www` 未规范化）需生产主机 root；店主已明确授权「生产部署环境系统下由你处理全量环境操作」。
@@ -203,7 +285,7 @@ verify:production        -> PASS；verify:production:strict -> PASS
 ```
 BUILD:             PASS   根 build exit 0；medusa build(2.21.0) exit 0
 TYPECHECK:         PASS   tsc --noEmit exit 0
-TEST:              PASS   根 20/20（第三轮由 14 扩至 20）；commerce 70/70
+TEST:              PASS   根 20/20（第三轮由 14 扩至 20）；commerce 71/71
 CORE_FLOW:         PASS   本地 health 200 + admin UI 200 + 未鉴权 401 + store 关闭
                           + foundation:verify + catalog:verify（RISK-1 已闭环）；
                           线上 verify:production exit 0
@@ -211,17 +293,29 @@ MOBILE:            FAIL   无跨浏览器/移动端执行证据（UNVERIFIED，�
 SECURITY:          PASS   静态审查全绿（密钥扫描零命中/CSP 覆盖全部 10 页/secret 边界）
                           + 监控新增安全头与 TLS 到期检查
                           + 生产 HSTS 已补齐（AR-6/RISK-5 已闭环）
-                          + www→apex 已规范化（AR-7/RISK-8 已闭环）；
+                          + www→apex 已规范化（AR-7/RISK-8 已闭环）
+                          + 陈旧 Pages 镜像已停用（AR-8/RISK-7 已闭环）；
                           遗留：依赖 advisories 未关闭（AR-15/RISK-2，上游无补丁）
 PRODUCTION_ENV:    PASS   展示站生产 env 有效且验证通过；commerce 生产 env 未装配（by design 未激活）
-DATABASE:          PASS   本地库运行/迁移/测试全过；生产库未创建（无生产 DB=无破坏面）
-BACKUP:            PASS   本地真实加密备份 exit 0（含第二轮修复前备份）；异地/生产 timer 待安装
+DATABASE:          PASS*  本地库运行/迁移/测试全过；**生产库 `pawshop` 已创建但 0 张表**
+                          （`public` schema 无任何表，首次迁移未执行）——
+                          因此当前确实无业务数据可丢，但这也说明"生产库未创建"的
+                          旧结论不准确，第五轮已按实测更正
+BACKUP:            FAIL   本地真实加密备份 exit 0（含第二轮修复前备份）；
+                          **生产加密备份链未启用**：`pawshop-backup.timer` disabled，
+                          且即使启用也会因四处硬阻塞失败（`current` 不存在 /
+                          `backup-offsite.env` 缺失 / 两个 `backup-s3-*` 凭据缺失 /
+                          `Requires=postgresql.service` 而该 meta 单元 inactive）
+                          → **生产目前没有任何加密备份**（P0，见 docs/REMAINING_WORK.md A2）
 RESTORE:           PASS   本地隔离恢复演练 exit 0，临时库清理确认
-ROLLBACK:          PASS   展示站脚本内建回滚+验证通过；commerce 回滚脚本齐备（生产演练待做）
-MONITORING:        PASS   12 项检查 + 8 项测试 + 真实冒烟；告警 webhook 可选、fail-closed；
-                          生产定时器待安装（需 root）
+ROLLBACK:          PASS   展示站脚本内建回滚+验证通过（7 个 release 保留）；
+                          commerce 回滚脚本齐备（生产演练待做）
+MONITORING:        PASS*  `pawshop-monitor.timer` **已于 2026-09-16 安装并启用**
+                          （每 5 分钟，实测调度运行 12/12 通过）；
+                          *遗留：**告警 webhook 未配置（当前 log-only，失败不会通知任何人）**；
+                          commerce 与备份新鲜度两项为临时显式跳过，须在商务激活后删除
 STAGING:           FAIL   无 staging 环境
-PRODUCTION_DEPLOY: PASS   展示站已发布 release a74aab3（verify:production exit 0）；
+PRODUCTION_DEPLOY: PASS   展示站线上 release 6dce5a4（verify:production exit 0）；
                           verify:production:strict = PASS（AR-6/AR-7 已于第四轮在生产修复）；
                           线上真实浏览器 0 CSP 违规；commerce 未部署（门禁未过）
 ```
@@ -266,9 +360,11 @@ PRODUCTION_DEPLOY: PASS   展示站已发布 release a74aab3（verify:production
 
 ## DEPLOYED
 
-- **展示站**：已于 2026-09-16 发布 release `a74aab3`（第四轮）到生产 `/srv/pawshop/current`，原子切换 + `nginx -t` + reload + 边界探测全部通过；上一 release `012666fc798b503960bb1ac889906ff7d7604269` 保留，可一键回滚。
+- **展示站**：当前线上 release **`6dce5a4`**（第五轮，2026-09-16），原子切换 + `nginx -t` + reload + 边界探测全部通过。历史 release 全部保留（含 `a74aab3`（第四轮）、`012666fc798b503960bb1ac889906ff7d7604269`），可一键回滚。
 - **主机配置**：`/etc/nginx/sites-available/pawshop` 于同日变更（HSTS + www→apex），备份 `/root/pawshop-nginx-pawshop.bak-20260916T070651Z`。
-- **未部署**：commerce 后端（Medusa 未激活，门禁未过）；未安装监控定时器（需 root 时人工确认）。
+- **监控**：`pawshop-monitor.timer` 已启用（每 5 分钟，实测 12/12 通过）；脚本在 `/usr/local/libexec/pawshop/`；配置 `/etc/pawshop-monitor/monitoring.env`。
+- **GitHub Pages**：已停用 `wesley9311/pawshop` 的 Pages（镜像现返回 404）。
+- **未部署/未启用**：commerce 后端（Medusa 未激活）；**备份链未启用（P0）**；告警 webhook 未配置。详见 `docs/REMAINING_WORK.md`。
 - 早期轮次（第一/二/三轮）：无生产部署。
 
 ## UNVERIFIED（诚实清单）

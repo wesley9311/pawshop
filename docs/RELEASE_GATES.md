@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | BUILD | **PASS** | 根 `npm run build` exit 0；`_commerce` `medusa build` exit 0（Medusa 2.21.0，backend 4.46s / frontend 13.22s，2026-09-16） |
 | TYPECHECK | **PASS** | `_commerce` `tsc --noEmit` exit 0（2.21.0） |
-| TEST | **PASS** | 根 **20/20**（第三轮由 14 扩至 20）；`_commerce` **70/70**（62 原有 + 8 监控新增；node --test） |
+| TEST | **PASS** | 根 **20/20**（第三轮由 14 扩至 20）；`_commerce` **71/71**（62 原有 + 9 监控新增；node --test） |
 | CORE_FLOW | **PASS（本地）** | dev server health 200；admin UI 200；未鉴权 admin 401；store 路由关闭；foundation:verify 与 catalog:verify 均通过。线上展示站 `verify:production` exit 0 |
 | MOBILE | **FAIL（部分）** | 本轮首次取得**真实浏览器执行证据**（无依赖 CDP + headless Chrome，11 页面：功能正确、0 CSP 违规、0 JS 错误、0 HTTP 404）。但**跨浏览器（Safari/Edge）与移动视口仍无证据**，故不 PASS |
 | SECURITY | **PASS** | check:security 通过（**CSP 现覆盖全部 10 个页面**并由回归强制）；git 密钥模式零命中；.env.example 全占位符；**生产 HSTS 已补齐（AR-6）**；`www`→apex 已规范化（AR-7）。生产渗透面（Cookie flags 实测、Rate limit）= UNVERIFIED。依赖漏洞见 RISK-2/AR-15 |
@@ -17,9 +17,9 @@
 | BACKUP | **PASS（本地）/ UNVERIFIED（异地+生产）** | 本地 `backup:real` exit 0（AES-256 + manifest）；OSS 异地备份无真实凭据与上传证据；生产每日备份 timer 未安装 |
 | RESTORE | **PASS（本地演练）** | `restore:verify-real` exit 0：隔离库恢复、关键数据哈希校验、临时库清理确认（`pawshop_restore_%` 计数=0）。生产隔离恢复服务未演练 |
 | ROLLBACK | **PASS（脚本级）/ UNVERIFIED（生产演练）** | 展示站：deploy-static.sh 内建失败回滚；commerce：rollback-commerce.sh 有 DB 兼容门禁+原子切换，但生产从未演练回滚 |
-| MONITORING | **PASS** | `pawshop-monitor` 已实现并验证：12 项检查、8 项新单测通过、真实冒烟运行（对 https://pawlivora.com + 本地运行时，10/12 ok）。告警通道为可选 HTTPS webhook，未配置时 fail-closed 本地告警。剩余：定时器需在生产主机安装（需 root） |
+| MONITORING | **PASS** | `pawshop-monitor.timer` **已于 2026-09-16 在生产主机安装并启用**（enabled+active，每 5 分钟；实测调度运行 **12/12 通过**，状态文件写入正常）。为摆脱对商务激活的依赖，单元改为从 `/usr/local/libexec/pawshop` 运行（见 RUNBOOK §9.1）。**剩余：告警 webhook 未配置（当前 log-only，不会主动通知任何人）；commerce 与备份新鲜度两项检查为临时显式跳过，须在商务激活后删除（RUNBOOK §9.2）** |
 | STAGING | **FAIL（不存在）** | 无 staging 环境；本地 dev 即最接近 production-like 的环境（回环 PG/Redis + admin-only 门禁） |
-| PRODUCTION_DEPLOY | **PASS（展示站）/ FAIL（commerce）** | 展示站线上可用，`verify:production` exit 0；**`verify:production:strict` 亦 PASS**（HSTS max-age 15552000s；www→apex 301）——两项主机侧缺口已于 2026-09-16 修复；**展示站已发布 release `a74aab3`**（原子切换 + 边界探测通过，上一 release `012666fc…` 保留可回滚），线上真实浏览器 0 CSP 违规；commerce 生产部署未发生（Medusa 未激活） |
+| PRODUCTION_DEPLOY | **PASS（展示站）/ FAIL（commerce）** | 展示站线上可用，`verify:production` exit 0；**`verify:production:strict` 亦 PASS**（HSTS max-age 15552000s；www→apex 301）——两项主机侧缺口已于 2026-09-16 修复；**当前线上 release `6dce5a4`**（含 sitemap 与隐私声明修订；原子切换 + 边界探测通过；`a74aab3`、`012666fc…` 等 7 个 release 保留可回滚），线上真实浏览器 0 CSP 违规；commerce 生产部署未发生（Medusa 未激活，`/srv/pawshop-commerce/current` 不存在） |
 
 ## 风险登记
 
@@ -56,10 +56,11 @@
 - 处置：改为可核实的准确表述（自管主机 + 同源资源），并如实披露 GitHub Pages 镜像面（含 `i.ibb.co`）。详见 `docs/ADVERSARIAL_REVIEW.md` AR-2。
 - 状态：**已修复并已上线**（随展示站 release `a74aab3` 于 2026-09-16 发布）；线上 `privacy.html` 实测已为准确表述。
 
-### RISK-7（P1，第二公开面）：陈旧 GitHub Pages 镜像仍在公开服务已被撤回的声明 —— **待店主决策**
-- 事实：`wesley9311.github.io/pawshop/` 由 `origin/main` 自动发布，其 `catalog.json` 仍是**已撤回**的旧数据（stock=100 / originalPrice=39.9 / availability=null），违反项目自身的 `check-security` 契约。
-- 影响：公开面存在与现行声明不一致的内容；镜像上的退役页（admin/dashboard/account）也可访问。
-- 处置选项（**需店主决策**）：更新 `main` 使镜像与现状一致；或停用 GitHub Pages；或明确接受。
+### RISK-7（P1，第二公开面）：陈旧 GitHub Pages 镜像 —— **已闭环（2026-09-16）**
+- 事实（修复前）：`wesley9311.github.io/pawshop/` 由 `origin/main` 自动发布，其 `catalog.json` 仍是**已撤回**的旧数据（stock=100 / originalPrice=39.9），与线上 `catalog.json`（price 29.9 / availability prelaunch / 无 stock 字段）**直接矛盾**。
+- **处置：已停用该仓库的 GitHub Pages**。实测镜像 URL 返回 **404**；仓库本体**仍为 PUBLIC**（保持公开，符合"非必要不转私有"的判断）。
+- 同时修订 `privacy.html`：删去"另有 GitHub Pages 预览镜像、可能加载第三方图片站"一句（已不成立），隐私声明现在只剩"自管主机 + 同源资源 + 无第三方 CDN"这一条准确表述。
+- **回滚**：`gh api -X POST repos/wesley9311/pawshop/pages -f build_type=legacy -f 'source[branch]=main' -f 'source[path]=/'`（注意 `main` 仍是旧状态，重新启用会立刻恢复陈旧内容，故合流 RISK-9 前不建议重开）。
 - 备注：无凭据泄露（`admin.html` 为无害占位页，敏感模式命中 0）。
 
 ### RISK-8（P1，规范主机/重复内容）：`www` 未规范化到 apex —— **已闭环（2026-09-16）**
@@ -76,10 +77,10 @@
 - 事实：`.github/workflows/quality.yml` 仅在 `main` 触发，工作分支的推送不会触发云端校验（本地已全量复现通过）。
 - 处置：合流后自然覆盖；如需保护工作分支可扩展触发条件。
 
-### RISK-11（P2，SEO 基础）：缺 `sitemap.xml`
-- 事实：`https://pawlivora.com/sitemap.xml` → 404。
-- 前置条件已满足：RISK-8 已完成，规范主机确定为 apex。
-- 处置：补 `sitemap.xml` + `canonical`，并将其加入 `ops/deploy-static.sh` 的 `public_paths`、在 `robots.txt` 中以 `Sitemap:` 声明。注意 `scripts/production-probe.mjs` 断言 `/` 必须返回 200，故不能用 `return 301` 把 `/` redirect 走（见 `docs/RUNBOOK.md` §10.3）。
+### RISK-11（P2，SEO 基础）：缺 `sitemap.xml` —— **已闭环（2026-09-16）**
+- **处置**：新增 `sitemap.xml`（apex 上 7 个已发布页面），`robots.txt` 增加 `Sitemap:` 行，并把 `sitemap.xml` 加入 `ops/deploy-static.sh` 的 `public_paths`。线上实测 **200、XML 合法、7 条 URL**，随 release `6dce5a4` 上线。
+- **`canonical` 有意未加**：RISK-8 完成后 `www` 已 301 到 apex，RISK-7 的镜像也已停用，"同一内容多个主机名"的问题面已消失，`canonical` 成为冗余。若将来重新引入任何第二主机名或镜像，再补。
+- `/` 仍保持 200 + 客户端跳转：`scripts/production-probe.mjs` 断言 `/` 必须返回 **200**，故不能用 `return 301` 把 `/` 重定向走（见 `docs/RUNBOOK.md` §10.3）。
 
 ## 上线（开放交易）前必须完成的门禁
 
@@ -88,11 +89,11 @@
 1. 生产 commerce 激活链完成并留证（迁移→首加密备份→OSS 回读→隔离恢复→店主登录验收）。
 2. Redis ACL 专用凭据门禁完成。
 3. 备份 RAM 最小权限用户创建 + 三条 OSS 生命周期规则提交（只匹配各自前缀，禁止全桶 90 天规则）。
-4. 监控与告警落地（uptime、5xx、错误聚合、备份失败告警）。实现已完成，**定时器与告警 webhook 需在生产主机安装配置**。
+4. 监控与告警落地。**定时器已于 2026-09-16 安装并运行**（实测 12/12）；**告警 webhook 仍未配置**——当前 log-only，失败不会通知任何人，需店主提供 HTTPS webhook 后接入并做一次真实投递验证。**备份失败告警目前无法生效**，因为备份链本身未启用（四处硬阻塞见 `docs/REMAINING_WORK.md` A2）。
 5. ~~RISK-1 数据漂移处置~~ —— **已于 2026-09-16 闭环**。
 6. ~~RISK-5（HSTS）与 RISK-8（www 规范化）处置~~ —— **均已于 2026-09-16 在生产主机执行并验证**；`verify:production:strict` 由 FAIL 转 PASS。
 7. ~~RISK-6（隐私声明事实性错误）~~ —— **已修复并已上线**（随 release `a74aab3` 发布）。
-8. 决策 RISK-7（陈旧 Pages 镜像公开服务已撤回声明）与 RISK-9（分支合流）。
+8. ~~RISK-7（陈旧 Pages 镜像公开服务已撤回声明）~~ —— **已停用该镜像（2026-09-16）**，镜像返回 404。RISK-9（分支合流）**仍待店主决策**。
 9. 支付服务商沙箱测试（成功/失败/退款/webhook/对账）。
 10. 物流、税务、退货地址、隐私条款、客服路由就绪。
 11. Store/Customer API 开放需单独批准（当前无条件 503 是代码级门禁）。
