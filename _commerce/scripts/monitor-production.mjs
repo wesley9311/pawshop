@@ -2,8 +2,8 @@
 //
 // Read-only checks over the public storefront, the loopback-only commerce
 // runtime, the private data services, the backup freshness and the host disk.
-// Alerts go to an HTTPS webhook, formatted for the configured channel
-// (generic JSON, Slack, Feishu or Telegram); when no webhook is configured the
+// Alerts go to every configured channel, each formatted for its own platform
+// (generic JSON, Slack, Feishu or Telegram); when no channel is configured the
 // run is log-only (fail-closed: monitoring never silently pretends to alert).
 //
 // Never logs or transmits credentials, headers or customer data. Provider
@@ -34,6 +34,12 @@ const logLines = [];
 // skip is opt-in, is announced in the log on every run, and must be removed when
 // commerce goes live; monitoring never silently pretends a check passed.
 const skipCommerceChecks = process.env.PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS === '1';
+
+// Every run records which channels would carry an alert, by label only: a
+// webhook URL is a write credential and never reaches the journal.
+log('INFO', config.alertChannels.length === 0
+  ? 'alerting is log-only: no channel is configured'
+  : `alert channels configured: ${config.alertChannels.map((channel) => channel.label).join(', ')}`);
 
 function log(level, message) {
   const line = formatLogLine(level, message, new Date());
@@ -264,20 +270,16 @@ async function runChecks() {
   return results;
 }
 
-async function dispatchAlert(payload) {
-  if (!config.alertWebhook) {
-    log('WARN', 'alert webhook is not configured; alert recorded locally only');
-    return { dispatched: false, configured: false };
-  }
+async function deliverToChannel(channel, payload) {
   let request;
   try {
-    request = buildAlertRequest(config, payload);
+    request = buildAlertRequest({ provider: channel.provider, telegramChatId: config.telegramChatId }, payload);
   } catch (error) {
-    log('ERROR', `alert payload could not be built: ${error.message}`);
-    return { dispatched: false, configured: true };
+    log('ERROR', `alert channel ${channel.label} could not build a payload: ${error.message}`);
+    return false;
   }
   try {
-    const response = await fetch(config.alertWebhook, {
+    const response = await fetch(channel.url, {
       method: 'POST',
       signal: AbortSignal.timeout(config.timeoutMs),
       headers: request.headers,
@@ -286,16 +288,41 @@ async function dispatchAlert(payload) {
     // Chat providers answer HTTP 200 with an error code in the body, so the body
     // decides acceptance too. It is read once, never logged and never stored.
     const bodyText = await response.text().catch(() => '');
-    if (!alertDeliveryAccepted(config.alertProvider, response.status, bodyText)) {
-      log('ERROR', `alert webhook did not accept the payload (status ${response.status})`);
-      return { dispatched: false, configured: true };
+    if (!alertDeliveryAccepted(channel.provider, response.status, bodyText)) {
+      log('ERROR', `alert channel ${channel.label} did not accept the payload (status ${response.status})`);
+      return false;
     }
-    log('INFO', 'alert webhook accepted the payload');
-    return { dispatched: true, configured: true };
+    log('INFO', `alert channel ${channel.label} accepted the payload`);
+    return true;
   } catch (error) {
-    log('ERROR', `alert webhook delivery failed: ${error.name}`);
-    return { dispatched: false, configured: true };
+    log('ERROR', `alert channel ${channel.label} delivery failed: ${error.name}`);
+    return false;
   }
+}
+
+// Alerting is the one subsystem whose failure is silent, so it runs over every
+// configured channel: a revoked webhook, a deleted group or a vendor outage then
+// costs one channel instead of the alarm. A single acknowledgement means the
+// owner was notified; the channels that stayed quiet are named in the log so a
+// dead channel cannot hide behind a healthy one.
+async function dispatchAlert(payload) {
+  if (config.alertChannels.length === 0) {
+    log('WARN', 'no alert channel is configured; alert recorded locally only');
+    return { dispatched: false, configured: false, delivered: [], failed: [] };
+  }
+  const delivered = [];
+  const failed = [];
+  for (const channel of config.alertChannels) {
+    // Sequential on purpose: a burst of parallel posts to one provider can trip
+    // its rate limit and cost the channel that would have worked.
+    // eslint-disable-next-line no-await-in-loop
+    if (await deliverToChannel(channel, payload)) delivered.push(channel.label);
+    else failed.push(channel.label);
+  }
+  if (failed.length > 0) {
+    log('WARN', `alert reached ${delivered.length}/${config.alertChannels.length} channels; no acknowledgement from: ${failed.join(', ')}`);
+  }
+  return { dispatched: delivered.length > 0, configured: true, delivered, failed };
 }
 
 function readAlertState(stateFile) {
@@ -320,10 +347,10 @@ const dispatch = shouldDispatchAlert(previousState, summary, now, config.alertSu
 // "attempted" is what separates a suppressed alert from a broken one: a run that
 // deliberately stays quiet inside the suppression window must not report the
 // alerting path as broken.
-let dispatchResult = { attempted: false, dispatched: false, configured: Boolean(config.alertWebhook) };
+let dispatchResult = { attempted: false, dispatched: false, configured: config.alertChannels.length > 0, delivered: [], failed: [] };
 if (dispatch) {
   dispatchResult = { attempted: true, ...(await dispatchAlert(buildAlertPayload(summary, now, config.storefrontOrigin))) };
-} else if (config.alertWebhook) {
+} else if (config.alertChannels.length > 0) {
   log('INFO', 'alert suppressed by the repeat window; the failure is still recorded');
 }
 try {

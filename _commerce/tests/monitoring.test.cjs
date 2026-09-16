@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const {
-  ALERT_PROVIDERS, ALERT_TEXT_MAX_CHARS, EXIT_CODES, REQUIRED_SECURITY_HEADERS,
+  ALERT_ENVELOPE, ALERT_PROVIDERS, ALERT_TEXT_MAX_CHARS, EXIT_CODES, REQUIRED_SECURITY_HEADERS,
   adminRouteRequiresAuth, alertDeliveryAccepted, backupAgeHours, buildAlertPayload, buildAlertRequest,
   checkResult, daysUntilExpiry, feishuAccepted, formatAlertText, formatLogLine, missingSecurityHeaders,
   nextAlertState, redactUrl, shouldDispatchAlert, storeRouteIsClosed, summarize, telegramAccepted,
@@ -154,7 +154,15 @@ test('alert payloads are translated into each channel dialect', () => {
   assert.match(text, /https:\/\/pawlivora\.com/);
   assert.ok(text.length <= ALERT_TEXT_MAX_CHARS);
   const recovered = formatAlertText(buildAlertPayload(summarize([checkResult('disk_space', true)]), now, 'https://pawlivora.com'));
-  assert.match(recovered, /\[PawShop 恢复\]/);
+  // A recovery must survive any deliverability filter an alert survives: both open
+  // with the same envelope, so a keyword drawn from it matches both. Phrasing them
+  // differently drops exactly the all-clear message (measured: Feishu answered
+  // 19024 "Key Words Not Found" for a differently-phrased recovery while accepting
+  // the alert).
+  assert.ok(recovered.startsWith(ALERT_ENVELOPE), `recovery must open with the envelope: ${recovered.split('\n')[0]}`);
+  assert.ok(text.startsWith(ALERT_ENVELOPE));
+  assert.match(recovered, /已恢复/);
+  assert.doesNotMatch(recovered, /项检查失败/);
   assert.doesNotMatch(text, /secret|password|token|authorization|cookie/i);
   assert.throws(() => formatAlertText(null));
   assert.throws(() => buildAlertRequest(null, payload));
@@ -210,15 +218,75 @@ test('a chat channel that answers 200 with an error code counts as a failed deli
   assert.equal(telegramAccepted('{"ok":true}'), true);
   assert.equal(telegramAccepted('not json'), false);
 
-  // The runner must use the provider-aware request and acceptance contract.
-  assert.match(monitor, /buildAlertRequest\(config, payload\)/);
-  assert.match(monitor, /alertDeliveryAccepted\(config\.alertProvider, response\.status, bodyText\)/);
+  // The runner must build and accept the payload per channel, so a second
+  // channel never inherits the first one's dialect.
+  assert.match(monitor, /buildAlertRequest\(\{ provider: channel\.provider, telegramChatId: config\.telegramChatId \}, payload\)/);
+  assert.match(monitor, /alertDeliveryAccepted\(channel\.provider, response\.status, bodyText\)/);
+  assert.doesNotMatch(monitor, /alertDeliveryAccepted\(config\.alertProvider/);
   assert.doesNotMatch(monitor, /alert webhook rejected the payload with status/);
+  assert.match(monitor, /for \(const channel of config\.alertChannels\)/);
   // An alert deliberately held back by the repeat window is not a broken channel:
   // only an attempted delivery may report the alerting path as failed.
   assert.match(monitor, /const alertDeliveryFailed = dispatchResult\.attempted && !dispatchResult\.dispatched/);
   assert.doesNotMatch(monitor, /const alertDeliveryFailed = dispatchResult\.configured/);
   assert.match(monitor, /attempted: true, \.\.\.\(await dispatchAlert\(buildAlertPayload/);
+});
+
+test('alerting fans out over every configured channel and needs one acknowledgement', () => {
+  const base = {
+    PAWSHOP_MONITOR_STOREFRONT_ORIGIN: 'https://pawlivora.com',
+    PAWSHOP_MONITOR_COMMERCE_ORIGIN: 'http://127.0.0.1:9000',
+  };
+  const both = validateMonitoringConfig({
+    ...base,
+    PAWSHOP_MONITOR_ALERT_CHANNELS:
+      'feishu:https://open.feishu.cn/open-apis/bot/v2/hook/aaa, slack:https://hooks.slack.com/services/T/B/xxx',
+  });
+  assert.deepEqual(both.alertChannels.map((channel) => [channel.label, channel.provider]), [
+    ['feishu', 'feishu'],
+    ['slack', 'slack'],
+  ]);
+  // Two channels are not describable by the single-webhook field, so the legacy
+  // view must not silently report only one of them.
+  assert.equal(both.alertWebhook, null);
+  assert.equal(both.alertProvider, 'generic');
+
+  // A single channel still populates the legacy view, so nothing regresses for
+  // the one-channel configuration.
+  const single = validateMonitoringConfig({
+    ...base,
+    PAWSHOP_MONITOR_ALERT_CHANNELS: 'feishu:https://open.feishu.cn/open-apis/bot/v2/hook/aaa',
+  });
+  assert.equal(single.alertChannels.length, 1);
+  assert.equal(single.alertWebhook, 'https://open.feishu.cn/open-apis/bot/v2/hook/aaa');
+  assert.equal(single.alertProvider, 'feishu');
+
+  // Two groups on the same platform must stay distinguishable in the journal.
+  const duplicate = validateMonitoringConfig({
+    ...base,
+    PAWSHOP_MONITOR_ALERT_CHANNELS:
+      'feishu:https://open.feishu.cn/open-apis/bot/v2/hook/a,feishu:https://open.feishu.cn/open-apis/bot/v2/hook/b',
+  });
+  assert.deepEqual(duplicate.alertChannels.map((channel) => channel.label), ['feishu', 'feishu#2']);
+
+  // A second channel is only a safety net if it is declared and pinned correctly.
+  for (const mutation of [
+    { PAWSHOP_MONITOR_ALERT_CHANNELS: 'feishu:https://evil.example.com/open-apis/bot/v2/hook/a' },
+    { PAWSHOP_MONITOR_ALERT_CHANNELS: 'hooks.slack.com/services/T/B/x' },
+    { PAWSHOP_MONITOR_ALERT_CHANNELS: 'email:https://mail.example.com/x' },
+    { PAWSHOP_MONITOR_ALERT_CHANNELS: 'feishu:http://open.feishu.cn/open-apis/bot/v2/hook/a' },
+    { PAWSHOP_MONITOR_ALERT_CHANNELS: 'telegram:https://api.telegram.org/bot1:a/sendMessage' },
+    // Two competing declarations is an operator error, not something to merge.
+    {
+      PAWSHOP_MONITOR_ALERT_CHANNELS: 'slack:https://hooks.slack.com/services/T/B/x',
+      PAWSHOP_MONITOR_ALERT_WEBHOOK: 'https://hooks.slack.com/services/T/B/y',
+    },
+  ]) {
+    assert.throws(() => validateMonitoringConfig({ ...base, ...mutation }), undefined, JSON.stringify(mutation));
+  }
+
+  // Nothing configured is log-only, not a startup failure.
+  assert.deepEqual(validateMonitoringConfig(base).alertChannels, []);
 });
 
 test('monitor runner bounds every call and never logs secret material', () => {
@@ -229,7 +297,7 @@ test('monitor runner bounds every call and never logs secret material', () => {
   assert.doesNotMatch(monitor, /console\.log\(\s*(process\.env|config\.alertWebhook)/);
   assert.doesNotMatch(monitor, /JSON\.stringify\(process\.env\)/);
   assert.doesNotMatch(monitor, /authorization|cookie/i);
-  assert.match(monitor, /alert webhook is not configured; alert recorded locally only/);
+  assert.match(monitor, /no alert channel is configured; alert recorded locally only/);
   assert.match(monitor, /process\.exit\(EXIT_CODES\.healthy\)/);
   assert.match(monitor, /EXIT_CODES\.alertDeliveryFailed/);
   assert.match(monitor, /EXIT_CODES\.checksFailed/);
