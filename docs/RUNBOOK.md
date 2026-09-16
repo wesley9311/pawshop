@@ -244,7 +244,7 @@ journalctl -u pawshop-monitor.service -n 20 --no-pager -o cat | grep -E "alert w
 
 第 3 步要求日志出现 `alert webhook accepted the payload` **且**你在自己的频道里看到那条消息——两者缺一都不算通过（这就是"真实投递验证"）。如果日志是 `did not accept the payload (status 200)`，说明报文或通道类型不对，按 §9.3 表逐项核对。
 
-**Webhook URL 的安全交接**：URL 等同于一个写入凭据（拿到就能往你的频道发消息），所以**不要贴到聊天里**。交付方式二选一：① 由店主在服务器上交互式写入（用 `read -s` 或编辑器，避免进 shell 历史）；② 存到本地文件后由 Agent 读取并 `scp` 上去。写入后不要 `git add`、不要截图。
+**Webhook URL 的安全交接**：URL 等同于一个写入凭据（拿到就能往你的频道发消息），所以**不要贴到聊天里**，也**不需要店主交出任何账号**（账号权限远大于一条群机器人 URL，代价不成比例）。交付方式三选一：① 店主在本机复制到剪贴板后由 Agent 用 `pbpaste` 读取（读完清空剪贴板，URL 不落地）；② 存到 `~/.pawshop/alert-webhook.url` 后由 Agent 读取、`scp` 上去并删除本地文件；③ 店主自己在服务器上交互式写入（用 `read -s` 或编辑器，避免进 shell 历史）。写入后不要 `git add`、不要截图。详见 `docs/OWNER_ACTIONS_ZH.md` §1.4。
 
 ## 10. 主机侧安全缺口修复（生产主机，root）
 
