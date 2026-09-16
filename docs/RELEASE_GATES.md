@@ -19,7 +19,7 @@
 | ROLLBACK | **PASS（脚本级）/ UNVERIFIED（生产演练）** | 展示站：deploy-static.sh 内建失败回滚；commerce：rollback-commerce.sh 有 DB 兼容门禁+原子切换，但生产从未演练回滚 |
 | MONITORING | **PASS** | `pawshop-monitor` 已实现并验证：12 项检查、8 项新单测通过、真实冒烟运行（对 https://pawlivora.com + 本地运行时，10/12 ok）。告警通道为可选 HTTPS webhook，未配置时 fail-closed 本地告警。剩余：定时器需在生产主机安装（需 root） |
 | STAGING | **FAIL（不存在）** | 无 staging 环境；本地 dev 即最接近 production-like 的环境（回环 PG/Redis + admin-only 门禁） |
-| PRODUCTION_DEPLOY | **PASS（展示站）/ FAIL（commerce）** | 展示站线上可用，`verify:production` exit 0；**`verify:production:strict` 亦 PASS**（HSTS max-age 15552000s；www→apex 301）——两项主机侧缺口已于 2026-09-16 修复；commerce 生产部署未发生（Medusa 未激活） |
+| PRODUCTION_DEPLOY | **PASS（展示站）/ FAIL（commerce）** | 展示站线上可用，`verify:production` exit 0；**`verify:production:strict` 亦 PASS**（HSTS max-age 15552000s；www→apex 301）——两项主机侧缺口已于 2026-09-16 修复；**展示站已发布 release `a74aab3`**（原子切换 + 边界探测通过，上一 release `012666fc…` 保留可回滚），线上真实浏览器 0 CSP 违规；commerce 生产部署未发生（Medusa 未激活） |
 
 ## 风险登记
 
@@ -54,7 +54,7 @@
 ### RISK-6（P1，合规）：`privacy.html` 曾谎称使用第三方 CDN —— **已修复（第三轮）**
 - 事实：实际为自管主机 nginx + 同源资源，隐私声明却写"由第三方 CDN 托管"，属事实性错误。
 - 处置：改为可核实的准确表述（自管主机 + 同源资源），并如实披露 GitHub Pages 镜像面（含 `i.ibb.co`）。详见 `docs/ADVERSARIAL_REVIEW.md` AR-2。
-- 状态：**仓库已修复；上线上线发布后生效（见下方 DEPLOY 说明）**。
+- 状态：**已修复并已上线**（随展示站 release `a74aab3` 于 2026-09-16 发布）；线上 `privacy.html` 实测已为准确表述。
 
 ### RISK-7（P1，第二公开面）：陈旧 GitHub Pages 镜像仍在公开服务已被撤回的声明 —— **待店主决策**
 - 事实：`wesley9311.github.io/pawshop/` 由 `origin/main` 自动发布，其 `catalog.json` 仍是**已撤回**的旧数据（stock=100 / originalPrice=39.9 / availability=null），违反项目自身的 `check-security` 契约。
@@ -91,7 +91,7 @@
 4. 监控与告警落地（uptime、5xx、错误聚合、备份失败告警）。实现已完成，**定时器与告警 webhook 需在生产主机安装配置**。
 5. ~~RISK-1 数据漂移处置~~ —— **已于 2026-09-16 闭环**。
 6. ~~RISK-5（HSTS）与 RISK-8（www 规范化）处置~~ —— **均已于 2026-09-16 在生产主机执行并验证**；`verify:production:strict` 由 FAIL 转 PASS。
-7. ~~RISK-6（隐私声明事实性错误）~~ —— **已修复（第三轮；需随下一次展示站发布上线）**。
+7. ~~RISK-6（隐私声明事实性错误）~~ —— **已修复并已上线**（随 release `a74aab3` 发布）。
 8. 决策 RISK-7（陈旧 Pages 镜像公开服务已撤回声明）与 RISK-9（分支合流）。
 9. 支付服务商沙箱测试（成功/失败/退款/webhook/对账）。
 10. 物流、税务、退货地址、隐私条款、客服路由就绪。

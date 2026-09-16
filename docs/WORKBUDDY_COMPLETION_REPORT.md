@@ -39,6 +39,34 @@ verify:production:strict         -> PASS：HSTS max-age 15552000s; www redirects
 - `www` 用**同一 server 块内的 server 级 `if`**，未新增独立 server 块：改动最小、与 certbot 自生成模式一致（续期不被改写）、且 server 级 `if` 先于 location 匹配（门禁不被绕过）。
 - 已知小瑕疵（已接受）：`http://www` 需两跳（80 端口块属 certbot 托管行，未改动）；HTTPS 侧已是单跳。
 
+### 展示站发布（同一轮，2026-09-16）
+
+发现第三轮交付的 AR-1~AR-5（CSP 全页 / 隐私声明更正 / 软 404 / favicon）**只存在于仓库，尚未对访客生效**——线上仍是旧 release。故按 `docs/RUNBOOK.md` §3 执行了一次正式发布：
+
+| 步骤 | 内容 |
+| --- | --- |
+| 差异核对（发布前） | 逐文件 sha256 比对仓库@HEAD 与 `/srv/pawshop/current`：**将变更 7 个文件**（`index.html`、`privacy.html`、`product.html`、`shipping.html`、`returns.html`、`terms.html`、`assets/tailwind.css`）；**`catalog.json` 与 `PawShop.html` 完全一致 → 无商品/内容变更** |
+| 主机侧准备 | `/srv/pawshop/source` 上 `git fetch` → 检出 `a74aab3`（工作树干净，0 处改动） |
+| 发布 | `ops/deploy-static.sh`（git-archive 白名单打包 → 原子切换 `/srv/pawshop/current` → `nginx -t` → reload → 边界探测；失败自动回滚） |
+| 结果 | `DEPLOY_RC=0`；`Production release activated: a74aab3f…`；上一 release `012666fc…` **保留**（可一键回滚） |
+
+发布后线上实测：
+
+```
+/ /PawShop.html /product.html /shipping.html /returns.html /privacy.html /terms.html
+    -> 全部 200，且每页均含 CSP meta 与 favicon link
+/admin.html /dashboard.html /account.html   -> 404（路由门禁仍生效）
+真实浏览器（headless Chrome，仅访问线上）：
+    /                  -> 落到 PawShop.html，商品网格渲染（1199B）
+    /product.html?id=1 -> PDP 渲染（9644B），robots=index, follow
+    /product.html?id=999999 -> robots=noindex, follow（软 404 修复在线上生效）
+    CSP 违规 0、JS 错误 0（仅 3 个退役页的 404 网络条目，属预期）
+verify:production        -> PASS；verify:production:strict -> PASS
+监控：storefront_security_headers -> **ok**（发布前为失败项，AR-6 已转绿）
+```
+
+**回滚方式**：`ln -sfn /srv/pawshop/releases/012666fc798b503960bb1ac889906ff7d7604269 /srv/pawshop/current && systemctl reload nginx`。
+
 ### 第四轮未做的事
 
 - 未改 80 端口块（certbot 托管）——见上。
@@ -193,9 +221,9 @@ ROLLBACK:          PASS   展示站脚本内建回滚+验证通过；commerce �
 MONITORING:        PASS   12 项检查 + 8 项测试 + 真实冒烟；告警 webhook 可选、fail-closed；
                           生产定时器待安装（需 root）
 STAGING:           FAIL   无 staging 环境
-PRODUCTION_DEPLOY: PASS   展示站线上可用（verify:production exit 0）；
+PRODUCTION_DEPLOY: PASS   展示站已发布 release a74aab3（verify:production exit 0）；
                           verify:production:strict = PASS（AR-6/AR-7 已于第四轮在生产修复）；
-                          commerce 未部署（门禁未过）
+                          线上真实浏览器 0 CSP 违规；commerce 未部署（门禁未过）
 ```
 
 判定规则：无证据不 PASS；本地证据充分而生产侧未发生的，在行内注明范围，不冒充生产 PASS。
@@ -238,7 +266,10 @@ PRODUCTION_DEPLOY: PASS   展示站线上可用（verify:production exit 0）；
 
 ## DEPLOYED
 
-无（本轮不做生产部署。展示站维持既有线上版本并验证通过）。
+- **展示站**：已于 2026-09-16 发布 release `a74aab3`（第四轮）到生产 `/srv/pawshop/current`，原子切换 + `nginx -t` + reload + 边界探测全部通过；上一 release `012666fc798b503960bb1ac889906ff7d7604269` 保留，可一键回滚。
+- **主机配置**：`/etc/nginx/sites-available/pawshop` 于同日变更（HSTS + www→apex），备份 `/root/pawshop-nginx-pawshop.bak-20260916T070651Z`。
+- **未部署**：commerce 后端（Medusa 未激活，门禁未过）；未安装监控定时器（需 root 时人工确认）。
+- 早期轮次（第一/二/三轮）：无生产部署。
 
 ## UNVERIFIED（诚实清单）
 

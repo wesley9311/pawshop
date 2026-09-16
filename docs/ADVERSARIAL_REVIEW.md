@@ -60,6 +60,8 @@
 
 ## 4. 已修复项（AR-1 ~ AR-7）
 
+> **上线状态**：AR-1~AR-5 的修复已随展示站 release `a74aab3` 于 2026-09-16 正式发布到生产（`/srv/pawshop/current` 已切换，上一 release `012666fc…` 保留可回滚）。线上实测这 7 个页面均返回 200 且带 CSP 与 favicon，软 404 在真实浏览器中为 `noindex`，0 CSP 违规。AR-6/AR-7 属主机配置变更，亦已生效。详见 `docs/WORKBUDDY_COMPLETION_REPORT.md` 第四轮。
+
 ### AR-1（P1）CSP 仅覆盖 2 个页面 → 现覆盖全部 10 个页面
 
 - **证据（修复前）**：`check-security.mjs` 只对 `PawShop.html`、`product.html` 断言 CSP；`index.html`、`shipping.html`、`returns.html`、`privacy.html`、`terms.html` 及 3 个退役页均无 CSP。
@@ -324,6 +326,24 @@ curl -sI http://pawlivora.com/         -> 301 Location: https://pawlivora.com/
 https://pawlivora.com/admin.html       -> 404（路由门禁未被跳转绕过）
 ```
 
+展示站发布 **release `a74aab3`** 后（AR-1~AR-5 上线），再对**线上**跑真实浏览器与监控：
+
+```
+真实浏览器（headless Chrome，直接访问 https://pawlivora.com）：
+  /                        -> OK，落到 PawShop.html，商品网格渲染 1199B
+  /PawShop.html            -> OK，网格渲染
+  /product.html?id=1       -> OK，PDP 渲染 9644B，robots=index, follow
+  /product.html?id=999999  -> OK，robots=noindex, follow（软 404 修复在线上生效）
+  privacy/shipping/returns/terms -> OK
+  admin/dashboard/account  -> 404（线上按设计屏蔽；本地文件检查器记为 FAIL，属预期差异）
+  CSP 违规 0；JS 错误 0
+监控冒烟：storefront_security_headers -> ok（修复前为失败项）
+          storefront_https_redirect  -> ok（301 -> https://pawlivora.com/）
+          tls_certificate            -> ok（剩余 80 天）
+```
+
+发布前已逐文件 sha256 比对，确认**只变更 7 个文件**且 `catalog.json` 未变（无商品/内容变更）；上一 release `012666fc…` 保留，可一键回滚。
+
 ---
 
 ## 8. 本轮刻意未做的事（及原因）
@@ -331,7 +351,7 @@ https://pawlivora.com/admin.html       -> 404（路由门禁未被跳转绕过�
 1. **未改 80 端口块（certbot 托管行）**：`http://www` 因此保留两跳（`→ https://www → https://apex`）。HTTPS 侧已是单跳，故未为省一跳去改动 certbot 托管内容（详见 AR-7）。
 2. **未动 `main` 分支、未改 GitHub Pages 设置**：AR-8 涉及公开面的增删，属店主决策。
 3. **未重写 Git 历史**：AR-14 受明令禁止。
-4. **未添加 `sitemap.xml`**：其 URL 集合依赖 AR-7/AR-9 尚未做出的规范主机决策（见 AR-10）。
+4. **未添加 `sitemap.xml`**：AR-7 已完成（规范主机定为 apex），前置条件已满足；但 `scripts/production-probe.mjs` 断言 `/` 必须返回 200，故 AR-9 的首页交付方式需先定方案，再与 AR-10 一并处理（见 `docs/RUNBOOK.md` §10.3）。
 5. **未重构内联事件处理器**：AR-12 属 P2 重构，且当前无用户数据流，风险低。
 6. **未升级/降级依赖**：AR-15 上游无补丁；npm 建议的修复有害。
 7. **未做跨浏览器矩阵测试**：本轮用 headless Chrome 覆盖了功能与 CSP 正确性；Safari/Edge 与移动端视口仍未取得执行证据，门禁保持 FAIL 而非虚报 PASS。
@@ -348,3 +368,4 @@ https://pawlivora.com/admin.html       -> 404（路由门禁未被跳转绕过�
 | SEO | 新增软 404 修复与 favicon 修复；**`www`→apex 已规范化（AR-7）**；sitemap 与 canonical 待补（AR-10，前置条件已满足） |
 | HOST（新） | AR-6/AR-7 由"待主机侧修复"转为**已在生产执行并验证**；`verify:production:strict` 由 FAIL → **PASS** |
 | PRODUCTION_DEPLOY | 标准验证 PASS；严格验证 **PASS**（修复 2 项主机侧缺口后） |
+| DEPLOY（新） | AR-1~AR-5 由"仅仓库"转为**已发布到生产**（release `a74aab3`）；发布前逐文件哈希比对确认只动 7 个文件且 `catalog.json` 未变；线上真实浏览器 0 CSP 违规 |
