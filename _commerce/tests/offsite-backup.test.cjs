@@ -6,9 +6,10 @@ const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const {
-  MIN_LOCAL_AGE_MS, offsiteReceiptIsValid, remoteObjectKey, selectLocalPruneCandidates, validateOffsiteConfig,
+  MIN_LOCAL_AGE_MS, archivePeriod, archiveReceiptIsValid, offsiteReceiptIsValid, remoteObjectKey,
+  selectLocalPruneCandidates, validateOffsiteConfig,
 } = require('../scripts/offsite-backup-policy.cjs');
-const { backupReceiptHmac } = require('../scripts/backup-integrity.cjs');
+const { backupArchiveReceiptHmac, backupReceiptHmac } = require('../scripts/backup-integrity.cjs');
 const { assertVersioningEnabled, uploadAndReadBack } = require('../scripts/offsite-s3-client.cjs');
 
 const env = {
@@ -18,19 +19,54 @@ const env = {
   PAWSHOP_BACKUP_S3_FORCE_PATH_STYLE: '0',
   PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED: '1',
   PAWSHOP_BACKUP_S3_DELETE_DISABLED: '1',
-  PAWSHOP_BACKUP_S3_RETENTION_DAYS: '180',
+  PAWSHOP_BACKUP_S3_DAILY_RETENTION_DAYS: '90',
+  PAWSHOP_BACKUP_S3_MONTHLY_RETENTION_DAYS: '365',
+  PAWSHOP_BACKUP_S3_YEARLY_RETENTION_DAYS: '1095',
 };
 const credentials = { accessKeyId: 'fixture-access', secretAccessKey: 'fixture-secret-value' };
 
-test('offsite config requires HTTPS, versioning, no-delete credentials, and 90 day retention', () => {
-  assert.equal(validateOffsiteConfig(env, credentials).retentionDays, 180);
+test('offsite config requires HTTPS, versioning, no-delete credentials, and all retention tiers', () => {
+  assert.deepEqual(validateOffsiteConfig(env, credentials).retentionDays, { daily: 90, monthly: 365, yearly: 1095 });
   for (const mutation of [
     { PAWSHOP_BACKUP_S3_ENDPOINT: 'http://s3.example.invalid' },
     { PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED: '0' },
     { PAWSHOP_BACKUP_S3_DELETE_DISABLED: '0' },
-    { PAWSHOP_BACKUP_S3_RETENTION_DAYS: '30' },
+    { PAWSHOP_BACKUP_S3_DAILY_RETENTION_DAYS: '30' },
+    { PAWSHOP_BACKUP_S3_MONTHLY_RETENTION_DAYS: '364' },
+    { PAWSHOP_BACKUP_S3_YEARLY_RETENTION_DAYS: '1094' },
   ]) assert.throws(() => validateOffsiteConfig({ ...env, ...mutation }, credentials));
   assert.throws(() => remoteObjectKey('../escape.dump.enc'));
+});
+
+test('remote keys and archive periods are isolated by approved retention tier', () => {
+  const file = 'pawshop_production_20260908T000000000Z.dump.enc';
+  assert.equal(remoteObjectKey(file), `pawshop/database-backups/daily/${file}`);
+  assert.equal(remoteObjectKey(file, 'monthly', '2026-09'), `pawshop/database-backups/monthly/2026-09/${file}`);
+  assert.equal(remoteObjectKey(file, 'yearly', '2026'), `pawshop/database-backups/yearly/2026/${file}`);
+  assert.equal(archivePeriod('monthly', new Date('2026-09-15T00:00:00Z')), '2026-09');
+  assert.equal(archivePeriod('yearly', new Date('2026-09-15T00:00:00Z')), '2026');
+  assert.throws(() => remoteObjectKey(file, 'monthly', '2026-13'));
+  assert.throws(() => remoteObjectKey(file, 'daily', '2026-09'));
+});
+
+test('archive receipt binds tier, period, sizes, and exact remote versions', () => {
+  const backupKey = Buffer.alloc(32, 4);
+  const encryptedFile = 'pawshop_production_20260908T000000000Z.dump.enc';
+  const manifestFile = 'pawshop_production_20260908T000000000Z.manifest.json';
+  const core = {
+    schema: 'pawshop-offsite-archive-receipt-v1', archived_at: '2026-09-08T01:00:00.000Z',
+    archive_tier: 'monthly', archive_period: '2026-09', source_created_at: '2026-09-08T00:00:00.000Z',
+    manifest_file: manifestFile, encrypted_file: encryptedFile,
+    encrypted_sha256: 'a'.repeat(64), encrypted_size_bytes: 123,
+    manifest_sha256: 'b'.repeat(64), manifest_size_bytes: 456, bucket: 'pawshop-backups',
+    encrypted_object_key: remoteObjectKey(encryptedFile, 'monthly', '2026-09'), encrypted_version_id: 'enc-v1',
+    manifest_object_key: remoteObjectKey(manifestFile, 'monthly', '2026-09'), manifest_version_id: 'manifest-v1',
+  };
+  const receipt = { ...core, archive_receipt_hmac_sha256: backupArchiveReceiptHmac(core, backupKey) };
+  const input = { tier: 'monthly', period: '2026-09', bucket: core.bucket, backupKey };
+  assert.equal(archiveReceiptIsValid(receipt, input), true);
+  assert.equal(archiveReceiptIsValid({ ...receipt, encrypted_size_bytes: 124 }, input), false);
+  assert.equal(archiveReceiptIsValid(receipt, { ...input, period: '2026-10' }), false);
 });
 
 test('local pruning keeps seven newest, latest, young, and unverified backup sets', () => {

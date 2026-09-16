@@ -277,10 +277,11 @@ test('production owner credentials stay out of argv and service-readable files',
   assert.match(finalizer, /create-production-owner\.mjs/);
   assert.match(finalizer, /verify-production-owner-login\.mjs/);
   assert.match(finalizer, /run-production-admin-verification\.mjs/);
-  assert.match(finalizer, /systemctl enable pawshop-commerce\.service pawshop-backup\.timer/);
+  assert.match(finalizer, /timers=\(pawshop-backup\.timer pawshop-backup-monthly\.timer pawshop-backup-yearly\.timer\)/);
+  assert.match(finalizer, /systemctl enable pawshop-commerce\.service "\$\{timers\[@\]\}"/);
   assert.match(finalizer, /pawshop-commerce-deploy\.lock/);
   assert.match(finalizer, /rollback_enablement/);
   assert.match(finalizer, /CRITICAL: production admin persistence finalization failed/);
-  assert.match(finalizer, /systemctl is-enabled --quiet pawshop-backup\.timer && restored=0/);
+  assert.match(finalizer, /systemctl is-enabled --quiet "\$timer" && restored=0/);
   assert.match(finalizer, /Public customer registration, checkout, and payment remain closed/);
 });

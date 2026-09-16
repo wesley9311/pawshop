@@ -120,7 +120,9 @@ release_content_sha256=$(/usr/bin/node "$source_dir/_commerce/scripts/verify-rel
   "$source_dir" "$release_dir" "$PAWSHOP_RELEASE_ID" >/dev/null
 /usr/bin/node "$source_dir/_commerce/scripts/verify-release-evidence.mjs" \
   "$PAWSHOP_RELEASE_ID" "$release_content_sha256"
-for installed in pawshop-commerce.service pawshop-backup.service pawshop-backup.timer pawshop-restore-verify.service; do
+for installed in pawshop-commerce.service pawshop-backup.service pawshop-backup.timer \
+  pawshop-backup-monthly.service pawshop-backup-monthly.timer \
+  pawshop-backup-yearly.service pawshop-backup-yearly.timer pawshop-restore-verify.service; do
   cmp -s "$release_dir/ops/commerce/$installed" "/etc/systemd/system/$installed" || {
     echo 'Installed runtime units do not match the exact candidate release.' >&2
     exit 1

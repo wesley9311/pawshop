@@ -55,14 +55,19 @@ if [[ -e /srv/pawshop-commerce/current || -L /srv/pawshop-commerce/current ]]; t
   exit 1
 fi
 
-units=(pawshop-commerce.service pawshop-backup.service pawshop-backup.timer pawshop-restore-verify.service)
+units=(
+  pawshop-commerce.service pawshop-backup.service pawshop-backup.timer
+  pawshop-backup-monthly.service pawshop-backup-monthly.timer
+  pawshop-backup-yearly.service pawshop-backup-yearly.timer
+  pawshop-restore-verify.service
+)
 for unit in "${units[@]}"; do
   if systemctl is-active --quiet "$unit"; then
     echo "Refusing to install over an active PawShop unit: $unit" >&2
     exit 1
   fi
   enabled=$(systemctl is-enabled "$unit" 2>/dev/null || true)
-  if [[ $unit == pawshop-commerce.service || $unit == pawshop-backup.timer ]]; then
+  if [[ $unit == pawshop-commerce.service || $unit == *.timer ]]; then
     expected_enabled=disabled
   else
     expected_enabled=static
@@ -73,8 +78,8 @@ for unit in "${units[@]}"; do
   fi
 done
 
-for target in /etc/systemd/system/pawshop-commerce.service /etc/systemd/system/pawshop-backup.service \
-  /etc/systemd/system/pawshop-backup.timer /etc/systemd/system/pawshop-restore-verify.service; do
+for unit in "${units[@]}"; do
+  target="/etc/systemd/system/$unit"
   [[ ! -e $target && ! -L $target ]] || { echo "Existing runtime file requires operator review: $target" >&2; exit 1; }
 done
 if find /usr/local/libexec/pawshop -mindepth 1 -print -quit | grep -q .; then
@@ -94,7 +99,7 @@ systemctl daemon-reload
 for unit in "${units[@]}"; do
   systemctl is-active --quiet "$unit" && { echo "Dormant unit unexpectedly became active: $unit" >&2; exit 1; }
   enabled=$(systemctl is-enabled "$unit" 2>/dev/null || true)
-  if [[ $unit == pawshop-commerce.service || $unit == pawshop-backup.timer ]]; then
+  if [[ $unit == pawshop-commerce.service || $unit == *.timer ]]; then
     [[ $enabled == disabled ]] || { echo "Dormant unit has an unexpected enablement state: $unit" >&2; exit 1; }
   else
     [[ $enabled == static ]] || { echo "Dormant oneshot unit has an unexpected enablement state: $unit" >&2; exit 1; }

@@ -22,32 +22,39 @@ release=/srv/pawshop-commerce/releases/$release_id
 lock_file=/run/lock/pawshop-commerce-deploy.lock
 mutation_started=0
 was_service_enabled=0
-was_timer_enabled=0
-was_timer_active=0
+timers=(pawshop-backup.timer pawshop-backup-monthly.timer pawshop-backup-yearly.timer)
+declare -A was_timer_enabled=()
+declare -A was_timer_active=()
 exec 9>"$lock_file"
 flock -n 9 || { echo 'Another PawShop finalization operation is active.' >&2; exit 1; }
 
 systemctl is-enabled --quiet pawshop-commerce.service && was_service_enabled=1 || true
-systemctl is-enabled --quiet pawshop-backup.timer && was_timer_enabled=1 || true
-systemctl is-active --quiet pawshop-backup.timer && was_timer_active=1 || true
+for timer in "${timers[@]}"; do
+  was_timer_enabled[$timer]=0
+  was_timer_active[$timer]=0
+  systemctl is-enabled --quiet "$timer" && was_timer_enabled[$timer]=1 || true
+  systemctl is-active --quiet "$timer" && was_timer_active[$timer]=1 || true
+done
 rollback_enablement() {
   local status=$?
   local restored=1
   trap - ERR INT TERM
   set +e
   if [[ $mutation_started == 1 ]]; then
-    if [[ $was_timer_active == 1 ]]; then
-      systemctl is-active --quiet pawshop-backup.timer || restored=0
-    else
-      systemctl stop pawshop-backup.timer || restored=0
-      systemctl is-active --quiet pawshop-backup.timer && restored=0
-    fi
-    if [[ $was_timer_enabled == 1 ]]; then
-      systemctl is-enabled --quiet pawshop-backup.timer || restored=0
-    else
-      systemctl disable pawshop-backup.timer >/dev/null || restored=0
-      systemctl is-enabled --quiet pawshop-backup.timer && restored=0
-    fi
+    for timer in "${timers[@]}"; do
+      if [[ ${was_timer_active[$timer]} == 1 ]]; then
+        systemctl is-active --quiet "$timer" || restored=0
+      else
+        systemctl stop "$timer" || restored=0
+        systemctl is-active --quiet "$timer" && restored=0
+      fi
+      if [[ ${was_timer_enabled[$timer]} == 1 ]]; then
+        systemctl is-enabled --quiet "$timer" || restored=0
+      else
+        systemctl disable "$timer" >/dev/null || restored=0
+        systemctl is-enabled --quiet "$timer" && restored=0
+      fi
+    done
     if [[ $was_service_enabled == 1 ]]; then
       systemctl is-enabled --quiet pawshop-commerce.service || restored=0
     else
@@ -80,12 +87,14 @@ runuser -u pawshop -- env -i HOME=/var/lib/pawshop LANG=C.UTF-8 PATH=/usr/bin:/b
   exit 1
 }
 mutation_started=1
-systemctl enable pawshop-commerce.service pawshop-backup.timer >/dev/null
-systemctl start pawshop-backup.timer
+systemctl enable pawshop-commerce.service "${timers[@]}" >/dev/null
+systemctl start "${timers[@]}"
 systemctl is-enabled --quiet pawshop-commerce.service
-systemctl is-enabled --quiet pawshop-backup.timer
 systemctl is-active --quiet pawshop-commerce.service
-systemctl is-active --quiet pawshop-backup.timer
+for timer in "${timers[@]}"; do
+  systemctl is-enabled --quiet "$timer"
+  systemctl is-active --quiet "$timer"
+done
 trap - ERR INT TERM
-echo 'Production admin is persistent and verified; daily encrypted offsite backups are scheduled.'
+echo 'Production admin is persistent and verified; daily, monthly, and yearly encrypted offsite backups are scheduled.'
 echo 'Public customer registration, checkout, and payment remain closed.'

@@ -70,7 +70,9 @@ npm --prefix _commerce run restore:verify-real
 - `pawshop-commerce.service`：以无特权 `pawshop` 用户运行，只允许写入指定
   运行目录，并明确屏蔽备份目录和备份密钥，启动后必须通过生产身份、回环监听与关闭交易探测；
 - `pawshop-backup.service`：以独立的 `pawshop-backup` 账号运行加密 PostgreSQL 备份；
-- `pawshop-backup.timer`：每天执行一次并补跑错过的计划任务。
+- `pawshop-backup.timer`：每天执行一次并补跑错过的计划任务；
+- `pawshop-backup-monthly.timer`：每月归档最近一份已验证密文，并补跑错过的月份任务；
+- `pawshop-backup-yearly.timer`：每年归档最近一份已验证密文，并补跑错过的年度任务。
 - `pawshop-restore-verify.service`：仅由管理员手动启动，以独立无特权账号和
   独立临时 PostgreSQL 集群验证 root 暂存的备份副本，绝不连接生产数据库。
 
@@ -145,15 +147,20 @@ sudo systemctl status pawshop-restore-verify.service --no-pager
 扫描或删除任何现有数据库。验证完成后，root 还必须删除只读暂存目录中的密钥
 副本、manifest 和密文副本。
 
-## 异地备份与本地保留策略（尚未启用）
+## 异地分层备份与本地保留策略（尚未在生产启用）
 
 每日生产备份成功后，`pawshop-backup.service` 调用异地同步程序。它只上传
 已经在本机加密的数据库密文及经过 HMAC 认证的 manifest，绝不上传
-`backup.key`。对象键固定在 `pawshop/database-backups/`，运行代码中不存在
+`backup.key`。每日对象键固定在 `pawshop/database-backups/daily/`。每月与年度任务
+不再执行数据库导出，而是复用最近一次已认证的加密日备份，分别写入
+`pawshop/database-backups/monthly/YYYY-MM/` 与
+`pawshop/database-backups/yearly/YYYY/`。每个周期有一份 HMAC 签名凭证，补跑或
+人工重试时只核验记录的精确版本，不重复归档。运行代码中不存在
 远程删除 API。
 
-异地桶上线前必须同时满足：开启版本控制；生命周期保留不少于 90 天（首发
-建议 180 天）；上传凭证明确没有删除对象、删除版本、修改生命周期或修改桶
+异地桶上线前必须同时满足：开启版本控制；生命周期按前缀分别设置每日 90 天、
+月度 365 天、年度 1095 天，且不得存在覆盖整个 Bucket 的 90 天规则；上传凭证明
+确没有删除对象、删除版本、修改生命周期或修改桶
 策略的权限；服务端默认加密已开启。上述生命周期与禁删权限属于上线前人工证据门槛，
 不能只凭环境变量声明。访问密钥和秘密密钥分别存放在 root-only
 的 `/etc/pawshop-backup/backup-s3-access-key` 与
@@ -173,7 +180,7 @@ SHA-256，然后为密文和 manifest 记录版本 ID 与带 HMAC 的本地收�
 顺序为收据、manifest、密文，避免中断后留下一个看似完整但实际缺密文的套件。
 远端保留由桶生命周期控制，PawShop 运行凭证没有删除权限。
 
-同步脚本使用排他锁；不得绕过 systemd 并发直接运行。断电或强制终止可能保留锁，
+每日同步、月度归档和年度归档共用排他锁；不得绕过 systemd 并发直接运行。断电或强制终止可能保留锁，
 此时后续运行会硬性失败，管理员应先确认没有同步进程并保留故障证据，再人工移除锁。
 
 ## 后台中英文切换

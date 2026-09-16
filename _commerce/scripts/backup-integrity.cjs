@@ -80,6 +80,28 @@ function backupReceiptHmac(receipt, key) {
   return createHmac('sha256', key).update(JSON.stringify(authenticated)).digest('hex');
 }
 
+function backupArchiveReceiptHmac(receipt, key) {
+  const authenticated = {
+    schema: receipt.schema,
+    archived_at: receipt.archived_at,
+    archive_tier: receipt.archive_tier,
+    archive_period: receipt.archive_period,
+    source_created_at: receipt.source_created_at,
+    manifest_file: receipt.manifest_file,
+    encrypted_file: receipt.encrypted_file,
+    encrypted_sha256: receipt.encrypted_sha256,
+    encrypted_size_bytes: receipt.encrypted_size_bytes,
+    manifest_sha256: receipt.manifest_sha256,
+    manifest_size_bytes: receipt.manifest_size_bytes,
+    bucket: receipt.bucket,
+    encrypted_object_key: receipt.encrypted_object_key,
+    encrypted_version_id: receipt.encrypted_version_id,
+    manifest_object_key: receipt.manifest_object_key,
+    manifest_version_id: receipt.manifest_version_id,
+  };
+  return createHmac('sha256', key).update(JSON.stringify(authenticated)).digest('hex');
+}
+
 function assertProductionBackupManifest(manifest, manifestFileName) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) ||
       Object.keys(manifest).sort().join('\0') !== productionManifestFields.join('\0') ||
@@ -111,6 +133,7 @@ function constrainedBackupPath(backupDir, candidate, label) {
 
 module.exports = {
   assertProductionBackupManifest,
+  backupArchiveReceiptHmac,
   backupManifestHmac,
   backupReceiptHmac,
   constrainedBackupPath,

@@ -1,0 +1,11 @@
+[Unit]
+Description=Archive PawShop encrypted backup monthly
+
+[Timer]
+OnCalendar=*-*-01 04:20:00 UTC
+RandomizedDelaySec=20m
+Persistent=true
+Unit=pawshop-backup-monthly.service
+
+[Install]
+WantedBy=timers.target

@@ -180,6 +180,17 @@ None of these units have been installed or enabled on the undersized live server
 - Local pruning keeps at least seven sets and never removes the latest, young, or
   remotely unverified set. Remote retention remains controlled by the bucket owner.
 
+## Tiered offsite retention implementation — 2026-09-15
+
+- Split encrypted objects into `daily/`, `monthly/YYYY-MM/`, and `yearly/YYYY/`
+  prefixes so a short daily lifecycle cannot erase long-term recovery points.
+- Added persistent monthly and yearly systemd timers. They reuse the latest
+  authenticated encrypted daily backup instead of running extra database dumps.
+- Added HMAC-authenticated per-period receipts and exact-version OSS checks, making
+  retries idempotent while keeping all remote delete APIs out of runtime credentials.
+- The reviewed minimums are 90, 365, and 1095 days. Cloud lifecycle submission and
+  production installation still require separate live evidence and confirmation.
+
 The next implementation step is atomic release activation and rollback. Real S3
 upload/read-back/delete-denial evidence still requires an owner-created bucket and
 least-privilege credentials; no external account or data was used in this round.

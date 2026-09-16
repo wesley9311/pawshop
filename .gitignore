@@ -11,3 +11,4 @@ _commerce/.env*
 _commerce/uploads/
 _commerce/static/
 _commerce/*.log
+.workbuddy/

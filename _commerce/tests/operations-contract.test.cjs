@@ -15,9 +15,14 @@ const productionBackup = readFileSync(resolve(root, 'scripts/backup-production.m
 const productionRestore = readFileSync(resolve(root, 'scripts/restore-verify-production.mjs'), 'utf8');
 const productionWait = readFileSync(resolve(root, 'scripts/wait-production-admin.mjs'), 'utf8');
 const offsiteSync = readFileSync(resolve(root, 'scripts/sync-production-backups.mjs'), 'utf8');
+const archiveBackup = readFileSync(resolve(root, 'scripts/archive-production-backup.mjs'), 'utf8');
 const offsiteClient = readFileSync(resolve(root, 'scripts/offsite-s3-client.cjs'), 'utf8');
 const commerceService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-commerce.service'), 'utf8');
 const backupService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup.service'), 'utf8');
+const monthlyBackupService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup-monthly.service'), 'utf8');
+const yearlyBackupService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup-yearly.service'), 'utf8');
+const monthlyBackupTimer = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup-monthly.timer'), 'utf8');
+const yearlyBackupTimer = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup-yearly.timer'), 'utf8');
 const restoreService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-restore-verify.service'), 'utf8');
 const hostBootstrap = readFileSync(resolve(root, '..', 'ops/commerce/bootstrap-ubuntu-host.sh'), 'utf8');
 const identityProvisioner = readFileSync(resolve(root, '..', 'ops/commerce/provision-production-identities.sh'), 'utf8');
@@ -230,6 +235,32 @@ test('offsite sync is versioned, read-back verified, credential isolated, and ne
   assert.match(backupService, /^LoadCredential=backup-s3-secret-key:/m);
   assert.match(backupService, /ExecStartPost=.*sync-production-backups\.mjs/);
   assert.doesNotMatch(backupService, /BACKUP_S3_ACCESS_KEY|BACKUP_S3_SECRET/);
+});
+
+test('monthly and yearly archives reuse authenticated encrypted backups and are persistent', () => {
+  assert.match(archiveBackup, /assertProductionBackupManifest/);
+  assert.match(archiveBackup, /backupManifestHmac/);
+  assert.match(archiveBackup, /backupArchiveReceiptHmac/);
+  assert.match(archiveBackup, /archiveReceiptIsValid/);
+  assert.match(archiveBackup, /headRemoteObject/);
+  assert.match(archiveBackup, /\.offsite-sync\.lock/);
+  assert.doesNotMatch(archiveBackup, /pg_dump|DeleteObject|DeleteObjects/);
+  for (const service of [monthlyBackupService, yearlyBackupService]) {
+    assert.match(service, /^User=pawshop-backup$/m);
+    assert.match(service, /^LoadCredential=backup-s3-access-key:/m);
+    assert.match(service, /^LoadCredential=backup-s3-secret-key:/m);
+    assert.match(service, /archive-production-backup\.mjs/);
+    assert.match(service, /^NoNewPrivileges=true$/m);
+    assert.match(service, /^CapabilityBoundingSet=$/m);
+  }
+  assert.match(monthlyBackupService, /^Environment=PAWSHOP_BACKUP_ARCHIVE_TIER=monthly$/m);
+  assert.match(yearlyBackupService, /^Environment=PAWSHOP_BACKUP_ARCHIVE_TIER=yearly$/m);
+  assert.match(monthlyBackupService, /^Requires=pawshop-backup\.service$/m);
+  assert.match(yearlyBackupService, /^Requires=pawshop-backup-monthly\.service$/m);
+  assert.match(archiveBackup, /latest encrypted backup does not belong to the current/);
+  assert.match(monthlyBackupTimer, /^OnCalendar=\*-\*-01 04:20:00 UTC$/m);
+  assert.match(yearlyBackupTimer, /^OnCalendar=\*-01-01 05:20:00 UTC$/m);
+  for (const timer of [monthlyBackupTimer, yearlyBackupTimer]) assert.match(timer, /^Persistent=true$/m);
 });
 
 test('production environment provisioning is atomic, exact, and activation-free', () => {
