@@ -128,7 +128,7 @@ for installed in pawshop-commerce.service pawshop-backup.service pawshop-backup.
     exit 1
   }
 done
-for installed in restore-verify-production.mjs backup-integrity.cjs; do
+for installed in restore-verify-production.mjs backup-integrity.cjs monitor-production.mjs monitoring-policy.cjs; do
   cmp -s "$release_dir/_commerce/scripts/$installed" "/usr/local/libexec/pawshop/$installed" || {
     echo 'Installed libexec files do not match the exact candidate release.' >&2
     exit 1

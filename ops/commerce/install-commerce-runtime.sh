@@ -91,7 +91,7 @@ for unit in "${units[@]}"; do
   install -o root -g root -m 0644 "$release/ops/commerce/$unit" "/etc/systemd/system/$unit"
   cmp -s "$release/ops/commerce/$unit" "/etc/systemd/system/$unit"
 done
-for script in restore-verify-production.mjs backup-integrity.cjs; do
+for script in restore-verify-production.mjs backup-integrity.cjs monitor-production.mjs monitoring-policy.cjs; do
   install -o root -g root -m 0555 "$release/_commerce/scripts/$script" "/usr/local/libexec/pawshop/$script"
   cmp -s "$release/_commerce/scripts/$script" "/usr/local/libexec/pawshop/$script"
 done

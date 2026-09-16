@@ -26,6 +26,12 @@ const now = new Date();
 const config = validateMonitoringConfig(process.env);
 const logLines = [];
 
+// The commerce runtime does not exist until the first commerce release is
+// activated, so probing it before then would report a permanent outage. The
+// skip is opt-in, is announced in the log on every run, and must be removed when
+// commerce goes live; monitoring never silently pretends a check passed.
+const skipCommerceChecks = process.env.PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS === '1';
+
 function log(level, message) {
   const line = formatLogLine(level, message, new Date());
   logLines.push(line);
@@ -148,40 +154,47 @@ async function runChecks() {
     expiryDays === null ? {} : { days_remaining: expiryDays },
   ));
 
-  try {
-    const response = await timedFetch(`${config.commerceOrigin}/health`);
-    results.push(checkResult(
-      'commerce_health',
-      response.status === 200,
-      `commerce health returned ${response.status}`,
-      { status: response.status, latency_ms: response.latencyMs },
-    ));
-  } catch (error) {
-    results.push(checkResult('commerce_health', false, `commerce health unreachable: ${error.name}`));
-  }
+  if (skipCommerceChecks) {
+    log('WARN', 'commerce checks are skipped by explicit configuration; unset PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS once a commerce release is active');
+    for (const name of ['commerce_health', 'store_api_closed', 'admin_requires_auth']) {
+      results.push(checkResult(name, true, 'commerce checks skipped by explicit configuration'));
+    }
+  } else {
+    try {
+      const response = await timedFetch(`${config.commerceOrigin}/health`);
+      results.push(checkResult(
+        'commerce_health',
+        response.status === 200,
+        `commerce health returned ${response.status}`,
+        { status: response.status, latency_ms: response.latencyMs },
+      ));
+    } catch (error) {
+      results.push(checkResult('commerce_health', false, `commerce health unreachable: ${error.name}`));
+    }
 
-  try {
-    const response = await timedFetch(`${config.commerceOrigin}/store/products`, { headers: { 'user-agent': 'pawshop-monitor/1', 'x-publishable-api-key': 'monitor-probe' } });
-    results.push(checkResult(
-      'store_api_closed',
-      storeRouteIsClosed(response.status),
-      `store route answered ${response.status}`,
-      { status: response.status },
-    ));
-  } catch (error) {
-    results.push(checkResult('store_api_closed', false, `store route probe failed: ${error.name}`));
-  }
+    try {
+      const response = await timedFetch(`${config.commerceOrigin}/store/products`, { headers: { 'user-agent': 'pawshop-monitor/1', 'x-publishable-api-key': 'monitor-probe' } });
+      results.push(checkResult(
+        'store_api_closed',
+        storeRouteIsClosed(response.status),
+        `store route answered ${response.status}`,
+        { status: response.status },
+      ));
+    } catch (error) {
+      results.push(checkResult('store_api_closed', false, `store route probe failed: ${error.name}`));
+    }
 
-  try {
-    const response = await timedFetch(`${config.commerceOrigin}/admin/products`);
-    results.push(checkResult(
-      'admin_requires_auth',
-      adminRouteRequiresAuth(response.status),
-      `unauthenticated admin request answered ${response.status}`,
-      { status: response.status },
-    ));
-  } catch (error) {
-    results.push(checkResult('admin_requires_auth', false, `admin auth probe failed: ${error.name}`));
+    try {
+      const response = await timedFetch(`${config.commerceOrigin}/admin/products`);
+      results.push(checkResult(
+        'admin_requires_auth',
+        adminRouteRequiresAuth(response.status),
+        `unauthenticated admin request answered ${response.status}`,
+        { status: response.status },
+      ));
+    } catch (error) {
+      results.push(checkResult('admin_requires_auth', false, `admin auth probe failed: ${error.name}`));
+    }
   }
 
   const databaseReachable = await tcpProbe(config.databaseHost, config.databasePort);

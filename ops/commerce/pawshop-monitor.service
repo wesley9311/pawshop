@@ -7,9 +7,12 @@ Wants=network-online.target
 Type=oneshot
 User=pawshop
 Group=pawshop
-WorkingDirectory=/srv/pawshop-commerce/current/_commerce
+# The storefront monitor must run before the first commerce release exists, so it
+# is deliberately independent of the commerce release tree. It is installed into
+# the fixed libexec directory alongside the other release-independent scripts.
+WorkingDirectory=/usr/local/libexec/pawshop
 EnvironmentFile=/etc/pawshop-monitor/monitoring.env
-ExecStart=/usr/bin/node scripts/monitor-production.mjs
+ExecStart=/usr/bin/node /usr/local/libexec/pawshop/monitor-production.mjs
 TimeoutStartSec=2min
 UMask=0077
 NoNewPrivileges=true

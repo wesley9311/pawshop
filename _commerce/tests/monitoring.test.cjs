@@ -145,6 +145,19 @@ test('monitor runner bounds every call and never logs secret material', () => {
   assert.match(monitor, /redis_connectivity/);
 });
 
+test('commerce checks are skippable only by explicit configuration', () => {
+  // The flag must be an exact literal comparison, not a truthy check.
+  assert.match(monitor, /process\.env\.PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS === '1'/);
+  assert.match(monitor, /commerce checks skipped by explicit configuration/);
+  // A skip must be announced on every run so it is never mistaken for a verified
+  // commerce path.
+  assert.match(monitor, /log\('WARN', 'commerce checks are skipped by explicit configuration/);
+  // The real checks must still exist for when the skip is removed.
+  assert.match(monitor, /commerce health unreachable/);
+  assert.match(monitor, /store route probe failed/);
+  assert.match(monitor, /admin auth probe failed/);
+});
+
 test('monitor units are hardened, non-privileged, and read a non-secret config', () => {
   assert.match(monitorService, /^User=pawshop$/m);
   assert.match(monitorService, /^Type=oneshot$/m);
@@ -154,8 +167,13 @@ test('monitor units are hardened, non-privileged, and read a non-secret config',
   assert.match(monitorService, /CapabilityBoundingSet=$/m);
   assert.match(monitorService, /PrivateTmp=true/);
   assert.match(monitorService, /EnvironmentFile=\/etc\/pawshop-monitor\/monitoring\.env/);
-  assert.match(monitorService, /ExecStart=\/usr\/bin\/node scripts\/monitor-production\.mjs/);
+  assert.match(monitorService, /^WorkingDirectory=\/usr\/local\/libexec\/pawshop$/m);
+  assert.match(monitorService, /ExecStart=\/usr\/bin\/node \/usr\/local\/libexec\/pawshop\/monitor-production\.mjs/);
   assert.doesNotMatch(monitorService, /LoadCredential/);
+  // Storefront monitoring must not depend on an activated commerce release: it is
+  // the safety net that should exist before commerce is switched on.
+  assert.doesNotMatch(monitorService, /srv\/pawshop-commerce/);
+  assert.match(monitorEnvExample, /PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS=1/);
   assert.match(monitorTimer, /^OnCalendar=\*:0\/5$/m);
   assert.match(monitorTimer, /^Persistent=true$/m);
   assert.match(monitorEnvExample, /PAWSHOP_MONITOR_STOREFRONT_ORIGIN=https:\/\//);
