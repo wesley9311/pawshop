@@ -1,6 +1,26 @@
 import { readFile } from 'node:fs/promises';
 
-const publicFiles = ['PawShop.html', 'product.html', 'account.html', 'admin.html', 'dashboard.html', 'config.js', 'support.js'];
+// Pages published by ops/deploy-static.sh (public_paths). Keep this list in
+// sync with that manifest: these are the HTML files that reach the production
+// origin.
+const deployedPages = [
+  'index.html',
+  'PawShop.html',
+  'product.html',
+  'shipping.html',
+  'returns.html',
+  'privacy.html',
+  'terms.html',
+];
+
+// Retired pages. They are deliberately excluded from the production release
+// (they must return 404 there) but they are still tracked, so they are scanned
+// as well: the GitHub Pages mirror of this repository serves them publicly.
+const legacyPages = ['account.html', 'admin.html', 'dashboard.html'];
+
+const allPages = [...deployedPages, ...legacyPages];
+const publicFiles = [...allPages, 'config.js', 'support.js'];
+
 const forbidden = [
   ['published demo password', /pawshop2026/i],
   ['browser GitHub token', /pawshop_github_token|github_pat_/i],

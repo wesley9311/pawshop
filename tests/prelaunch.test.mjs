@@ -12,6 +12,8 @@ function boot(file, saved = []) {
   const nodes = new Map();
   const storage = new Map([['pawshop_cart', JSON.stringify(saved)]]);
   const calls = [];
+  // Mirrors the static <meta name="robots" content="index, follow"> in the page.
+  const robots = { content: 'index, follow' };
   let resolveCatalog;
   let rejectCatalog;
   const response = new Promise((resolve, reject) => { resolveCatalog = resolve; rejectCatalog = reject; });
@@ -25,7 +27,9 @@ function boot(file, saved = []) {
         if (!nodes.has(id)) nodes.set(id, { innerHTML: '', textContent: '', value: '', style: {}, classList: { add() {}, remove() {}, toggle() {} } });
         return nodes.get(id);
       },
-      querySelectorAll: () => [], querySelector: () => null, addEventListener() {},
+      querySelectorAll: () => [],
+      querySelector: selector => (selector === 'meta[name="robots"]' ? robots : null),
+      addEventListener() {},
     },
     addEventListener() {}, setTimeout() {}, clearTimeout() {},
     fetch(url, options) { calls.push({ url, options }); return response; },
@@ -35,7 +39,7 @@ function boot(file, saved = []) {
   const source = read(file);
   for (const match of source.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) vm.runInContext(match[1], context);
   return {
-    context, nodes, storage, calls, source,
+    context, nodes, storage, calls, source, robots,
     run: code => vm.runInContext(code, context),
     async load(data) { resolveCatalog({ ok: true, json: async () => data }); await new Promise(setImmediate); },
     async fail() { rejectCatalog(new Error('offline')); await new Promise(setImmediate); },
@@ -87,6 +91,26 @@ for (const page of ['PawShop.html', 'product.html']) {
     assert.ok(app.nodes.get(id).innerHTML.includes('temporarily unavailable'));
   });
 }
+
+test('product.html keeps unknown product URLs out of the index', async () => {
+  // The catalog loaded, but no product matches ?id=1: a soft 404 was rendered,
+  // so the page must declare itself non-indexable.
+  const missing = boot('product.html');
+  await missing.load([]);
+  assert.equal(missing.robots.content, 'noindex, follow');
+  assert.equal(missing.context.document.title, 'Product not found - PawShop');
+
+  // A real product keeps the page indexable.
+  const found = boot('product.html');
+  await found.load([product]);
+  assert.equal(found.robots.content, 'index, follow');
+  assert.equal(found.context.document.title, 'PawShop - Preview lounger');
+
+  // A failed catalog fetch must not de-index an otherwise valid product page.
+  const offline = boot('product.html');
+  await offline.fail();
+  assert.equal(offline.robots.content, 'index, follow');
+});
 
 test('safe helpers reject malformed catalog fields and dangerous URL schemes', () => {
   const { context } = boot('PawShop.html');

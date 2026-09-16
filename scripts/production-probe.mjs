@@ -3,6 +3,7 @@ import https from 'node:https';
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_BODY_BYTES = 1_048_576;
+const DEFAULT_MIN_HSTS_MAX_AGE = 15_552_000; // 180 days
 
 function normalizedOrigin(value, protocol, label) {
   let url;
@@ -60,7 +61,28 @@ function expectStatus(result, expected, label) {
   if (result.status !== expected) throw new Error(`${label} returned ${result.status}; expected ${expected}.`);
 }
 
-export async function verifyProduction({ httpsOrigin, httpOrigin, request = requestOnce }) {
+// Parses the max-age directive of a Strict-Transport-Security header. Returns
+// null when the header is absent or carries no usable max-age.
+export function hstsMaxAge(headers = {}) {
+  const raw = headers['strict-transport-security'];
+  if (typeof raw !== 'string') return null;
+  const match = /(?:^|;)\s*max-age\s*=\s*"?(\d+)"?/i.exec(raw);
+  return match ? Number(match[1]) : null;
+}
+
+// The canonical host is the bare domain; the www host must redirect to it,
+// otherwise the same content is served from two hostnames (duplicate content).
+export function wwwOrigin(httpsOrigin) {
+  return `https://www.${new URL(httpsOrigin).hostname}`;
+}
+
+export async function verifyProduction({
+  httpsOrigin,
+  httpOrigin,
+  request = requestOnce,
+  strict = false,
+  minHstsMaxAge = DEFAULT_MIN_HSTS_MAX_AGE,
+}) {
   const secure = normalizedOrigin(httpsOrigin, 'https', 'HTTPS origin');
   const insecure = normalizedOrigin(httpOrigin, 'http', 'HTTP origin');
   if (new URL(secure).hostname !== new URL(insecure).hostname) {
@@ -108,5 +130,23 @@ export async function verifyProduction({ httpsOrigin, httpOrigin, request = requ
     expectStatus(result, 404, `Sensitive route /${path}`);
   }
 
-  return { productCount: products.length };
+  if (!strict) return { productCount: products.length };
+
+  const maxAge = hstsMaxAge(home.headers);
+  if (maxAge === null) {
+    throw new Error('HTTPS root is missing a Strict-Transport-Security max-age directive.');
+  }
+  if (maxAge < minHstsMaxAge) {
+    throw new Error(`Strict-Transport-Security max-age ${maxAge} is below the required ${minHstsMaxAge}.`);
+  }
+
+  const www = await request(`${wwwOrigin(secure)}/`);
+  if (![301, 308].includes(www.status)) {
+    throw new Error(`www host returned ${www.status}; expected 301 or 308.`);
+  }
+  if (www.headers.location !== `${secure}/`) {
+    throw new Error('www host did not redirect to the exact HTTPS apex origin.');
+  }
+
+  return { productCount: products.length, hstsMaxAge: maxAge, wwwRedirects: true };
 }

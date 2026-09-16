@@ -19,7 +19,7 @@
 | ROLLBACK | **PASS（脚本级）/ UNVERIFIED（生产演练）** | 展示站：deploy-static.sh 内建失败回滚；commerce：rollback-commerce.sh 有 DB 兼容门禁+原子切换，但生产从未演练回滚 |
 | MONITORING | **PASS** | `pawshop-monitor` 已实现并验证：12 项检查、8 项新单测通过、真实冒烟运行（对 https://pawlivora.com + 本地运行时，10/12 ok）。告警通道为可选 HTTPS webhook，未配置时 fail-closed 本地告警。剩余：定时器需在生产主机安装（需 root） |
 | STAGING | **FAIL（不存在）** | 无 staging 环境；本地 dev 即最接近 production-like 的环境（回环 PG/Redis + admin-only 门禁） |
-| PRODUCTION_DEPLOY | **PASS（展示站）/ FAIL（commerce）** | 展示站线上可用且验证通过；commerce 生产部署未发生（Medusa 未激活） |
+| PRODUCTION_DEPLOY | **PASS（展示站）/ FAIL（commerce）** | 展示站线上可用，`verify:production` exit 0；**新增 `verify:production:strict` 检出两项主机侧缺口（HSTS、www 规范化）**，修好后应转 PASS；commerce 生产部署未发生（Medusa 未激活） |
 
 ## 风险登记
 
@@ -57,8 +57,10 @@
 1. 生产 commerce 激活链完成并留证（迁移→首加密备份→OSS 回读→隔离恢复→店主登录验收）。
 2. Redis ACL 专用凭据门禁完成。
 3. 备份 RAM 最小权限用户创建 + 三条 OSS 生命周期规则提交（只匹配各自前缀，禁止全桶 90 天规则）。
-4. 监控与告警落地（uptime、5xx、错误聚合、备份失败告警）。
-5. RISK-1 数据漂移处置。
-6. 支付服务商沙箱测试（成功/失败/退款/webhook/对账）。
-7. 物流、税务、退货地址、隐私条款、客服路由就绪。
-8. Store/Customer API 开放需单独批准（当前无条件 503 是代码级门禁）。
+4. 监控与告警落地（uptime、5xx、错误聚合、备份失败告警）。实现已完成，**定时器与告警 webhook 需在生产主机安装配置**。
+5. ~~RISK-1 数据漂移处置~~ —— **已于 2026-09-16 闭环**。
+6. 处置 RISK-5（HSTS）与 RISK-8（www 规范化）——均为主机侧一行/一块配置，命令已备。
+7. 决策 RISK-7（陈旧 Pages 镜像公开服务未验证的折扣声明）。
+8. 支付服务商沙箱测试（成功/失败/退款/webhook/对账）。
+9. 物流、税务、退货地址、隐私条款、客服路由就绪。
+10. Store/Customer API 开放需单独批准（当前无条件 503 是代码级门禁）。

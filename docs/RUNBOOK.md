@@ -153,12 +153,67 @@ install -o root -g pawshop -m 0640 ops/commerce/monitoring.env.example /etc/paws
 systemctl daemon-reload && systemctl enable --now pawshop-monitor.timer
 ```
 
-**待补（容器/主机侧，Agent 不做）**：线上当前缺少 `Strict-Transport-Security`。在 Nginx 站点配置的 `server` 块（HTTPS 监听）中加入：
+## 10. 主机侧安全缺口修复（生产主机，root；Agent 不执行）
+
+2026-09-16 对抗审查（`docs/ADVERSARIAL_REVIEW.md`）确认线上存在两项主机侧缺口。仓库内已提供**机器校验**（`npm run verify:production:strict`），修好后该命令应转为通过。
+
+### 10.1 缺 `Strict-Transport-Security`（AR-6）
+
+现状实测：`https://pawlivora.com/` 只返回 `X-Content-Type-Options` 与 `X-Frame-Options`，无 HSTS。
+
+在 Nginx 站点配置中**已存在 `add_header` 的那个 `server` 块**（HTTPS 监听，`listen 443 ssl`）内加入一行——务必与已有的 `add_header` 放在同一块：Nginx 的 `add_header` 在子级作用域内**不继承**，放到别的 `location` 里会导致既有的 nosniff / X-Frame-Options 失效。
 
 ```nginx
-add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+# 先不含 includeSubDomains：只有确认所有子域都已启用 HTTPS 后再加。
+add_header Strict-Transport-Security "max-age=15552000" always;
 ```
 
-先确认所有子域都已启用 HTTPS，再加 `includeSubDomains`；确认后再逐步启用 `preload` 与 HSTS 提交。改完 `nginx -t` 通过再 reload，随后用监控的 `storefront_security_headers` 检查确认转绿。
+```bash
+nginx -t && systemctl reload nginx
+curl -sI https://pawlivora.com/ | grep -i strict-transport-security   # 应命中
+curl -sI https://pawlivora.com/ | grep -iE 'x-(content-type-options|frame-options)'  # 既有头必须仍在
+cd ~/pawshop && PAWSHOP_HTTPS_ORIGIN=https://pawlivora.com PAWSHOP_HTTP_ORIGIN=http://pawlivora.com npm run verify:production:strict
+```
+
+确认全部子域均为 HTTPS 后，再把值升级为 `"max-age=31536000; includeSubDomains"`，最后才考虑 `preload` 与 HSTS 预加载列表提交。
+
+**回滚**：删除该行 → `nginx -t` → `systemctl reload nginx`。HSTS 一旦被浏览器缓存，在 `max-age` 到期前无法通过服务端撤销；因此 `max-age` 从 180 天起步。
+
+### 10.2 `www` 未规范化到 apex（AR-7）
+
+现状实测：`https://www.pawlivora.com/` 返回 **200** 且与 apex 内容 MD5 完全一致（`29aaa54af4011c159782ba4df983b5f2`）→ 同一内容由两个主机名提供，构成重复内容。
+
+为 `www` 单列一个 server 块做永久重定向（证书需覆盖 `www`，实测其 HTTPS 已可用）：
+
+```nginx
+server {
+  listen 443 ssl;
+  server_name www.pawlivora.com;
+  # 复用现有 apex 证书路径
+  ssl_certificate     /etc/letsencrypt/live/pawlivora.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/pawlivora.com/privkey.pem;
+  return 301 https://pawlivora.com$request_uri;
+}
+```
+
+```bash
+nginx -t && systemctl reload nginx
+curl -sI https://www.pawlivora.com/ | head -3   # 期望 301，Location: https://pawlivora.com/
+cd ~/pawshop && PAWSHOP_HTTPS_ORIGIN=https://pawlivora.com PAWSHOP_HTTP_ORIGIN=http://pawlivora.com npm run verify:production:strict
+```
+
+**回滚**：撤回该 server 块（或恢复原 `server_name` 列表）→ `nginx -t` → `systemctl reload nginx`。
+
+### 10.3 首页与 sitemap（AR-9 / AR-10，需先决策再动）
+
+现状：`/` 返回 116 字节的 `index.html`（`<meta http-equiv="refresh">` 跳转到 `PawShop.html`）；`/sitemap.xml` 为 404。
+
+**约束（重要）**：`scripts/production-probe.mjs` 断言 `/` 返回 **200**。因此不能用 `return 301` 把 `/` 重定向走，否则标准验证会失败。可选方案：
+
+1. 让 `/` 直接返回首页内容而不跳转（`location = / { try_files /PawShop.html =404; }`），此时 `/` 与 `/PawShop.html` 需通过 `canonical` 明确其一为规范 URL；
+2. 保持现状，仅补 `sitemap.xml` 并在其中只列 apex + `/PawShop.html` 的规范形式。
+
+方案选定后再补 `sitemap.xml` 与 `canonical`，并把 `sitemap.xml` 加入 `ops/deploy-static.sh` 的 `public_paths`、在 `robots.txt` 中以 `Sitemap:` 声明。**顺序上建议先做 10.2，再定 10.3**，避免把规范主机选择固化进 sitemap。
+
 
 日志纪律：可区分 DEBUG/INFO/WARN/ERROR；**永不**记录密码、token、完整 session、数据库 secret、客户明文。

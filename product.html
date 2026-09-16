@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="robots" content="index, follow">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <title>PawShop - Product</title>
 <link rel="stylesheet" href="assets/tailwind.css">
@@ -111,6 +112,16 @@ const SYM = { USD: '$' };
 const fmt = u => '$' + u.toFixed(2);
 const { html: safeHtml, url: safeUrl, icon: safeIcon, id: safeId } = PawSafe;
 
+// A URL such as product.html?id=999999 renders "Product not found" while the
+// response is still 200, i.e. a soft 404 that search engines may index. The
+// page is marked non-indexable only once the catalog has actually loaded, so a
+// slow or failed catalog fetch cannot de-index a valid product page.
+const setRobots = content => {
+  if (typeof document.querySelector !== 'function') return;
+  const tag = document.querySelector('meta[name="robots"]');
+  if (tag) tag.content = content;
+};
+
 let lang = localStorage.getItem('pawshop_lang') || 'en';
 let currentProduct = null;
 let selectedVariant = null;
@@ -169,10 +180,15 @@ function render() {
   if (!currentProduct) {
     box.innerHTML = `<div class="py-24 text-center"><i class="fas fa-box-open text-4xl text-slate-200 mb-4"></i><p class="text-slate-400 mb-6">Product not found.</p><a href="PawShop.html" class="px-6 py-3 bg-slate-900 text-white text-sm rounded-lg">Back to shop</a></div>`;
     document.getElementById('stickyBar').innerHTML = '';
+    if (Array.isArray(window.__pawCatalog)) {
+      document.title = 'Product not found - PawShop';
+      setRobots('noindex, follow');
+    }
     return;
   }
   const p = currentProduct;
   document.title = `PawShop - ${String(p.name || '')}`;
+  setRobots('index, follow');
   selectedVariant = (p.variants && p.variants[0]) || null;
   const imgs = productImages(p);
   const discount = p.originalPrice && p.originalPrice > p.price ? Math.round((1 - p.price / p.originalPrice) * 100) : 0;
