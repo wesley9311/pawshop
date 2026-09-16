@@ -7,7 +7,9 @@
 ## 基准与范围
 
 - **BASE_COMMIT**：`366cc0e3656eb2259e9f4e4002452f142d20a147`（接管前 HEAD，分支 `codex/pawshop-real-operations`，与 origin 同步）
-- **FINAL_COMMIT**：`cf650d2`（审计命令：`git diff 366cc0e...cf650d2`，等价于 `git diff 366cc0e...HEAD`）
+- **FINAL_COMMIT（代码与构建产物终态）**：`cf650d2`
+- 其后所有提交均为纯文档（含本报告定稿），可用 `git log --oneline --stat 366cc0e..HEAD` 核验无代码/数据变更
+- **审计命令**：`git diff 366cc0e...HEAD`（分支未推送，全部变更均在本地）
 - **WIP 保全提交**：`13616a9` —— Codex 接管时未提交的分层备份收尾工作，原样固化，非 WorkBuddy 创作
 
 ## STACK
