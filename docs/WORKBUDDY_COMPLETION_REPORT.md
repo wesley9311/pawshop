@@ -116,6 +116,7 @@ PRODUCTION_DEPLOY: PASS   展示站线上可用（verify:production exit 0）；
 - CSP/安全头：check:security + 线上 verify:production 通过。✅
 - 环境隔离：本地私有 env（仓库外 0600）/ CI fixture（.invalid）/ 生产 root:service 0640 三层分离。✅
 - **RISK-2（P1）**：`_commerce` 生产依赖 77 漏洞（lodash 链），修复需框架升级。
+- **RISK-4（P1，历史泄露）**：公开 Git 历史含供应商成本字段（`git log -S costCNY` 命中 8 个提交）。当前树已清除且 `check:security` 永久防护，但历史对公开仓库克隆者可见。修复需店主决策（转私有 / 经批准重写历史 / 接受）。
 - **RISK-3（P2）**：根 dev 依赖 qs 1 moderate（http-server，仅本地）。
 - 生产侧（TLS 配置实测、Cookie flags、Rate limit、JWT 过期策略）随激活链验证，当前 UNVERIFIED。
 
@@ -147,8 +148,9 @@ PRODUCTION_DEPLOY: PASS   展示站线上可用（verify:production exit 0）；
 1. RISK-1（P1 数据）：本地商品 published 违反草稿契约（接管前发生，无对外影响，修复 SQL 已备好待确认）。
 2. RISK-2（P1 依赖）：commerce 77 个生产依赖漏洞。
 3. RISK-3（P2）：qs dev 漏洞。
-4. RISK-4（P1 运维）：零监控——线上故障将无告警发现。
-5. 结构性风险：分支 `codex/pawshop-real-operations` ahead origin 4 个提交（WIP 保全 + docs + 构建产物 + 报告），**未推送**——推送时机留给店主/Codex 决定。
+4. RISK-4（P1 历史泄露）：公开 Git 历史含供应商成本字段（8 个提交），需店主决策处置。
+5. RISK-5（P1 运维）：零监控——线上故障将无告警发现。
+6. 结构性风险：分支 `codex/pawshop-real-operations` ahead origin 4 个提交（WIP 保全 + docs + 构建产物 + 报告），**未推送**——推送时机留给店主/Codex 决定。
 
 ## NEXT_ACTIONS（优先级序）
 
