@@ -58,7 +58,7 @@ probe_headers=
 public_paths=(
   index.html PawShop.html product.html shipping.html returns.html privacy.html
   terms.html catalog.json config.js safe.js support.js policy.css favicon.svg
-  robots.txt assets
+  robots.txt sitemap.xml assets
 )
 
 cleanup() {
