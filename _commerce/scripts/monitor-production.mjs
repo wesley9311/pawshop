@@ -341,7 +341,12 @@ const dispatch = shouldDispatchAlert(previousState, summary, now, config.alertSu
 let dispatchResult = { attempted: false, dispatched: false, configured: config.alertChannels.length > 0, delivered: [], failed: [] };
 if (dispatch) {
   dispatchResult = { attempted: true, ...(await dispatchAlert(buildAlertPayload(summary, now, config.storefrontOrigin))) };
-} else if (config.alertChannels.length > 0) {
+} else if (config.alertChannels.length > 0 && summary.failed > 0) {
+  // Only a real failure can be held back by the repeat window. A healthy run
+  // also lands here (shouldDispatchAlert returns false when nothing failed and
+  // no recovery is owed), and announcing "the failure is still recorded" on a
+  // green run would be the log line inventing a failure - the same class of lie
+  // as a check that pretends to pass.
   log('INFO', 'alert suppressed by the repeat window; the failure is still recorded');
 }
 try {

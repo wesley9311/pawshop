@@ -245,6 +245,11 @@ test('a chat channel that answers 200 with an error code counts as a failed deli
   assert.match(monitor, /const alertDeliveryFailed = dispatchResult\.attempted && !dispatchResult\.dispatched/);
   assert.doesNotMatch(monitor, /const alertDeliveryFailed = dispatchResult\.configured/);
   assert.match(monitor, /attempted: true, \.\.\.\(await dispatchAlert\(buildAlertPayload/);
+  // A healthy run reaches the same else branch (shouldDispatchAlert returns
+  // false when nothing failed and no recovery is owed), so the suppression line
+  // must be gated on an actual failure. Otherwise a green run logs "the failure
+  // is still recorded" and invents an outage nobody can find.
+  assert.match(monitor, /else if \(config\.alertChannels\.length > 0 && summary\.failed > 0\)/);
 });
 
 test('a rejected channel names the provider error code and never the response body', () => {
