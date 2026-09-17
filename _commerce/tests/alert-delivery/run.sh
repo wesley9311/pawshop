@@ -94,7 +94,7 @@ rm -f "$WORK"/state-*.json
 run_case "feishu accepted"        feishu   "https://open.feishu.cn:$PORT/feishu-ok"        1 feishu
 run_case "feishu 200 + error code" feishu  "https://open.feishu.cn:$PORT/feishu-bad"       2 feishu-bad
 run_case "feishu keyword rejection" feishu "https://open.feishu.cn:$PORT/feishu-keyword"   2 feishu-keyword \
-  "provider code 19024: provider rejected the message: this bot has a keyword requirement"
+  "provider code 19024: provider rejected the message: this bot requires a keyword"
 run_case "feishu v1 StatusCode"    feishu  "https://open.feishu.cn:$PORT/feishu-ok-v1"     1 feishu-v1
 run_case "slack accepted"          slack   "https://hooks.slack.com:$PORT/slack-ok"        1 slack
 run_case "slack 400"               slack   "https://hooks.slack.com:$PORT/slack-400"       2 slack-bad

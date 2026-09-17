@@ -31,10 +31,14 @@ const ALERT_TEXT_MAX_CHARS = 1500;
 // present. Phrasing a recovery differently from an alert therefore drops exactly
 // the message that says the incident is over - the operator sees every alarm and
 // never an all-clear. Keeping the envelope identical in both cases means any
-// keyword drawn from it (the whole envelope, the prefix, or just "PawShop")
-// matches both. Verified against the live channel: the previous "[PawShop 恢复]"
-// opening was rejected with 19024 while "[PawShop 告警]" was accepted.
-const ALERT_ENVELOPE = '[PawShop 告警]';
+// keyword drawn from it matches both.
+//
+// The keyword is owned by the chat group and can drift without the host noticing,
+// which already happened once: the live channel accepted "[PawShop 告警]" on
+// 2026-09-17 and by the same evening only accepted "[PawShop]", silently dropping
+// every alert in between. The envelope therefore carries both of those spellings,
+// so either keyword keeps both messages deliverable.
+const ALERT_ENVELOPE = '[PawShop] 告警';
 
 // Each provider's webhook is pinned to its vendor host. A mistyped or swapped
 // alert URL is otherwise a silent way to send host status to the wrong place.
@@ -429,7 +433,8 @@ function telegramAccepted(bodyText) {
 // the payload" is undiagnosable at 3am: the provider's own code is what says why.
 const ALERT_PROVIDER_CODE_HINTS = Object.freeze({
   19021: 'provider rejected the message: this bot requires a signature or timestamp the monitor does not send',
-  19024: 'provider rejected the message: this bot has a keyword requirement the alert text does not contain',
+  19024: `provider rejected the message: this bot requires a keyword and the alert text does not contain it; `
+    + `the text always opens with "${ALERT_ENVELOPE}", so make one of its words a keyword on the bot or drop the requirement`,
 });
 
 function alertProviderErrorCode(bodyText) {

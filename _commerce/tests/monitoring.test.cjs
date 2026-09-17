@@ -153,7 +153,7 @@ test('alert payloads are translated into each channel dialect', () => {
 
   // The readable text keeps the machine check names and stays bounded.
   const text = formatAlertText(payload);
-  assert.match(text, /\[PawShop 告警\] 1\/2 项检查失败/);
+  assert.match(text, /\[PawShop\] 告警 1\/2 项检查失败/);
   assert.match(text, /commerce_health/);
   assert.match(text, /https:\/\/pawlivora\.com/);
   assert.ok(text.length <= ALERT_TEXT_MAX_CHARS);
@@ -165,6 +165,17 @@ test('alert payloads are translated into each channel dialect', () => {
   // the alert).
   assert.ok(recovered.startsWith(ALERT_ENVELOPE), `recovery must open with the envelope: ${recovered.split('\n')[0]}`);
   assert.ok(text.startsWith(ALERT_ENVELOPE));
+  // The keyword belongs to the chat group and drifted once already, silently
+  // costing every alert. The envelope carries both spellings the live channel has
+  // required, so either keyword keeps both messages deliverable.
+  assert.equal(ALERT_ENVELOPE, '[PawShop] 告警');
+  for (const message of [text, recovered]) {
+    // Any keyword drawn from the envelope must match both messages, so the
+    // spellings the live channel has required all have to be present.
+    for (const keyword of ['PawShop', '[PawShop]', '告警']) {
+      assert.ok(message.includes(keyword), `every message must satisfy the "${keyword}" keyword: ${message.split('\n')[0]}`);
+    }
+  }
   assert.match(recovered, /已恢复/);
   assert.doesNotMatch(recovered, /项检查失败/);
   assert.doesNotMatch(text, /secret|password|token|authorization|cookie/i);
