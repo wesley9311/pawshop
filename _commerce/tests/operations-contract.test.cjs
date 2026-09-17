@@ -28,6 +28,9 @@ const restoreService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-re
 const hostBootstrap = readFileSync(resolve(root, '..', 'ops/commerce/bootstrap-ubuntu-host.sh'), 'utf8');
 const identityProvisioner = readFileSync(resolve(root, '..', 'ops/commerce/provision-production-identities.sh'), 'utf8');
 const environmentProvisioner = readFileSync(resolve(root, '..', 'ops/commerce/provision-production-environment.sh'), 'utf8');
+const passwordResetSubscriber = readFileSync(resolve(root, 'src/subscribers/password-reset.ts'), 'utf8');
+const ownerRotation = readFileSync(resolve(root, 'scripts/reset-production-owner-password.mjs'), 'utf8');
+const ownerRotationWrapper = readFileSync(resolve(root, '..', 'ops/commerce/reset-production-owner-password.sh'), 'utf8');
 
 test('real backup is encrypted and plaintext is removed', () => {
   assert.match(backup, /aes-256-cbc/);
@@ -298,4 +301,31 @@ test('production environment provisioning is atomic, exact, and activation-free'
   assert.match(environmentProvisioner, /install -o root -g pawshop -m 0640/);
   assert.match(environmentProvisioner, /migrations disabled/);
   assert.doesNotMatch(environmentProvisioner, /systemctl|db:migrate|source .*\.env|PAWSHOP_RELEASE_ACTIVATION_CONFIRMED/);
+});
+
+test('the password reset path is wired, and the fallback proves itself', () => {
+  // Medusa emits auth.password_reset and ships no subscriber, so nothing would
+  // deliver the token without this file. The event name is the whole contract.
+  assert.match(passwordResetSubscriber, /event: 'auth\.password_reset'/);
+  assert.match(passwordResetSubscriber, /deliverPasswordReset\(/);
+  assert.match(passwordResetSubscriber, /readEmailCredentials\(/);
+  // The reset link is a single-use credential; it must never reach the journal.
+  assert.doesNotMatch(passwordResetSubscriber, /logger\.\w+\([^)]*resetUrl/);
+
+  // The rotation fallback exists because a lost password would otherwise be
+  // unrecoverable - Medusa's `user` command creates accounts and cannot change one.
+  assert.match(ownerRotation, /PAWSHOP_PRODUCTION_OWNER_ROTATION_CONFIRMED/);
+  assert.match(ownerRotation, /scryptKdf\.kdf\(nextPassword/);
+  assert.match(ownerRotation, /verify\(Buffer\.from\(nextHash/);
+  assert.match(ownerRotation, /RETURNING 1/);
+  assert.match(ownerRotation, /renameSync\(stagingPath, credentialsPath\)/);
+  assert.doesNotMatch(ownerRotation, /console\.(log|error)\([^)]*(nextPassword|passwordHash)/);
+
+  // A rotation is only real once the running service accepts the new password,
+  // so the wrapper must restart and authenticate rather than trust the write.
+  assert.match(ownerRotationWrapper, /^set \+x$/m);
+  assert.match(ownerRotationWrapper, /^set -Eeuo pipefail$/m);
+  assert.match(ownerRotationWrapper, /systemctl restart pawshop-commerce\.service/);
+  assert.match(ownerRotationWrapper, /verify-production-owner-login\.mjs/);
+  assert.match(ownerRotationWrapper, /flock -n 9/);
 });
