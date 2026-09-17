@@ -10,7 +10,7 @@ if [[ ! $PAWSHOP_RELEASE_ID =~ ^[0-9a-f]{40}$ ]]; then
   echo 'PAWSHOP_RELEASE_ID must be a full lowercase Git commit SHA.' >&2
   exit 1
 fi
-for required_command in git tar runuser node npm flock chown chmod install find grep mv stat rm df tail getent awk id env; do
+for required_command in git tar runuser node npm flock chown chmod install find grep mv stat rm df tail getent awk id env nice ionice; do
   command -v "$required_command" >/dev/null || {
     echo "Required production command is unavailable: $required_command" >&2
     exit 1
@@ -185,13 +185,19 @@ if find "$staging_dir" -type l -print -quit | grep -q . ||
   exit 1
 fi
 chown -R pawshop-build:pawshop-build -- "$staging_dir"
-runuser -u pawshop-build -- env -i HOME=/var/cache/pawshop-build LANG=C.UTF-8 PATH=/usr/bin:/bin \
+# The release build must never outrank production. On this 1.6 GB host it is the
+# only job heavy enough to starve nginx, and it did exactly that once: the live
+# site stopped answering while the admin bundle was compiling. Idle I/O and a low
+# niceness keep the site ahead of the build, so a slow build costs throughput
+# instead of availability.
+build_priority=(ionice -c 3 nice -n 19)
+"${build_priority[@]}" runuser -u pawshop-build -- env -i HOME=/var/cache/pawshop-build LANG=C.UTF-8 PATH=/usr/bin:/bin \
   npm_config_cache=/var/cache/pawshop-build/npm npm_config_userconfig=/dev/null \
   npm_config_globalconfig="$empty_npmrc" \
   /usr/bin/npm --prefix "$staging_dir/_commerce" ci --no-audit --no-fund
-runuser -u pawshop-build -- env -i HOME=/var/cache/pawshop-build LANG=C.UTF-8 PATH=/usr/bin:/bin \
+"${build_priority[@]}" runuser -u pawshop-build -- env -i HOME=/var/cache/pawshop-build LANG=C.UTF-8 PATH=/usr/bin:/bin \
   /usr/bin/node "$staging_dir/_commerce/scripts/run-release-build.mjs"
-runuser -u pawshop-build -- env -i HOME=/var/cache/pawshop-build LANG=C.UTF-8 PATH=/usr/bin:/bin \
+"${build_priority[@]}" runuser -u pawshop-build -- env -i HOME=/var/cache/pawshop-build LANG=C.UTF-8 PATH=/usr/bin:/bin \
   npm_config_cache=/var/cache/pawshop-build/npm npm_config_userconfig=/dev/null \
   npm_config_globalconfig="$empty_npmrc" \
   /usr/bin/npm --prefix "$staging_dir/_commerce" prune --omit=dev --no-audit --no-fund

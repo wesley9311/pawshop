@@ -40,7 +40,11 @@ const child = spawn('/usr/bin/npm', ['run', 'build:production'], {
   cwd: projectRoot,
   env: {
     HOME: '/var/cache/pawshop-build', LANG: 'C.UTF-8', PATH: '/usr/bin:/bin',
-    NODE_OPTIONS: '--max-old-space-size=1536',
+    // The host has ~1.6 GB of RAM. A 1.5 GB heap let the admin Vite build push
+    // the whole box into swap thrash, which starved nginx and took the live site
+    // down for several minutes. Cap the heap so the build either fits or fails
+    // fast inside its own address space; it must never compete with production.
+    NODE_OPTIONS: '--max-old-space-size=896',
     npm_config_cache: '/var/cache/pawshop-build/npm',
     npm_config_userconfig: '/dev/null', npm_config_globalconfig: npmGlobalConfig,
     ...buildEnv,
