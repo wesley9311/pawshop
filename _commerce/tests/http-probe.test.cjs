@@ -51,3 +51,26 @@ test('rejects unbounded timeout configuration', async () => {
     await assert.rejects(expectHttpStatus('http://127.0.0.1', { status: 200, timeoutMs }), /Probe timeout/);
   }
 });
+
+test('accepts a matching refusal type and rejects a different one without exposing the body', async t => {
+  const url = await listen(t, (req, res) => {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ type: 'not_allowed', message: 'private response' }));
+  });
+  await expectHttpStatus(url, { status: 400, type: 'not_allowed' });
+  await assert.rejects(expectHttpStatus(url, { status: 400, type: 'invalid_data' }), error => {
+    assert.match(error.message, /returned refusal type not_allowed; expected invalid_data/);
+    assert.doesNotMatch(error.message, /private response/);
+    return true;
+  });
+});
+
+test('rejects an unreadable or oversized refusal body', async t => {
+  const unreadable = await listen(t, (req, res) => { res.writeHead(400); res.end('not json'); });
+  await assert.rejects(expectHttpStatus(unreadable, { status: 400, type: 'not_allowed' }), /unreadable refusal body/);
+  const oversized = await listen(t, (req, res) => {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ type: 'not_allowed', padding: 'x'.repeat(4096) }));
+  });
+  await assert.rejects(expectHttpStatus(oversized, { status: 400, type: 'not_allowed' }), /exceeded the reviewed bound/);
+});

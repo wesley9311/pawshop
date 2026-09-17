@@ -31,17 +31,25 @@ if (markerResponse.status !== 200 || marker.mode !== 'production-admin-only' ||
   throw new Error('Target process is not the closed production admin runtime.');
 }
 
-for (const [method, path, status] of [
-  ['GET', '/health', 200],
-  ['GET', '/app', 200],
-  ['GET', '/admin/products', 401],
-  ['GET', '/admin/orders', 401],
-  ['GET', '/store/products', 503],
-  ['POST', '/store/carts', 503],
-  ['POST', '/auth/customer/emailpass/register', 503],
+// The store namespace is closed by Medusa's own API-key gate, which the HTTP
+// loader installs on the app before every user middleware and every route. A
+// store request that carries no key is therefore refused by that gate with 400,
+// and our own 503 gate for the namespace can only be reached once a key is
+// presented. Assert the refusal that is observable from outside the process:
+// the store namespace answers no request without a key. Customer authentication
+// routes have no such framework gate ahead of them, so they keep returning the
+// explicit PawShop 503.
+for (const [method, path, status, type] of [
+  ['GET', '/health', 200, undefined],
+  ['GET', '/app', 200, undefined],
+  ['GET', '/admin/products', 401, undefined],
+  ['GET', '/admin/orders', 401, undefined],
+  ['GET', '/store/products', 400, 'not_allowed'],
+  ['POST', '/store/carts', 400, 'not_allowed'],
+  ['POST', '/auth/customer/emailpass/register', 503, 'not_allowed'],
 ]) {
   try {
-    await expectHttpStatus(`${origin}${path}`, { method, status });
+    await expectHttpStatus(`${origin}${path}`, { method, status, type });
   } catch (error) {
     throw new Error(`${path}: ${error.message}`);
   }

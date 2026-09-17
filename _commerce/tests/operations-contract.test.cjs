@@ -92,6 +92,13 @@ test('production admin verifier keeps customer commerce closed', () => {
   assert.match(productionVerifier, /assertLoopbackListeners/);
   assert.match(productionVerifier, /validateProductionEnvironment/);
   assert.doesNotMatch(productionVerifier, /publishable|authorization|cookie/i);
+  // Medusa's own store API-key gate answers before any user middleware or route,
+  // so the store namespace can only ever be observed refusing with 400 under this
+  // profile. Pin the exact expectations so they cannot drift back to a 503 that
+  // no request can reach.
+  assert.match(productionVerifier, /\['GET', '\/store\/products', 400, 'not_allowed'\]/);
+  assert.match(productionVerifier, /\['POST', '\/store\/carts', 400, 'not_allowed'\]/);
+  assert.match(productionVerifier, /\['POST', '\/auth\/customer\/emailpass\/register', 503, 'not_allowed'\]/);
 });
 
 test('production backup encrypts data and suppresses database command output', () => {
