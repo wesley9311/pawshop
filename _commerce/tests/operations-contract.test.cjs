@@ -15,6 +15,7 @@ const productionBackup = readFileSync(resolve(root, 'scripts/backup-production.m
 const productionRestore = readFileSync(resolve(root, 'scripts/restore-verify-production.mjs'), 'utf8');
 const productionWait = readFileSync(resolve(root, 'scripts/wait-production-admin.mjs'), 'utf8');
 const offsiteSync = readFileSync(resolve(root, 'scripts/sync-production-backups.mjs'), 'utf8');
+const scheduledBackup = readFileSync(resolve(root, 'scripts/run-scheduled-backup.mjs'), 'utf8');
 const archiveBackup = readFileSync(resolve(root, 'scripts/archive-production-backup.mjs'), 'utf8');
 const offsiteClient = readFileSync(resolve(root, 'scripts/offsite-s3-client.cjs'), 'utf8');
 const commerceService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-commerce.service'), 'utf8');
@@ -244,7 +245,20 @@ test('offsite sync is versioned, read-back verified, credential isolated, and ne
   assert.doesNotMatch(`${offsiteSync}\n${offsiteClient}`, /DeleteObject|DeleteObjects/);
   assert.match(backupService, /^LoadCredential=backup-s3-access-key:/m);
   assert.match(backupService, /^LoadCredential=backup-s3-secret-key:/m);
-  assert.match(backupService, /ExecStartPost=.*sync-production-backups\.mjs/);
+  // The offsite upload has to run inside the main process. Credentials delivered
+  // by LoadCredential are unreadable from an ExecStartPost process as soon as
+  // the unit takes a private mount namespace, and this unit sets four options
+  // that do (ProtectSystem=strict, ProtectHome, PrivateTmp, ProtectKernel*): the
+  // upload then fails with EACCES and the offsite copy silently falls behind.
+  // run-scheduled-backup.mjs composes the dump and the upload in one process,
+  // the same way the verified first-backup drill does.
+  assert.match(backupService, /^ExecStart=\/usr\/bin\/node scripts\/run-scheduled-backup\.mjs$/m);
+  assert.doesNotMatch(backupService, /^ExecStartPost=/m);
+  assert.doesNotMatch(backupService, /backup-production\.mjs|sync-production-backups\.mjs/);
+  assert.match(scheduledBackup, /import\('\.\/backup-production\.mjs'\)/);
+  assert.match(scheduledBackup, /import\('\.\/sync-production-backups\.mjs'\)/);
+  assert.match(scheduledBackup, /process\.getuid\(\) === 0/);
+  assert.match(scheduledBackup, /realpathSync\('\/srv\/pawshop-commerce\/current\/_commerce'\)/);
   assert.doesNotMatch(backupService, /BACKUP_S3_ACCESS_KEY|BACKUP_S3_SECRET/);
 });
 

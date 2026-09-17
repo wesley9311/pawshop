@@ -147,9 +147,12 @@ sudo systemctl status pawshop-restore-verify.service --no-pager
 扫描或删除任何现有数据库。验证完成后，root 还必须删除只读暂存目录中的密钥
 副本、manifest 和密文副本。
 
-## 异地分层备份与本地保留策略（尚未在生产启用）
+## 异地分层备份与本地保留策略
 
-每日生产备份成功后，`pawshop-backup.service` 调用异地同步程序。它只上传
+每日生产备份成功后，同一个主进程继续执行异地同步（`run-scheduled-backup.mjs`
+先 `backup-production.mjs`、再 `sync-production-backups.mjs`；**不能用
+`ExecStartPost`**，原因见 `docs/RUNBOOK.md` §9.4：单元带私有挂载命名空间时，
+`ExecStartPost` 进程读不到 systemd 注入的凭据）。同步只上传
 已经在本机加密的数据库密文及经过 HMAC 认证的 manifest，绝不上传
 `backup.key`。每日对象键固定在 `pawshop/database-backups/daily/`。每月与年度任务
 不再执行数据库导出，而是复用最近一次已认证的加密日备份，分别写入
