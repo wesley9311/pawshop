@@ -1,5 +1,7 @@
 'use strict';
 
+const { realpathSync } = require('node:fs');
+
 // Alibaba Cloud's reviewed 2 GiB SWAS plan exposes 1,651,800 KiB to Ubuntu.
 // Keep enough tolerance for provider-reserved memory while rejecting the former
 // 1 GiB plan (measured at roughly 915,000 KiB).
@@ -22,12 +24,30 @@ function assertProductionHost({ memoryKib, availableDiskKib }) {
   }
 }
 
-function assertProductionNodeRuntime({ version, executablePath }) {
+// Resolve a path to the exact file it denotes, or null when it does not exist.
+// Both sides of the comparison below must be resolved: `process.execPath` always
+// reports the resolved path of the running binary, while `/usr/bin/node` is a
+// symbolic link into the pinned tree that `bootstrap-ubuntu-host.sh` installs
+// under /opt. Comparing the running executable literally against the link could
+// therefore never succeed on a correctly bootstrapped host, so the approved
+// runtime is the file the reviewed path points at, not its spelling.
+function resolveExecutablePath(candidate) {
+  if (typeof candidate !== 'string' || candidate === '') return null;
+  try {
+    return realpathSync(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function assertProductionNodeRuntime({ version, executablePath, expectedNodePath = PRODUCTION_NODE_PATH }) {
   if (!/^v(?:22|24)\.\d+\.\d+$/.test(version)) {
     throw new Error('Production commerce requires Node 22 or 24 LTS.');
   }
-  if (executablePath !== PRODUCTION_NODE_PATH) {
-    throw new Error(`Production commerce must run with ${PRODUCTION_NODE_PATH}.`);
+  const reviewed = resolveExecutablePath(expectedNodePath);
+  const running = resolveExecutablePath(executablePath);
+  if (reviewed === null || running === null || running !== reviewed) {
+    throw new Error(`Production commerce must run with ${expectedNodePath}.`);
   }
 }
 
