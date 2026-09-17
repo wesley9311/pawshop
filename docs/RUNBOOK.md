@@ -218,6 +218,33 @@ journalctl -u pawshop-monitor.service -n 25 --no-pager -o cat | grep -E "monitor
 cat /var/lib/pawshop-monitor/alert-state.json
 ```
 
+#### 9.1.1 ⚠️ libexec 与 release 的「漂移窗口」：下次发版必须带上这期间的脚本改动（2026-09-17 新增）
+
+`deploy-commerce.sh` 在激活前会**逐字比对**四个 libexec 文件与候选 release，不一致就 `exit 1`。而 §9.1 又把监控脚本设计成"独立于 release 演进"——两者叠起来的后果是：**任何只装进 libexec、还没进 release 的脚本改动，都会把下一次发版挡住**（fail-closed：不会损坏任何东西，但会停住）。
+
+2026-09-17 就制造了这样一个窗口：修掉一处监控日志缺陷后只装了 libexec，而当时 `current` 仍是 `466cfc5`。
+
+| 项 | 值 |
+| --- | --- |
+| libexec 现状 | `monitor-production.mjs` = `b12a23a` 的字节（sha256 `caf48b8cde6a38c2441d77b1ed80ceb01d053655707978a1be44381eb4505b71`）；`monitoring-policy.cjs` 未变（与 `466cfc5` 一致，`83af5b70…`） |
+| 备份 | `/root/pawshop-libexec-backup-20260917T083225Z/monitor-production.mjs`（sha256 `a54cbcbd…`，即 `466cfc5` 的版本） |
+| 收敛条件 | **下次发版的候选 release 必须基于含 `b12a23a` 的提交**，否则 `deploy-commerce.sh` 会以 `Installed libexec files do not match the exact candidate release.` 拒绝激活 |
+
+**排障要点**：看到那句报错**不要**先怀疑候选 release——先 `cmp` 一下 libexec 与 `current` 里的同名文件，通常是"libexec 领先了一个监控改动"。要么让新 release 带上它，要么把 libexec 退回与候选 release 一致。
+
+**为什么会领先**：监控是"商务上线前就该存在的安全网"（§9.1），不该在等 release 的时间窗里带着一个已知缺陷继续跑；而它的修复也用不着清库发版。所以允许短暂领先，但**必须在下次发版收敛**。检查命令：
+
+```bash
+for f in monitor-production.mjs monitoring-policy.cjs; do
+  cmp -s "/srv/pawshop-commerce/current/_commerce/scripts/$f" "/usr/local/libexec/pawshop/$f" \
+    && echo "$f: in sync with current" || echo "$f: libexec ahead of current (converge on next release)"
+done
+```
+
+**本次修掉的缺陷**（`b12a23a`）：`shouldDispatchAlert` 在"什么都没失败"和"真失败落在抑制窗口内"两种情况下**都**返回 `false`，而代码把后者的措辞用在了前者上——于是 **12/12 全绿的运行也会打一行 `alert suppressed by the repeat window; the failure is still recorded`**，一条凭空制造故障的日志。它与"检查假装通过"是同一类谎话，只是方向相反。现在该行以 `summary.failed > 0` 为门槛，并由 `_commerce/tests/monitoring.test.cjs` 锁住。实测：修后一次真实运行 `monitoring passed 12/12 checks`，且该行不再出现。
+
+> ⚠️ 另有一条 `journalctl --since` 的坑：`--since 2026-09-17T00:35:13`（UTC 格式、无时区后缀）会被 journalctl 当**本地时间**解释，于是捞回一大堆历史日志（本次实测一次捞了 154 KB，还混进了商务上线前 `SKIP_COMMERCE_CHECKS` 时代的旧行，差点误判"修复无效"）。锚定"只看本次运行"请用 epoch：`--since "@$(date +%s)"`。
+
 ### 9.2 上线首阶段的临时跳过（**激活商务后必须删除**）
 
 **2026-09-17 状态：`SKIP_COMMERCE_CHECKS` 已删除**（商务已激活，三项 commerce 检查改为真实探测，实测 `commerce_health` 200 / `store_api_closed` 400 / `admin_requires_auth` 401）。**`SKIP_SYSTEMD_CHECKS` 也已删除**——备份异地同步的缺陷修好并上线后（release `9bac8dc`），`pawshop-backup.service` 实测 `result=success`，监控回到 **12/12 全部真实检查**（`backup_freshness ok (last successful backup 0.0h ago (limit 36h))`）。原计划的"暂时保留"已不再需要，理由记录在 §9.2.1。
