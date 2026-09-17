@@ -19,7 +19,8 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  EXIT_CODES, adminRouteRequiresAuth, alertDeliveryAccepted, backupAgeHours, buildAlertPayload,
+  EXIT_CODES, adminRouteRequiresAuth, alertDeliveryAccepted, backupAgeHours, backupFreshnessCheck,
+  buildAlertPayload,
   buildAlertRequest, checkResult, daysUntilExpiry,
   formatLogLine, missingSecurityHeaders, nextAlertState, redactUrl, shouldDispatchAlert,
   storeRouteIsClosed, summarize, validateMonitoringConfig,
@@ -236,22 +237,7 @@ async function runChecks() {
       results.push(checkResult('backup_freshness', false, 'backup timestamp file is missing or unreadable'));
     }
   } else {
-    const unit = systemdUnitState('pawshop-backup.service');
-    if (unit.skipped) {
-      results.push(checkResult('backup_freshness', true, 'systemd checks skipped by explicit configuration'));
-    } else if (unit.error) {
-      results.push(checkResult('backup_freshness', false, unit.error));
-    } else if (unit.result !== 'success') {
-      results.push(checkResult('backup_freshness', false, `last backup unit result is ${unit.result}`));
-    } else {
-      const ageHours = backupAgeHours(new Date(unit.lastRun).toISOString(), now);
-      results.push(checkResult(
-        'backup_freshness',
-        ageHours <= config.maxBackupAgeHours,
-        `last successful backup ${ageHours.toFixed(1)}h ago (limit ${config.maxBackupAgeHours}h)`,
-        { age_hours: Number(ageHours.toFixed(1)) },
-      ));
-    }
+    results.push(backupFreshnessCheck(systemdUnitState('pawshop-backup.service'), now, config.maxBackupAgeHours));
   }
 
   try {

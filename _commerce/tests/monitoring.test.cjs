@@ -6,9 +6,11 @@ const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const {
   ALERT_ENVELOPE, ALERT_PROVIDERS, ALERT_TEXT_MAX_CHARS, EXIT_CODES, REQUIRED_SECURITY_HEADERS,
-  adminRouteRequiresAuth, alertDeliveryAccepted, backupAgeHours, buildAlertPayload, buildAlertRequest,
+  adminRouteRequiresAuth, alertDeliveryAccepted, backupAgeHours, backupFreshnessCheck, buildAlertPayload,
+  buildAlertRequest,
   checkResult, daysUntilExpiry, feishuAccepted, formatAlertText, formatLogLine, missingSecurityHeaders,
-  nextAlertState, redactUrl, shouldDispatchAlert, storeRouteIsClosed, summarize, telegramAccepted,
+  nextAlertState, redactUrl, shouldDispatchAlert, storeRouteIsClosed, summarize, systemdTimestampToIso,
+  telegramAccepted,
   validateMonitoringConfig,
 } = require('../scripts/monitoring-policy.cjs');
 
@@ -326,6 +328,50 @@ test('commerce checks are skippable only by explicit configuration', () => {
   assert.match(monitor, /commerce health unreachable/);
   assert.match(monitor, /store route probe failed/);
   assert.match(monitor, /admin auth probe failed/);
+});
+
+test('backup freshness survives an unrecorded run and reads systemd timestamps in local time', () => {
+  // systemd prints local wall-clock time with a timezone abbreviation. The
+  // verdict must read those fields as local time: handing the whole string to
+  // Date lets the engine resolve "CST" as US Central, which moved every age
+  // fourteen hours towards "fresh" and let a stale backup pass a 36h limit.
+  const systemdValue = 'Thu 2026-09-17 14:18:07 CST';
+  const lastRunInstant = new Date(2026, 8, 17, 14, 18, 7).getTime();
+  const hoursAfter = hours => new Date(lastRunInstant + hours * 3600000);
+
+  assert.equal(systemdTimestampToIso(systemdValue), new Date(lastRunInstant).toISOString());
+  assert.equal(systemdTimestampToIso(undefined), null);
+  assert.equal(systemdTimestampToIso(''), null);
+  assert.equal(systemdTimestampToIso('   '), null);
+  // A field the Date constructor would silently normalise is not a real instant.
+  assert.equal(systemdTimestampToIso('Thu 2026-13-40 25:61:61 CST'), null);
+  assert.equal(systemdTimestampToIso('Thu 2026-09-17 14:18:07'), new Date(lastRunInstant).toISOString());
+
+  const fresh = backupFreshnessCheck({ result: 'success', lastRun: systemdValue }, hoursAfter(3), 36);
+  assert.equal(fresh.name, 'backup_freshness');
+  assert.equal(fresh.ok, true);
+  assert.match(fresh.detail, /3\.0h ago/);
+
+  const stale = backupFreshnessCheck({ result: 'success', lastRun: systemdValue }, hoursAfter(41), 36);
+  assert.equal(stale.ok, false);
+
+  // The regression that took the whole run down: a unit that has not run since
+  // the host booted reports Result=success with an empty completion timestamp.
+  const neverRan = backupFreshnessCheck({ result: 'success', lastRun: '' }, hoursAfter(1), 36);
+  assert.equal(neverRan.ok, false);
+  assert.match(neverRan.detail, /no completed run recorded since the host booted/);
+
+  assert.match(
+    backupFreshnessCheck({ result: 'exit-code', lastRun: systemdValue }, hoursAfter(1), 36).detail,
+    /result is exit-code/,
+  );
+  assert.equal(backupFreshnessCheck({ error: 'systemctl is unavailable' }, hoursAfter(1), 36).ok, false);
+  assert.equal(backupFreshnessCheck({ skipped: true }, hoursAfter(1), 36).ok, true);
+  assert.equal(backupFreshnessCheck(null, hoursAfter(1), 36).ok, false);
+
+  // The runner delegates the verdict instead of parsing the timestamp itself.
+  assert.match(monitor, /backupFreshnessCheck\(systemdUnitState\('pawshop-backup\.service'\)/);
+  assert.doesNotMatch(monitor, /new Date\(unit\.lastRun\)/);
 });
 
 test('monitor units are hardened, non-privileged, and read a non-secret config', () => {

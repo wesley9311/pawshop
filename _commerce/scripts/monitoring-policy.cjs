@@ -259,6 +259,61 @@ function backupAgeHours(lastSuccessIso, now) {
   return (now.getTime() - lastSuccess.getTime()) / 3600000;
 }
 
+// systemd renders timestamps as local wall-clock time with a timezone
+// abbreviation ("Thu 2026-09-17 14:18:07 CST"). Handing that string straight to
+// Date resolves the abbreviation as US Central, which on this host sits fourteen
+// hours away from the real zone, so every age came out fourteen hours too fresh
+// and a fifty-hour-old backup satisfied a thirty-six hour limit. The monitor runs
+// on the same host as systemd, so the wall-clock fields are read as local time
+// and the ambiguous abbreviation is ignored. Absent or unexpected values yield
+// null, which the caller reports as a failed check.
+function systemdTimestampToIso(value) {
+  if (typeof value !== 'string') return null;
+  const match = /^[A-Za-z]{3} (\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?: \S+)?$/.exec(value.trim());
+  if (!match) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1).map(part => Number(part));
+  const parsed = new Date(year, month - 1, day, hour, minute, second);
+  // Reject field values the Date constructor silently normalised (month 13,
+  // hour 25): a normalised value would be a plausible-looking wrong instant.
+  if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day ||
+      parsed.getHours() !== hour || parsed.getMinutes() !== minute || parsed.getSeconds() !== second) {
+    return null;
+  }
+  return parsed.toISOString();
+}
+
+// The backup freshness verdict is decided here, not in the monitor, because the
+// systemd properties it reads are runtime state: a unit that has not run since
+// the host booted still reports Result=success while its completion timestamp is
+// empty. Parsing that empty timestamp inline killed the whole monitoring run
+// with an unhandled RangeError on the first real use, and a crashed monitor
+// dispatches no alert at all - a silent death, which is the one outcome the
+// fail-closed design exists to prevent. An unknown age is reported as a failed
+// check with a reason, never as a passing one.
+function backupFreshnessCheck(unitState, now, maxAgeHours) {
+  if (!unitState || typeof unitState !== 'object') {
+    return checkResult('backup_freshness', false, 'the backup unit state could not be read');
+  }
+  if (unitState.skipped) {
+    return checkResult('backup_freshness', true, 'systemd checks skipped by explicit configuration');
+  }
+  if (unitState.error) return checkResult('backup_freshness', false, unitState.error);
+  if (unitState.result !== 'success') {
+    return checkResult('backup_freshness', false, `last backup unit result is ${unitState.result}`);
+  }
+  const lastRun = systemdTimestampToIso(unitState.lastRun);
+  if (lastRun === null) {
+    return checkResult('backup_freshness', false, 'the backup unit has no completed run recorded since the host booted');
+  }
+  const ageHours = backupAgeHours(lastRun, now);
+  return checkResult(
+    'backup_freshness',
+    ageHours <= maxAgeHours,
+    `last successful backup ${ageHours.toFixed(1)}h ago (limit ${maxAgeHours}h)`,
+    { age_hours: Number(ageHours.toFixed(1)) },
+  );
+}
+
 function summarize(results) {
   if (!Array.isArray(results) || results.length === 0) throw new Error('At least one check result is required.');
   const failures = results.filter(result => !result.ok);
@@ -413,6 +468,7 @@ module.exports = {
   adminRouteRequiresAuth,
   alertDeliveryAccepted,
   backupAgeHours,
+  backupFreshnessCheck,
   buildAlertPayload,
   buildAlertRequest,
   checkResult,
@@ -427,6 +483,7 @@ module.exports = {
   shouldDispatchAlert,
   storeRouteIsClosed,
   summarize,
+  systemdTimestampToIso,
   telegramAccepted,
   validateAlertUrl,
   validateMonitoringConfig,
