@@ -82,15 +82,15 @@
 
 ### B3 2026-09-17 状态与未结项
 
-**已完成**：商务后台**已激活并在跑**（`current` → `764221a`，服务 active、NRestarts=0，只监听回环），3 个备份定时器已 enable，服务已 enable 开机自启，首次加密备份 + OSS 精确版本回读 + 隔离恢复演练全部通过，线上店铺全程 200 无中断。
+**已完成**：商务后台**已激活并在跑**（`current` → `9bac8dc`，服务 enabled+active、NRestarts=0，只监听回环），4 个定时器（3 个备份 + 监控）全部 enabled，服务已 enable 开机自启，首次加密备份 + OSS 精确版本回读 + 隔离恢复演练全部通过，线上店铺全程 200 无中断，**监控 12/12 全部真实检查（无任何跳过行）**。
 
 **未结项（按优先级）**：
 
-1. **P0｜定时备份的异地上传修好但未上线**：`ExecStartPost` 读不到 systemd 凭据（实测 EACCES，见 RUNBOOK §9.4），所以"每日备份"一直只落本地、异地副本静默落后。代码已修（`run-scheduled-backup.mjs`，与演练同形），**需要一次 release 才生效**。当日的缺口已用演练路径手工补传（收据 7 份）。
-2. **P0｜店主账号未建**：等店主给邮箱（见上）。
-3. **P0｜一个数据库只能激活一个 release**：`assertMigrationEvidence` 只接受 `initialization === 'empty-database'`，而每次激活都强制要求该证据 → **库里一旦有真实业务数据，下次发版必须清库**。现在库里 0 业务数据，是修它的唯一便宜时机。**在补上"后续 release 升级证据路径"之前，不要往后台录真实商品/客户数据。**
-4. **P1｜备份新鲜度缺少跨重启的可靠信号**：`backup_freshness` 目前只能读 systemd 运行时状态（重启后为空，已修成"报失败"而不是崩溃，但重启后到下次备份前会误报）。干净做法是让备份把时间戳写进监控可读的文件（`PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` 已支持该机制、但**尚无写入方**），需要动 release 侧单元。
-5. **P1｜`SKIP_SYSTEMD_CHECKS` 待删**：等第 1 项上线后删掉，监控回到 12/12 全真实检查。
+1. **P0｜店主账号未建**：等店主给一个**小写**邮箱（脚本的校验只接受小写完整地址）；密码由 `provision-production-owner-credentials.mjs` 随机生成、写入 root-only 文件、**不打印**。拿到邮箱后跑 `finalize-production-admin.sh <ID>` 即可（它还会复核 owner 登录、跑管理端验证、并 enable 服务与 3 个定时器——这几项现已手工完成，重复执行是幂等的）。
+2. **P0｜一个数据库只能激活一个 release**：`assertMigrationEvidence` 只接受 `initialization === 'empty-database'`，而每次激活都强制要求该证据 → **库里一旦有真实业务数据，下次发版必须清库**。今天两次激活、两次清库都只是"库恰好是空的"。**在补上"后续 release 升级证据路径"之前，不要往后台录真实商品/客户数据。**
+3. **P1｜备份新鲜度缺少跨重启的可靠信号**：`backup_freshness` 仍只能读 systemd 运行时状态（重启后该属性为空）。已修成"报失败"而不是崩溃，但**重启后到下一次备份之间会误报一次**。干净做法是让备份把时间戳写进监控可读的文件（`PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` 机制已支持、**尚无写入方**），需要动 release 侧单元；注意 `/var/backups/pawshop` 是 `0700 pawshop-backup`，监控用户读不到。
+
+**已结项（同日）**：定时备份的异地同步（`ExecStartPost` 读不到 systemd 凭据 → 异地副本静默落后）已随 release `9bac8dc` 修复并实测通过；`SKIP_SYSTEMD_CHECKS` 已删除，监控不再有任何跳过行。
 
 ---
 

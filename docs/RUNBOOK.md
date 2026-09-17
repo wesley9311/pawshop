@@ -220,20 +220,18 @@ cat /var/lib/pawshop-monitor/alert-state.json
 
 ### 9.2 上线首阶段的临时跳过（**激活商务后必须删除**）
 
-**2026-09-17 状态：`SKIP_COMMERCE_CHECKS` 已删除**（商务已激活，三项 commerce 检查改为真实探测，实测 `commerce_health` 200 / `store_api_closed` 400 / `admin_requires_auth` 401）。**`SKIP_SYSTEMD_CHECKS` 暂时保留**，原因不是"还没上线"，而是当日实测出的一处真实缺陷：定时备份的异地上传步骤（原 `ExecStartPost`）**读不到 systemd 注入的凭据**（见 §9.4），`pawshop-backup.service` 因此报 `Result=exit-code`。此时删掉这一行，监控会每 30 分钟对一条**已知且已定位**的故障告警，属于噪音；修复 release 上线后再删，届时 12/12 全部为真实检查。
+**2026-09-17 状态：`SKIP_COMMERCE_CHECKS` 已删除**（商务已激活，三项 commerce 检查改为真实探测，实测 `commerce_health` 200 / `store_api_closed` 400 / `admin_requires_auth` 401）。**`SKIP_SYSTEMD_CHECKS` 也已删除**——备份异地同步的缺陷修好并上线后（release `9bac8dc`），`pawshop-backup.service` 实测 `result=success`，监控回到 **12/12 全部真实检查**（`backup_freshness ok (last successful backup 0.0h ago (limit 36h))`）。原计划的"暂时保留"已不再需要，理由记录在 §9.2.1。
 
-`/etc/pawshop-monitor/monitoring.env` 当前只含一行跳过：
+**当时的过渡状态（历史记录）**：`SKIP_SYSTEMD_CHECKS` 曾短暂保留，原因不是"还没上线"，而是当日实测出的一处真实缺陷：定时备份的异地上传步骤（原 `ExecStartPost`）**读不到 systemd 注入的凭据**（见 §9.2.1），`pawshop-backup.service` 因此报 `Result=exit-code`。那时删掉这一行，监控会每 30 分钟对一条**已知且已定位**的故障告警，属于噪音。
 
-```ini
-PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1
-```
+`/etc/pawshop-monitor/monitoring.env` 现在**不含任何跳过行**：
 
-- `SKIP_SYSTEMD_CHECKS`：跳过 `backup_freshness`，检查详情写明"skipped by explicit configuration"。
+- `SKIP_SYSTEMD_CHECKS`（已删除）：曾跳过 `backup_freshness`。
 - `SKIP_COMMERCE_CHECKS`（已删除）：留下它的语义是"商务后台未激活时，`commerce_health` / `store_api_closed` / `admin_requires_auth` 三项记为显式跳过，**每次运行都会打一条 WARN**"，避免把"跳过"误读成"已验证"。
 
-跳过是**临时状态**：备份修复后必须删掉，监控应变成 12/12 且全部为真实检查。**留着会掩盖真实的 commerce 宕机与备份中断。**
+跳过只能是**临时状态**：留着会掩盖真实的 commerce 宕机与备份中断。两行的删除都已实测确认为 12/12 全真实检查。
 
-### 9.4 定时备份的异地上传为什么必须在主进程里做（2026-09-17 实测）
+### 9.2.1 定时备份的异地上传为什么必须在主进程里做（2026-09-17 实测）
 
 `pawshop-backup.service` 原先是 `ExecStart=backup-production.mjs` + `ExecStartPost=sync-production-backups.mjs`。**这个形状在这台主机上永远跑不通**：异地同步必须从 systemd 凭据目录读 S3 密钥，而单元一旦设置**私有挂载命名空间**相关的加固项，`ExecStartPost` 进程读自己单元的凭据会 **EACCES**。
 
@@ -458,3 +456,48 @@ systemctl list-timers 'pawshop-*' --no-pager
 **已知会留在桶里的无害对象**：`pawshop/database-backups/daily/.pawshop-credential-check.txt`（`ops/commerce/verify-offsite-credential.mjs` 自检时写入；**两个版本**，各约 40 字节——第二版是"覆盖上传"那一步，第一版正是"覆盖后旧版本仍可读"这条证明的取证对象）。写入它的凭据**故意没有删除权限**（这正是被验证的能力），所以它会随 `daily/` 的 90 天规则自然到期；想立刻清掉就用管理凭据删。
 
 **回滚**：`ops/commerce/rollback-commerce.sh`（切换 `current` 并重启）；监控与告警不依赖 commerce，激活失败不会影响站点与监控。
+
+### 11.1 第二次激活（re-activation）实测：两处必须手工"就位"（2026-09-17）
+
+**先退回"已迁移、未激活"状态。** `rollback-commerce.sh` 只能切到另一个保留 release，**不能"切到没有"**，所以要手动退：
+
+```bash
+systemctl stop pawshop-commerce.service
+systemctl disable pawshop-commerce.service
+rm -f /srv/pawshop-commerce/current
+# 门禁必须回到 fail-closed，否则迁移脚本会拒绝（它硬要求这一行等于 0）
+sed -i 's/^PAWSHOP_MIGRATIONS_CONFIRMED=1$/PAWSHOP_MIGRATIONS_CONFIRMED=0/' /etc/pawshop/commerce.env
+```
+
+之后按 §11 的 1→4 走。**注意这必然清空生产库**（证据契约只接受空库首次迁移，见 §11.2 与 `REMAINING_WORK` B3）；期间后台不可用几分钟，展示站不受影响（实测 71 次采样 0 次非 200）。
+
+**deploy 之前必须手工完成的两件"就位"（deploy 只比对、不安装）：**
+
+1. **该 release 改动过的 systemd 单元**。`deploy-commerce.sh` 第 126 行只对 8 个单元做 `cmp`，不一致即报 `Installed runtime units do not match the exact candidate release.` 并在切换 `current` **之前**中止（安全，但会让你以为"改了代码却没生效"）。**修过一次单元就会踩一次**（本轮 `pawshop-backup.service` 就是）：
+
+```bash
+REL=/srv/pawshop-commerce/releases/<RELEASE_SHA>
+cp -a /etc/systemd/system/pawshop-*.service /etc/systemd/system/pawshop-*.timer \
+      /root/pawshop-unit-snapshot-$(date -u +%Y%m%dT%H%M%SZ)/
+for u in pawshop-commerce.service pawshop-backup.service pawshop-backup.timer \
+         pawshop-backup-monthly.service pawshop-backup-monthly.timer \
+         pawshop-backup-yearly.service pawshop-backup-yearly.timer pawshop-restore-verify.service; do
+  if ! cmp -s "$REL/ops/commerce/$u" "/etc/systemd/system/$u"; then
+    install -o root -g root -m 0644 "$REL/ops/commerce/$u" "/etc/systemd/system/$u"
+  fi
+done
+systemctl daemon-reload
+```
+
+2. **libexec 的 4 个文件**（`restore-verify-production.mjs`、`backup-integrity.cjs`、`monitor-production.mjs`、`monitoring-policy.cjs`）：deploy 第 131-136 行逐个 `cmp`，演练只比对前两个。从该 release 安装并逐个复核：
+
+```bash
+for s in restore-verify-production.mjs backup-integrity.cjs monitor-production.mjs monitoring-policy.cjs; do
+  install -o root -g root -m 0555 "$REL/_commerce/scripts/$s" "/usr/local/libexec/pawshop/$s"
+  cmp -s "$REL/_commerce/scripts/$s" "/usr/local/libexec/pawshop/$s"
+done
+```
+
+> ⚠️ **`set -Eeuo pipefail` 下 `diff a b | head` 会中止整个脚本**（`pipefail` 让管道取到 `diff` 的退出码 1，`head` 救不了）。本轮因此在"打印差异"后整段安装循环没跑，输出却看起来只是"打印了差异"。比对循环里任何可能返回非 0 的命令都要包 `if` 或 `|| true`。
+
+**本轮实测结果**：release `9bac8dc2913f4fcf9740de07aa757499ae82ccd3`，内容摘要 `9dff5f3121c1b279bfd3b4c3c0c38211eb18a00fb91258a82cd974e870f74b26`，构建 3m19s；迁移、演练、激活全绿；激活后**定时备份单元首次实测 `result=success`**（dump 与异地同步都在主进程内完成，收据带精确版本号），监控 **12/12 全部真实检查**。
