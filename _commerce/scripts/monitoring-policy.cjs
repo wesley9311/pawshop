@@ -424,6 +424,31 @@ function telegramAccepted(bodyText) {
   return parsed !== null && parsed.ok === true;
 }
 
+// Only the numeric verdict reaches the journal. The raw response body can echo
+// request details back and is never logged or stored, but a bare "did not accept
+// the payload" is undiagnosable at 3am: the provider's own code is what says why.
+const ALERT_PROVIDER_CODE_HINTS = Object.freeze({
+  19021: 'provider rejected the message: this bot requires a signature or timestamp the monitor does not send',
+  19024: 'provider rejected the message: this bot has a keyword requirement the alert text does not contain',
+});
+
+function alertProviderErrorCode(bodyText) {
+  const parsed = parseJsonObject(bodyText);
+  if (parsed === null) return null;
+  for (const key of ['code', 'StatusCode', 'error_code']) {
+    const value = parsed[key];
+    if (Number.isInteger(value)) return value;
+    if (typeof value === 'string' && /^-?\d+$/.test(value)) return Number(value);
+  }
+  return null;
+}
+
+function describeAlertProviderCode(code) {
+  if (!Number.isInteger(code)) return '';
+  const hint = ALERT_PROVIDER_CODE_HINTS[code];
+  return hint === undefined ? '' : `: ${hint}`;
+}
+
 // Accepts either a resolved channel ({label, provider, url}) or the legacy
 // single-channel config ({alertProvider, telegramChatId}); the provider key is
 // read from whichever is present.
@@ -467,12 +492,14 @@ module.exports = {
   REQUIRED_SECURITY_HEADERS,
   adminRouteRequiresAuth,
   alertDeliveryAccepted,
+  alertProviderErrorCode,
   backupAgeHours,
   backupFreshnessCheck,
   buildAlertPayload,
   buildAlertRequest,
   checkResult,
   daysUntilExpiry,
+  describeAlertProviderCode,
   feishuAccepted,
   formatAlertText,
   formatLogLine,

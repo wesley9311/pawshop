@@ -19,9 +19,10 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  EXIT_CODES, adminRouteRequiresAuth, alertDeliveryAccepted, backupAgeHours, backupFreshnessCheck,
+  EXIT_CODES, adminRouteRequiresAuth, alertDeliveryAccepted, alertProviderErrorCode, backupAgeHours,
+  backupFreshnessCheck,
   buildAlertPayload,
-  buildAlertRequest, checkResult, daysUntilExpiry,
+  buildAlertRequest, checkResult, daysUntilExpiry, describeAlertProviderCode,
   formatLogLine, missingSecurityHeaders, nextAlertState, redactUrl, shouldDispatchAlert,
   storeRouteIsClosed, summarize, validateMonitoringConfig,
 } = require('./monitoring-policy.cjs');
@@ -275,7 +276,11 @@ async function deliverToChannel(channel, payload) {
     // decides acceptance too. It is read once, never logged and never stored.
     const bodyText = await response.text().catch(() => '');
     if (!alertDeliveryAccepted(channel.provider, response.status, bodyText)) {
-      log('ERROR', `alert channel ${channel.label} did not accept the payload (status ${response.status})`);
+      // The provider's numeric code is the only part of the body that may be
+      // logged; without it a rejected channel is undiagnosable from the journal.
+      const providerCode = alertProviderErrorCode(bodyText);
+      log('ERROR', `alert channel ${channel.label} did not accept the payload (status ${response.status}, `
+        + `provider code ${providerCode === null ? 'none' : providerCode}${describeAlertProviderCode(providerCode)})`);
       return false;
     }
     log('INFO', `alert channel ${channel.label} accepted the payload`);

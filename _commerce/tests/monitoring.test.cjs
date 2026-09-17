@@ -6,9 +6,11 @@ const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const {
   ALERT_ENVELOPE, ALERT_PROVIDERS, ALERT_TEXT_MAX_CHARS, EXIT_CODES, REQUIRED_SECURITY_HEADERS,
-  adminRouteRequiresAuth, alertDeliveryAccepted, backupAgeHours, backupFreshnessCheck, buildAlertPayload,
+  adminRouteRequiresAuth, alertDeliveryAccepted, alertProviderErrorCode, backupAgeHours,
+  backupFreshnessCheck, buildAlertPayload,
   buildAlertRequest,
-  checkResult, daysUntilExpiry, feishuAccepted, formatAlertText, formatLogLine, missingSecurityHeaders,
+  checkResult, daysUntilExpiry, describeAlertProviderCode, feishuAccepted, formatAlertText, formatLogLine,
+  missingSecurityHeaders,
   nextAlertState, redactUrl, shouldDispatchAlert, storeRouteIsClosed, summarize, systemdTimestampToIso,
   telegramAccepted,
   validateMonitoringConfig,
@@ -232,6 +234,33 @@ test('a chat channel that answers 200 with an error code counts as a failed deli
   assert.match(monitor, /const alertDeliveryFailed = dispatchResult\.attempted && !dispatchResult\.dispatched/);
   assert.doesNotMatch(monitor, /const alertDeliveryFailed = dispatchResult\.configured/);
   assert.match(monitor, /attempted: true, \.\.\.\(await dispatchAlert\(buildAlertPayload/);
+});
+
+test('a rejected channel names the provider error code and never the response body', () => {
+  // Regression: a live Feishu channel answered 200 with {"code":19024} and the
+  // journal only said "did not accept the payload", so diagnosing it required
+  // writing an ad-hoc probe script against the production webhook.
+  assert.equal(alertProviderErrorCode('{"code":19024,"data":{},"msg":"Key Words Not Found"}'), 19024);
+  assert.equal(alertProviderErrorCode('{"StatusCode":0,"StatusMessage":"success"}'), 0);
+  assert.equal(alertProviderErrorCode('{"error_code":"19021"}'), 19021);
+  assert.equal(alertProviderErrorCode('ok'), null);
+  assert.equal(alertProviderErrorCode(''), null);
+  assert.equal(alertProviderErrorCode('<html>gateway</html>'), null);
+  assert.equal(alertProviderErrorCode('{"code":null}'), null);
+  assert.equal(alertProviderErrorCode('{"code":"not-a-number"}'), null);
+
+  assert.match(describeAlertProviderCode(19024), /keyword/);
+  assert.match(describeAlertProviderCode(19021), /signature/);
+  // An unknown code is still reported; only the invented explanation is withheld.
+  assert.equal(describeAlertProviderCode(4242), '');
+  assert.equal(describeAlertProviderCode(null), '');
+  assert.equal(describeAlertProviderCode('19024'), '');
+
+  assert.match(monitor, /alertProviderErrorCode\(bodyText\)/);
+  assert.match(monitor, /describeAlertProviderCode\(providerCode\)/);
+  // The body itself must stay out of the journal: only the numeric code is logged.
+  assert.doesNotMatch(monitor, /did not accept the payload[^`]*\$\{bodyText\}/);
+  assert.doesNotMatch(monitor, /log\([^)]*bodyText\)/);
 });
 
 test('alerting fans out over every configured channel and needs one acknowledgement', () => {

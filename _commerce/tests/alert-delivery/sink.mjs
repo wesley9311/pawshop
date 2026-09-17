@@ -18,6 +18,10 @@ const responses = {
   '/feishu-ok': [200, '{"code":0,"msg":"success"}'],
   '/feishu-ok-v1': [200, '{"StatusCode":0,"StatusMessage":"success"}'],
   '/feishu-bad': [200, '{"code":9499,"msg":"param invalid"}'],
+  // The exact rejection a live channel produced on 2026-09-17: the bot's keyword
+  // security setting did not match the alert text, so every alert was dropped
+  // while the monitor still reported healthy.
+  '/feishu-keyword': [200, '{"code":19024,"data":{},"msg":"Key Words Not Found"}'],
   '/slack-ok': [200, 'ok'],
   '/slack-400': [400, 'invalid_payload'],
   '/telegram-ok': [200, '{"ok":true,"result":{"message_id":1}}'],

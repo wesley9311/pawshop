@@ -55,7 +55,7 @@ export PAWSHOP_MONITOR_TELEGRAM_CHAT_ID=-1001234567890
 export NODE_TLS_REJECT_UNAUTHORIZED=0
 
 run_case() {
-  local label="$1" provider="$2" url="$3" expected="$4" state="$5"
+  local label="$1" provider="$2" url="$3" expected="$4" state="$5" expect_log="${6:-}"
   export PAWSHOP_MONITOR_ALERT_PROVIDER="$provider"
   export PAWSHOP_MONITOR_ALERT_WEBHOOK="$url"
   unset PAWSHOP_MONITOR_ALERT_CHANNELS
@@ -64,6 +64,9 @@ run_case() {
   output="$("$NODE" --import "$DIR/dns-stub.mjs" "$MONITOR" 2>&1)" && code=0 || code=$?
   [ "$code" -eq "$expected" ] || verdict=FAIL
   echo "$output" | grep -qE 'TypeError|SyntaxError|unhandled' && verdict=FAIL
+  # A rejection the journal cannot explain costs an operator a manual probe
+  # against the production webhook, so the provider's own code must be named.
+  if [ -n "$expect_log" ] && ! echo "$output" | grep -qF "$expect_log"; then verdict=FAIL; fi
   printf -- '--- %-34s exit=%s expected=%s %s\n' "$label" "$code" "$expected" "$verdict"
   if [ "$verdict" = PASS ]; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); fi
 }
@@ -90,6 +93,8 @@ echo "=== alert delivery end-to-end ==="
 rm -f "$WORK"/state-*.json
 run_case "feishu accepted"        feishu   "https://open.feishu.cn:$PORT/feishu-ok"        1 feishu
 run_case "feishu 200 + error code" feishu  "https://open.feishu.cn:$PORT/feishu-bad"       2 feishu-bad
+run_case "feishu keyword rejection" feishu "https://open.feishu.cn:$PORT/feishu-keyword"   2 feishu-keyword \
+  "provider code 19024: provider rejected the message: this bot has a keyword requirement"
 run_case "feishu v1 StatusCode"    feishu  "https://open.feishu.cn:$PORT/feishu-ok-v1"     1 feishu-v1
 run_case "slack accepted"          slack   "https://hooks.slack.com:$PORT/slack-ok"        1 slack
 run_case "slack 400"               slack   "https://hooks.slack.com:$PORT/slack-400"       2 slack-bad
