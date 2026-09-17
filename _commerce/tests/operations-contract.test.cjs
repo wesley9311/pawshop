@@ -31,6 +31,7 @@ const environmentProvisioner = readFileSync(resolve(root, '..', 'ops/commerce/pr
 const passwordResetSubscriber = readFileSync(resolve(root, 'src/subscribers/password-reset.ts'), 'utf8');
 const ownerRotation = readFileSync(resolve(root, 'scripts/reset-production-owner-password.mjs'), 'utf8');
 const ownerRotationWrapper = readFileSync(resolve(root, '..', 'ops/commerce/reset-production-owner-password.sh'), 'utf8');
+const ownerCreation = readFileSync(resolve(root, 'scripts/create-production-owner.mjs'), 'utf8');
 
 test('real backup is encrypted and plaintext is removed', () => {
   assert.match(backup, /aes-256-cbc/);
@@ -328,4 +329,14 @@ test('the password reset path is wired, and the fallback proves itself', () => {
   assert.match(ownerRotationWrapper, /systemctl restart pawshop-commerce\.service/);
   assert.match(ownerRotationWrapper, /verify-production-owner-login\.mjs/);
   assert.match(ownerRotationWrapper, /flock -n 9/);
+
+  // Medusa resolves medusa-config against the directory it is handed, and the
+  // production config is compiled into .medusa/server only. The first live run of
+  // this script failed with "Cannot find module medusa-config" because it pointed
+  // at _commerce - nothing had ever created an owner before, so no earlier attempt
+  // could have caught it.
+  assert.match(ownerCreation, /const serverDirectory = join\(release, '_commerce', '\.medusa', 'server'\)/);
+  assert.match(ownerCreation, /directory: serverDirectory/);
+  assert.match(ownerCreation, /process\.chdir\(serverDirectory\)/);
+  assert.doesNotMatch(ownerCreation, /directory: join\(release, '_commerce'\)/);
 });

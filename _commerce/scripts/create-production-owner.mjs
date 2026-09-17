@@ -29,6 +29,20 @@ function readRootFile(path, maximum, label, { gid = 0, mode = 0o600 } = {}) {
   try { return readFileSync(descriptor, 'utf8'); } finally { closeSync(descriptor); }
 }
 
+// Medusa resolves `medusa-config` relative to the directory it is handed, and the
+// production config exists only as compiled JavaScript under `.medusa/server`: the
+// TypeScript source beside it needs a dev-mode loader that production must not
+// depend on. Handing the CLI `_commerce` failed with "Cannot find module
+// medusa-config" the first time this script was ever run against a live release,
+// because no owner had been created before that moment.
+const serverDirectory = join(release, '_commerce', '.medusa', 'server');
+for (const entry of ['medusa-config.js', 'package.json']) {
+  const file = lstatSync(join(serverDirectory, entry), { throwIfNoEntry: false });
+  if (!file || !file.isFile() || file.isSymbolicLink()) {
+    throw new Error(`The compiled production server is missing ${entry}.`);
+  }
+}
+
 const pawshopUid = Number(execFileSync('/usr/bin/id', ['-u', 'pawshop'], { encoding: 'utf8' }).trim());
 const pawshopGid = Number(execFileSync('/usr/bin/id', ['-g', 'pawshop'], { encoding: 'utf8' }).trim());
 let credentials;
@@ -55,7 +69,7 @@ Object.assign(process.env, environment, {
   // here rather than leaving the loader to mistake the override for a real value.
   [CLI_WORKER_OVERRIDE]: 'user',
 });
-process.chdir(join(release, '_commerce'));
+process.chdir(serverDirectory);
 process.setgroups([pawshopGid]);
 process.setgid(pawshopGid);
 process.setuid(pawshopUid);
@@ -88,6 +102,6 @@ const commandPath = join(release, '_commerce/node_modules/@medusajs/medusa/dist/
 const createUser = require(commandPath).default;
 if (typeof createUser !== 'function') throw new Error('The pinned Medusa owner command is unavailable.');
 await createUser({
-  directory: join(release, '_commerce'), email: credentials.email, password: credentials.password,
+  directory: serverDirectory, email: credentials.email, password: credentials.password,
   keepAlive: false, invite: false,
 });
