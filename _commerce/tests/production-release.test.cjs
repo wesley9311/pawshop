@@ -19,6 +19,7 @@ const releaseManifest = readFileSync(resolve(root, '_commerce/scripts/release-ma
 const trackedVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-tracked-release.mjs'), 'utf8');
 const firstMigration = readFileSync(resolve(root, 'ops/commerce/run-first-production-migration.sh'), 'utf8');
 const migrationRunner = readFileSync(resolve(root, '_commerce/scripts/run-first-production-migration.mjs'), 'utf8');
+const productionRunner = readFileSync(resolve(root, '_commerce/scripts/run-production.mjs'), 'utf8');
 const migrationWriter = readFileSync(resolve(root, '_commerce/scripts/write-production-migration-evidence.mjs'), 'utf8');
 const backupEvidenceWriter = readFileSync(resolve(root, '_commerce/scripts/write-production-backup-restore-evidence.mjs'), 'utf8');
 const firstBackupRestore = readFileSync(resolve(root, 'ops/commerce/run-first-production-backup-restore.sh'), 'utf8');
@@ -116,7 +117,14 @@ test('commerce activation consumes an immutable prepared release and verified ev
   assert.match(build, /validateProductionEnvironment/);
   assert.doesNotMatch(build, /commerce\.env|readFileSync/);
   assert.match(build, /HOME: '\/var\/cache\/pawshop-build'/);
-  assert.match(build, /NODE_OPTIONS: '--max-old-space-size=1536'/);
+  // The heap cap must fit the host's RAM plus swap, and the build must yield to
+  // production while it runs. 1536 MB on a 1.6 GB host thrashed the box hard
+  // enough to take nginx and sshd offline, so the cap is asserted as a range
+  // rather than as a number that would silently ratify an unsafe value.
+  const heapCapMb = Number(/NODE_OPTIONS: '--max-old-space-size=(\d+)'/.exec(build)?.[1]);
+  assert.ok(Number.isSafeInteger(heapCapMb), 'the release build must cap the Node heap explicitly');
+  assert.ok(heapCapMb >= 512 && heapCapMb <= 1280, `unsafe release build heap cap: ${heapCapMb}`);
+  assert.match(prepare, /ionice -c 3 nice -n 19/);
   assert.match(build, /npmGlobalConfig = '\/etc\/pawshop-build\/npmrc-empty'/);
   assert.match(build, /npmGlobalConfigStat\.isSymbolicLink\(\)/);
   assert.match(build, /npmGlobalConfigStat\.uid !== 0/);
@@ -154,6 +162,35 @@ test('first production migration is exact-release, empty-database, and fail-clos
   assert.match(migrationWriter, /already exists and cannot be replaced/);
   assert.match(migrationWriter, /if \(lock !== undefined\)/);
   assert.match(migrationWriter, /assertMigrationEvidence/);
+});
+
+test('server commands run from the compiled release directory, not the source root', () => {
+  // medusa-config is compiled JavaScript inside .medusa/server. The CLI resolves
+  // the config relative to its working directory, so running it from the source
+  // root failed with "Cannot find module medusa-config" and took the first
+  // production migration down with it. Both facts are assertions now.
+  assert.match(productionRunner, /\.medusa', 'server'/);
+  assert.match(migrationRunner, /\.medusa', 'server'/);
+  assert.match(productionRunner, /requireBuiltServerDirectory/);
+  assert.match(migrationRunner, /lstatSync\(builtServer/);
+  for (const guard of [
+    /compiled production server directory is missing/,
+    /compiled production server is missing/,
+  ]) {
+    assert.match(productionRunner, guard);
+  }
+  for (const guard of [
+    /compiled production server directory is missing/,
+    /compiled production configuration is missing/,
+  ]) {
+    assert.match(migrationRunner, guard);
+  }
+  // The build keeps compiling from the source root; only the server commands move.
+  assert.match(productionRunner, /command === 'build' \? root : requireBuiltServerDirectory/);
+  assert.match(productionRunner, /cwd: workingDirectory/);
+  assert.match(migrationRunner, /cwd: builtServer/);
+  // The deployment root keeps owning the safety scripts, so it must not be replaced.
+  assert.doesNotMatch(productionRunner, /cwd: root|cwd: join\(root\)/);
 });
 
 test('backup evidence requires authenticated offsite and isolated restore records', () => {

@@ -23,8 +23,22 @@ if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '0') {
   throw new Error('First production migration requires the fail-closed migration gate.');
 }
 
+// The migration runs from the built directory: medusa-config exists there as
+// compiled JavaScript, while the release root only holds the TypeScript source
+// that the CLI cannot load in production. The release root itself stays the
+// deployment root and keeps being validated above.
+const builtServer = join(root, '.medusa', 'server');
+const builtServerStat = lstatSync(builtServer, { throwIfNoEntry: false });
+if (!builtServerStat || !builtServerStat.isDirectory() || builtServerStat.isSymbolicLink()) {
+  throw new Error('The compiled production server directory is missing or unsafe.');
+}
+const builtConfigStat = lstatSync(join(builtServer, 'medusa-config.js'), { throwIfNoEntry: false });
+if (!builtConfigStat || !builtConfigStat.isFile() || builtConfigStat.isSymbolicLink()) {
+  throw new Error('The compiled production configuration is missing.');
+}
+
 const child = spawn(join(root, 'node_modules', '.bin', 'medusa'), ['db:migrate'], {
-  cwd: root,
+  cwd: builtServer,
   env: {
     HOME: '/var/lib/pawshop', LANG: 'C.UTF-8', PATH: '/usr/bin:/bin',
     NODE_OPTIONS: '--max-old-space-size=768', MEDUSA_DISABLE_TELEMETRY: 'true',
