@@ -2,8 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
-const { resolve } = require('node:path');
+const { readFileSync, mkdtempSync, mkdirSync, existsSync, readdirSync, writeFileSync, symlinkSync, rmSync } = require('node:fs');
+const { resolve, join } = require('node:path');
+const { tmpdir } = require('node:os');
+const { spawnSync } = require('node:child_process');
 const {
   assertProductionEnvironmentFileStat, parseProductionEnvironmentFile, requiredFields,
 } = require('../scripts/production-env-file.cjs');
@@ -14,6 +16,7 @@ const prepare = readFileSync(resolve(root, 'ops/commerce/prepare-commerce-releas
 const rollback = readFileSync(resolve(root, 'ops/commerce/rollback-commerce.sh'), 'utf8');
 const installer = readFileSync(resolve(root, 'ops/commerce/install-commerce-runtime.sh'), 'utf8');
 const build = readFileSync(resolve(root, '_commerce/scripts/run-release-build.mjs'), 'utf8');
+const seederPath = resolve(root, '_commerce/scripts/seed-module-migration-directories.mjs');
 const evidenceVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-release-evidence.mjs'), 'utf8');
 const releaseManifest = readFileSync(resolve(root, '_commerce/scripts/release-manifest.cjs'), 'utf8');
 const trackedVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-tracked-release.mjs'), 'utf8');
@@ -254,6 +257,54 @@ test('commerce release preparation builds an immutable candidate without activat
   assert.match(prepare, /npm_config_globalconfig="\$empty_npmrc"/);
   assert.match(prepare, /temporary artifacts were removed/);
   assert.doesNotMatch(prepare, /systemctl|current_link|commerce\.env|db:migrate|PAWSHOP_RELEASE_ACTIVATION_CONFIRMED/);
+  // The migration directories have to be seeded while the tree is still writable, and
+  // before it is sealed: after `chown -R root:root` the migrator could not create them.
+  assert.match(prepare, /seed-module-migration-directories\.mjs" "\$staging_dir"/);
+  const seedAt = prepare.indexOf('seed-module-migration-directories.mjs');
+  assert.ok(seedAt > prepare.indexOf('prune --omit=dev'), 'seeding must follow the final dependency install');
+  assert.ok(seedAt < prepare.indexOf('chown -R root:root'), 'seeding must precede sealing the release');
+});
+
+test('release preparation seeds the module migration directories MikroORM needs', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'pawshop-seed-'));
+  const linkedTarget = mkdtempSync(join(tmpdir(), 'pawshop-seed-link-'));
+  try {
+    const modules = join(fixture, '_commerce', 'node_modules', '@medusajs');
+    mkdirSync(join(modules, 'medusa', 'dist', 'migrations'), { recursive: true });
+    writeFileSync(join(modules, 'medusa', 'dist', 'migrations', 'Migration20231228143900.js'), '');
+    mkdirSync(join(modules, 'caching', 'dist'), { recursive: true });
+    mkdirSync(join(modules, 'caching', 'migrations'), { recursive: true });
+    mkdirSync(join(modules, 'file', 'dist'), { recursive: true });
+    mkdirSync(join(modules, 'locking'), { recursive: true });
+    writeFileSync(join(modules, 'stray.js'), '');
+    symlinkSync(linkedTarget, join(modules, 'linked'));
+
+    const run = spawnSync(process.execPath, [seederPath, fixture], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+
+    // A built package that ships no migrations gets an empty compiled directory, which
+    // is the path Medusa appends "migrations" to.
+    assert.deepEqual(readdirSync(join(modules, 'file', 'dist', 'migrations')), []);
+    // A package with no compiled directory gets one at its root instead.
+    assert.deepEqual(readdirSync(join(modules, 'locking', 'migrations')), []);
+    // A package that declares its own migrations keeps them, in either location, and is
+    // never shadowed by an empty directory that would silently stop applying changes.
+    assert.deepEqual(readdirSync(join(modules, 'medusa', 'dist', 'migrations')), ['Migration20231228143900.js']);
+    assert.equal(existsSync(join(modules, 'medusa', 'migrations')), false);
+    assert.equal(existsSync(join(modules, 'caching', 'dist', 'migrations')), false);
+    // Symlinks are not followed and non-directories are ignored.
+    assert.deepEqual(readdirSync(linkedTarget), []);
+    assert.equal(existsSync(join(fixture, '_commerce', 'node_modules', '@medusajs', 'stray.js', 'migrations')), false);
+    assert.match(run.stdout, /Seeded 2 empty module migration directories/);
+
+    // Anything that is not a prepared release is refused rather than guessed at.
+    for (const refused of [linkedTarget, join(fixture, 'missing'), 'relative/path']) {
+      assert.notEqual(spawnSync(process.execPath, [seederPath, refused], { encoding: 'utf8' }).status, 0);
+    }
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+    rmSync(linkedTarget, { recursive: true, force: true });
+  }
 });
 
 test('reviewed runtime installation remains dormant and refuses existing files', () => {

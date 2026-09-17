@@ -201,6 +201,11 @@ build_priority=(ionice -c 3 nice -n 19)
   npm_config_cache=/var/cache/pawshop-build/npm npm_config_userconfig=/dev/null \
   npm_config_globalconfig="$empty_npmrc" \
   /usr/bin/npm --prefix "$staging_dir/_commerce" prune --omit=dev --no-audit --no-fund
+# MikroORM's migrator ensureDir()s each module's migrations directory. A sealed
+# release is read-only, so any module that ships none would abort the module
+# migration with EACCES, after other modules had already been applied. Seed them
+# while the tree is still writable.
+/usr/bin/node "$staging_dir/_commerce/scripts/seed-module-migration-directories.mjs" "$staging_dir"
 
 /usr/bin/node "$source_dir/_commerce/scripts/verify-tracked-release.mjs" \
   "$source_dir" "$staging_dir" "$PAWSHOP_RELEASE_ID" >/dev/null
