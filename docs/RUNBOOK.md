@@ -409,7 +409,9 @@ git -C /srv/pawshop-source status --porcelain                # 必须为空
 
 ```bash
 # 1) 准备不可变 release（产出 release ID 与内容摘要）
-bash /srv/pawshop-source/ops/commerce/prepare-commerce-release.sh <RELEASE_SHA>
+#    注意：release ID 走【环境变量】，不是位置参数
+PAWSHOP_RELEASE_ID=<RELEASE_SHA> \
+  bash /srv/pawshop-source/ops/commerce/prepare-commerce-release.sh
 #    记下输出里的 RELEASE_ID 与 RELEASE_CONTENT_SHA256
 
 # 2) 首次数据库迁移（产出 /var/lib/pawshop-release-evidence/<sha>/migration.json）
@@ -421,8 +423,9 @@ PAWSHOP_FIRST_BACKUP_RESTORE_CONFIRMED=1 \
   bash /srv/pawshop-source/ops/commerce/run-first-production-backup-restore.sh \
   <RELEASE_SHA> <RELEASE_CONTENT_SHA256>
 
-# 4) 只有 3 成功后才允许激活
-bash /srv/pawshop-source/ops/commerce/deploy-commerce.sh <RELEASE_SHA> <RELEASE_CONTENT_SHA256>
+# 4) 只有 3 成功后才允许激活（内容摘要由脚本自己从 release 复算，无需传参）
+PAWSHOP_RELEASE_ID=<RELEASE_SHA> PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1 \
+  bash /srv/pawshop-source/ops/commerce/deploy-commerce.sh
 
 # 5) 激活后：删掉监控里那两行临时跳过，让 12 项检查全部变成真实检查
 #    删 PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS 与 PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS
