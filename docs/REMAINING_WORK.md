@@ -66,11 +66,11 @@
 3. `run-first-production-migration.sh` 执行首次迁移（写 `migration.json` 门禁）。
 4. `run-first-production-backup-restore.sh`：**首次加密备份 + 离线精确版本回读 + 隔离恢复演练**（写 `backup-restore.json`）。**这一步不通过就不允许激活。**
 5. `deploy-commerce.sh` 激活（`PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1`）→ 建 `current` + 重启服务。
-6. 激活后：删掉监控那两行临时跳过（A3）→ 启用 `pawshop-backup.timer` → 验证商品草稿上传。
+6. 激活后：删掉监控里的临时跳过行（A3）→ 启用 `pawshop-backup.timer` → 验证商品草稿上传。
 
-> ⚙️ 修正上轮的一处说法：**不再需要 `install-commerce-runtime.sh`**。它是"首次安装、且要求 libexec 为空"的语义，而主机上监控已经跑在 libexec 里（`monitor-production.mjs`、`monitoring-policy.cjs` 等），且 4 个单元已存在——它必然在前置检查处拒绝。现在的路径是 `deploy-commerce.sh`（它会把该 release 需要的单元与脚本按各自契约就位）。**店主不需要为此审阅"4 个单元的去留"。**
+> ⚙️ **2026-09-17 修正一处错误说法**：`deploy-commerce.sh` **不会安装** systemd 单元，它只把已安装单元与候选 release **逐字节比对**，不一致就**拒绝激活**（"Installed runtime units do not match the exact candidate release."）。会安装的是 `install-commerce-runtime.sh`，而它是"首次安装专用"（目标已存在即拒绝、要求无 `current`），在混合状态上不可用。当日实际发生的是：`pawshop-backup-monthly.{service,timer}` 与 `pawshop-backup-yearly.{service,timer}` 这 **4 个月/年归档单元从来没有被安装过**（release 里有、`/etc/systemd/system` 里没有），把激活门禁卡死。处置是按 release 内容逐字节 `install` + `cmp` 补齐（快照在 `/root/pawshop-unit-snapshot-*`）。**教训：部署脚本"比对"不等于"就位"，首次上线要自己核对单元清单是否真的装齐。**
 >
-> 另外，店主的**后台账号**（`/root/pawshop-production-owner-credentials.json`，现在不存在）由 `finalize-production-admin.sh` / `provision-production-owner-credentials.mjs` 在激活后创建——**这一步需要店主在场**（要设密码/确认邮箱），我会在那时候把交互命令给你。
+> 另外，店主的**后台账号**（`/root/pawshop-production-owner-credentials.json`）由 `finalize-production-admin.sh` / `provision-production-owner-credentials.mjs` 在激活后创建。**脚本不生成邮箱、需要店主给一个**（密码由脚本随机生成并写进 root-only 文件，不打印）。**当前阻塞在"等店主给邮箱"这一步。**
 
 **需要店主先拍板的一件事（B2）**：后台暴露方式。RUNBOOK 的既定设计是**回环 + SSH 隧道**（`127.0.0.1:9000`，不对外）。这最安全，但也意味着**浏览器里的中文运营台无法直接调 Admin API**（浏览器在你自己电脑上，够不到服务器的回环口）。三条路：
 
@@ -79,6 +79,18 @@
 - **(c) 直接公网暴露 Admin API**：不推荐。
 
 **我的判断：走 (b)**，但要在运营台开工前先定，否则运营台做完发现调不通。
+
+### B3 2026-09-17 状态与未结项
+
+**已完成**：商务后台**已激活并在跑**（`current` → `764221a`，服务 active、NRestarts=0，只监听回环），3 个备份定时器已 enable，服务已 enable 开机自启，首次加密备份 + OSS 精确版本回读 + 隔离恢复演练全部通过，线上店铺全程 200 无中断。
+
+**未结项（按优先级）**：
+
+1. **P0｜定时备份的异地上传修好但未上线**：`ExecStartPost` 读不到 systemd 凭据（实测 EACCES，见 RUNBOOK §9.4），所以"每日备份"一直只落本地、异地副本静默落后。代码已修（`run-scheduled-backup.mjs`，与演练同形），**需要一次 release 才生效**。当日的缺口已用演练路径手工补传（收据 7 份）。
+2. **P0｜店主账号未建**：等店主给邮箱（见上）。
+3. **P0｜一个数据库只能激活一个 release**：`assertMigrationEvidence` 只接受 `initialization === 'empty-database'`，而每次激活都强制要求该证据 → **库里一旦有真实业务数据，下次发版必须清库**。现在库里 0 业务数据，是修它的唯一便宜时机。**在补上"后续 release 升级证据路径"之前，不要往后台录真实商品/客户数据。**
+4. **P1｜备份新鲜度缺少跨重启的可靠信号**：`backup_freshness` 目前只能读 systemd 运行时状态（重启后为空，已修成"报失败"而不是崩溃，但重启后到下次备份前会误报）。干净做法是让备份把时间戳写进监控可读的文件（`PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` 已支持该机制、但**尚无写入方**），需要动 release 侧单元。
+5. **P1｜`SKIP_SYSTEMD_CHECKS` 待删**：等第 1 项上线后删掉，监控回到 12/12 全真实检查。
 
 ---
 

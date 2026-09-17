@@ -220,17 +220,36 @@ cat /var/lib/pawshop-monitor/alert-state.json
 
 ### 9.2 上线首阶段的临时跳过（**激活商务后必须删除**）
 
-`/etc/pawshop-monitor/monitoring.env` 当前含两行：
+**2026-09-17 状态：`SKIP_COMMERCE_CHECKS` 已删除**（商务已激活，三项 commerce 检查改为真实探测，实测 `commerce_health` 200 / `store_api_closed` 400 / `admin_requires_auth` 401）。**`SKIP_SYSTEMD_CHECKS` 暂时保留**，原因不是"还没上线"，而是当日实测出的一处真实缺陷：定时备份的异地上传步骤（原 `ExecStartPost`）**读不到 systemd 注入的凭据**（见 §9.4），`pawshop-backup.service` 因此报 `Result=exit-code`。此时删掉这一行，监控会每 30 分钟对一条**已知且已定位**的故障告警，属于噪音；修复 release 上线后再删，届时 12/12 全部为真实检查。
+
+`/etc/pawshop-monitor/monitoring.env` 当前只含一行跳过：
 
 ```ini
-PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS=1
 PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1
 ```
 
-- `SKIP_COMMERCE_CHECKS`：商务后台未激活时，`commerce_health` / `store_api_closed` / `admin_requires_auth` 三项记为"显式跳过"，**每次运行都会打一条 WARN**，检查详情也写明"skipped by explicit configuration"，避免把"跳过"误读成"已验证"。
-- `SKIP_SYSTEMD_CHECKS`：备份链未启用时跳过 `backup_freshness`。
+- `SKIP_SYSTEMD_CHECKS`：跳过 `backup_freshness`，检查详情写明"skipped by explicit configuration"。
+- `SKIP_COMMERCE_CHECKS`（已删除）：留下它的语义是"商务后台未激活时，`commerce_health` / `store_api_closed` / `admin_requires_auth` 三项记为显式跳过，**每次运行都会打一条 WARN**"，避免把"跳过"误读成"已验证"。
 
-两者都是**临时状态**：商务激活并启用备份后删掉这两行，监控应变成 12/12 且全部为真实检查。**留着会掩盖真实的 commerce 宕机与备份中断。**
+跳过是**临时状态**：备份修复后必须删掉，监控应变成 12/12 且全部为真实检查。**留着会掩盖真实的 commerce 宕机与备份中断。**
+
+### 9.4 定时备份的异地上传为什么必须在主进程里做（2026-09-17 实测）
+
+`pawshop-backup.service` 原先是 `ExecStart=backup-production.mjs` + `ExecStartPost=sync-production-backups.mjs`。**这个形状在这台主机上永远跑不通**：异地同步必须从 systemd 凭据目录读 S3 密钥，而单元一旦设置**私有挂载命名空间**相关的加固项，`ExecStartPost` 进程读自己单元的凭据会 **EACCES**。
+
+逐项二分实测（systemd 255 / Ubuntu 24.04，服务用户 `pawshop-backup` 读 `$CREDENTIALS_DIRECTORY` 里的凭据）：
+
+| 单元属性 | 凭据可读？ |
+| --- | --- |
+| `ProtectSystem=strict`、`ProtectHome=yes`、`PrivateTmp=yes`、`ProtectKernel{Tunables,Modules,ControlGroups}=yes` | **不可读（EACCES）** |
+| `NoNewPrivileges`、`UMask`、`CapabilityBoundingSet=`、`RestrictAddressFamilies`、`LockPersonality`、`RestrictSUIDSGID`、`ProtectClock`、`WorkingDirectory`、`EnvironmentFile` | 可读 |
+| 同样的加固项，但凭据在 **`ExecStart` 主进程**里读 | 可读 |
+
+所以修法是让两种步骤共用一个主进程：`ExecStart=/usr/bin/node scripts/run-scheduled-backup.mjs`，该脚本顺序 `await import('./backup-production.mjs')` 再 `await import('./sync-production-backups.mjs')`——和**已经验证通过的**首次备份演练（`run-first-production-backup.mjs`）完全同形，那正是演练一直能成功、而每日备份一直在悄悄漏上传的原因。
+
+后果与教训：这个缺陷**只会在第一次由 systemd 真正跑备份时暴露**（此前所有备份都是脚本手工跑的），而它一旦存在，本地密文照常生成、单元报失败、**异地副本静默落后**。现在 `operations-contract.test.cjs` 会断言该单元**不得**出现 `ExecStartPost`、且两个步骤必须同在主进程。
+
+**顺带修掉的同类问题（同一处判定里）**：`backup_freshness` 原来把 systemd 打印的时间戳（`Thu 2026-09-17 14:18:07 CST`）直接丢给 `Date`。JS 会把 `CST` 解析成**美国中部时间（UTC-6）**，比本机真实时区偏 14 小时，于是**一份 41 小时前的备份被算成 27 小时并通过 36 小时上限**（实测）。现在统一按本机墙钟时间解析，并把该判定收敛为可测的纯函数 `backupFreshnessCheck`——空时间戳也不再让整轮监控以未捕获异常崩掉（**崩掉的监控不会告警**，那才是这套 fail-closed 设计最怕的结果）。
 
 **回滚整个监控**：`systemctl disable --now pawshop-monitor.timer`（保留单元与配置，随时可再启用）。
 
