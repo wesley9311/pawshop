@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { assertProductionEnvironmentFileStat, parseProductionEnvironmentFile } = require('./production-env-file.cjs');
-const { validateProductionEnvironment } = require('../src/lib/production-policy.cjs');
+const { validateProductionEnvironment, CLI_WORKER_OVERRIDE } = require('../src/lib/production-policy.cjs');
 
 if (process.platform !== 'linux' || process.getuid() === 0 || process.argv.length !== 2) {
   throw new Error('First production migration must run as the unprivileged PawShop service account.');
@@ -43,6 +43,10 @@ const child = spawn(join(root, 'node_modules', '.bin', 'medusa'), ['db:migrate']
     HOME: '/var/lib/pawshop', LANG: 'C.UTF-8', PATH: '/usr/bin:/bin',
     NODE_OPTIONS: '--max-old-space-size=768', MEDUSA_DISABLE_TELEMETRY: 'true',
     ...environment,
+    // `medusa db:migrate` forces MEDUSA_WORKER_MODE=server before loading the
+    // config. The declaration above was already validated, so name the command and
+    // let the loader tell Medusa's own override apart from a real misconfiguration.
+    [CLI_WORKER_OVERRIDE]: 'db:migrate',
   },
   stdio: 'inherit',
 });

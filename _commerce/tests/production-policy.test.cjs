@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateProductionEnvironment } = require('../src/lib/production-policy.cjs');
+const { validateProductionEnvironment, CLI_WORKER_OVERRIDE, CLI_WORKER_OVERRIDE_COMMANDS } = require('../src/lib/production-policy.cjs');
 const { productionPort } = require('../scripts/production-runtime.cjs');
 const valid = () => ({
   NODE_ENV: 'production', PAWSHOP_MODE: 'production-admin-only',
@@ -87,6 +87,35 @@ test('single-host topology rejects public services and public admin origins', ()
     { MEDUSA_WORKER_MODE: 'server' },
     { MEDUSA_WORKER_MODE: 'worker' },
   ]) assert.throws(() => validateProductionEnvironment({ ...local, ...mutation }));
+});
+test('a Medusa CLI command may force server mode on a single host', () => {
+  const local = {
+    ...valid(),
+    PAWSHOP_INFRA_TOPOLOGY: 'single-host-private',
+    DATABASE_URL: 'postgresql://pawshop:private@127.0.0.1:5432/pawshop?sslmode=disable',
+    REDIS_URL: 'redis://pawshop:private@127.0.0.1:6379/0',
+    ADMIN_ORIGIN: 'http://127.0.0.1:9000',
+  };
+  // db:migrate, user, exec, db:rollback, db:run-scripts and db:migrate-search all
+  // assign MEDUSA_WORKER_MODE=server before loading the config. The wrapper names the
+  // command, and the declaration it was given has already been validated, so the
+  // forced value is expected rather than mistaken for a misconfigured deployment.
+  for (const command of CLI_WORKER_OVERRIDE_COMMANDS) {
+    const config = validateProductionEnvironment({
+      ...local, MEDUSA_WORKER_MODE: 'server', [CLI_WORKER_OVERRIDE]: command,
+    });
+    assert.equal(config.workerMode, 'server');
+  }
+  // The marker only excuses the one forced value, and only for a command Medusa
+  // actually runs: a split worker, or an unrecognised marker, stays refused.
+  for (const override of ['', 'start', 'db:migrate ', 'unknown-command']) {
+    assert.throws(() => validateProductionEnvironment({
+      ...local, MEDUSA_WORKER_MODE: 'server', [CLI_WORKER_OVERRIDE]: override,
+    }), /single-host/i);
+  }
+  assert.throws(() => validateProductionEnvironment({
+    ...local, MEDUSA_WORKER_MODE: 'worker', [CLI_WORKER_OVERRIDE]: 'db:migrate',
+  }), /single-host/i);
 });
 test('production port is a bounded positional value', () => {
   assert.equal(productionPort(), '9000');

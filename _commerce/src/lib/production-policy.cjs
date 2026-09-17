@@ -1,5 +1,16 @@
 'use strict';
 
+// Medusa's own CLI commands force MEDUSA_WORKER_MODE=server before they load the
+// config, because a CLI invocation is never the long-running worker. That
+// assignment is indistinguishable from an operator declaring "server" in the
+// environment file, and a single-host deployment must keep serving and processing
+// jobs in its one process. The wrappers that invoke such a command therefore name
+// the command in this variable, and only a known CLI command lets the forced
+// "server" through. A service start sets nothing here, so the declaration is still
+// enforced end to end for the process that actually runs the store.
+const CLI_WORKER_OVERRIDE = 'PAWSHOP_MEDUSA_CLI_COMMAND';
+const CLI_WORKER_OVERRIDE_COMMANDS = ['db:migrate', 'db:rollback', 'db:run-scripts', 'db:migrate-search', 'exec', 'user'];
+
 function explicitOrigin(env, field, { allowLoopbackHttp = false } = {}) {
   const value = env[field] || '';
   let url;
@@ -108,7 +119,9 @@ function validateProductionEnvironment(env) {
 
   const workerMode = env.MEDUSA_WORKER_MODE || 'shared';
   if (!['shared', 'server', 'worker'].includes(workerMode)) throw new Error('MEDUSA_WORKER_MODE must be shared, server, or worker.');
-  if (topology === 'single-host-private' && workerMode !== 'shared') {
+  const cliWorkerOverride = workerMode === 'server' &&
+    CLI_WORKER_OVERRIDE_COMMANDS.includes(env[CLI_WORKER_OVERRIDE] || '');
+  if (topology === 'single-host-private' && workerMode !== 'shared' && !cliWorkerOverride) {
     throw new Error('Single-host production requires MEDUSA_WORKER_MODE=shared.');
   }
   return {
@@ -121,4 +134,4 @@ function validateProductionEnvironment(env) {
   };
 }
 
-module.exports = { validateProductionEnvironment };
+module.exports = { validateProductionEnvironment, CLI_WORKER_OVERRIDE, CLI_WORKER_OVERRIDE_COMMANDS };

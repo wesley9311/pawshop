@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { validateProductionEnvironment } = require('../src/lib/production-policy.cjs');
+const { validateProductionEnvironment, CLI_WORKER_OVERRIDE } = require('../src/lib/production-policy.cjs');
 const { productionPort } = require('./production-runtime.cjs');
 validateProductionEnvironment(process.env);
 const command = process.argv[2];
@@ -43,7 +43,14 @@ const args = [command];
 if (command === 'start') args.push('--host', '127.0.0.1', '--port', productionPort(process.env.PORT));
 const child = spawn(join(root, 'node_modules', '.bin', 'medusa'), args, {
   cwd: workingDirectory,
-  env: { ...process.env, MEDUSA_DISABLE_TELEMETRY: 'true' },
+  env: {
+    ...process.env,
+    MEDUSA_DISABLE_TELEMETRY: 'true',
+    // `medusa db:migrate` forces MEDUSA_WORKER_MODE=server itself. Name the command
+    // so the config loader can tell Medusa's CLI override apart from an operator
+    // declaring a non-shared worker mode, which stays refused on a single host.
+    ...(command === 'db:migrate' ? { [CLI_WORKER_OVERRIDE]: command } : {}),
+  },
   stdio: 'inherit',
 });
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal));

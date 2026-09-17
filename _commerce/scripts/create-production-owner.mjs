@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { parseProductionEnvironmentFile } = require('./production-env-file.cjs');
+const { validateProductionEnvironment, CLI_WORKER_OVERRIDE } = require('../src/lib/production-policy.cjs');
 const { databaseConnection } = require('./production-private-paths.cjs');
 
 if (process.platform !== 'linux' || process.getuid() !== 0 || process.argv.length !== 4) {
@@ -45,7 +46,15 @@ const environment = parseProductionEnvironmentFile(readRootFile(
 if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '1' || environment.PAWSHOP_MODE !== 'production-admin-only') {
   throw new Error('Production owner creation requires the activated admin-only environment.');
 }
-Object.assign(process.env, environment, { MEDUSA_DISABLE_TELEMETRY: 'true', HOME: '/var/lib/pawshop' });
+// Validate the declaration as stored, before any Medusa CLI code can rewrite it.
+validateProductionEnvironment(environment);
+Object.assign(process.env, environment, {
+  MEDUSA_DISABLE_TELEMETRY: 'true', HOME: '/var/lib/pawshop',
+  // Medusa's `user` command forces MEDUSA_WORKER_MODE=server before it loads the
+  // config; the declaration above was validated a line earlier, so name the command
+  // here rather than leaving the loader to mistake the override for a real value.
+  [CLI_WORKER_OVERRIDE]: 'user',
+});
 process.chdir(join(release, '_commerce'));
 process.setgroups([pawshopGid]);
 process.setgid(pawshopGid);
