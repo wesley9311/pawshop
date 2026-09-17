@@ -8,6 +8,22 @@ const MIN_LOCAL_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const REMOTE_PREFIX = 'pawshop/database-backups';
 const RETENTION_DAYS = Object.freeze({ daily: 90, monthly: 365, yearly: 1095 });
 
+// The exact field set of /etc/pawshop-backup/backup-offsite.env. It lives here, next
+// to the retention tiers that are part of it, because the backup evidence writer
+// refuses to record evidence for a file whose fields are not exactly these. Keeping
+// the list beside RETENTION_DAYS is what stops the two from drifting apart - they did
+// once, and the first production backup died on the last step because of it.
+const OFFSITE_ENVIRONMENT_FIELDS = Object.freeze([
+  'PAWSHOP_BACKUP_S3_BUCKET', 'PAWSHOP_BACKUP_S3_DELETE_DISABLED', 'PAWSHOP_BACKUP_S3_ENDPOINT',
+  'PAWSHOP_BACKUP_S3_FORCE_PATH_STYLE', 'PAWSHOP_BACKUP_S3_REGION',
+  'PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED',
+  ...Object.keys(RETENTION_DAYS).map(tier => `PAWSHOP_BACKUP_S3_${tier.toUpperCase()}_RETENTION_DAYS`),
+].sort());
+
+function offsiteEnvironmentMatchesContract(fields) {
+  return [...fields].sort().join('\0') === OFFSITE_ENVIRONMENT_FIELDS.join('\0');
+}
+
 function validateOffsiteConfig(env, credentials) {
   let endpoint;
   try { endpoint = new URL(env.PAWSHOP_BACKUP_S3_ENDPOINT || ''); } catch { throw new Error('Backup object storage endpoint is invalid.'); }
@@ -124,12 +140,14 @@ function selectLocalPruneCandidates(entries, latestManifest, nowMs) {
 }
 
 module.exports = {
-  RETENTION_DAYS,
   MIN_LOCAL_AGE_MS,
   MIN_LOCAL_COPIES,
+  OFFSITE_ENVIRONMENT_FIELDS,
   REMOTE_PREFIX,
+  RETENTION_DAYS,
   archivePeriod,
   archiveReceiptIsValid,
+  offsiteEnvironmentMatchesContract,
   offsiteReceiptIsValid,
   remoteObjectKey,
   selectLocalPruneCandidates,

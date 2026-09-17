@@ -38,6 +38,36 @@ test('offsite config requires HTTPS, versioning, no-delete credentials, and all 
   assert.throws(() => remoteObjectKey('../escape.dump.enc'));
 });
 
+test('the offsite environment contract covers exactly the shipped example and policy tiers', () => {
+  const { OFFSITE_ENVIRONMENT_FIELDS, offsiteEnvironmentMatchesContract } = require('../scripts/offsite-backup-policy.cjs');
+  const example = require('node:fs')
+    .readFileSync(join(__dirname, '..', '..', 'ops', 'commerce', 'backup-offsite.env.example'), 'utf8');
+  const fields = [];
+  const values = {};
+  for (const line of example.split(/\r?\n/)) {
+    if (!line || line.startsWith('#')) continue;
+    const match = /^([A-Z][A-Z0-9_]*)=([^\s'"\\]+)$/.exec(line);
+    assert.ok(match, `example line is not a plain assignment: ${line}`);
+    fields.push(match[1]);
+    values[match[1]] = match[2];
+  }
+  // The shipped example, the contract the evidence writer enforces, and the validator
+  // must describe the same file: they drifted apart once and the first production
+  // backup failed on its final step because of it.
+  assert.equal(offsiteEnvironmentMatchesContract(fields), true);
+  assert.deepEqual([...OFFSITE_ENVIRONMENT_FIELDS], [
+    'PAWSHOP_BACKUP_S3_BUCKET', 'PAWSHOP_BACKUP_S3_DAILY_RETENTION_DAYS',
+    'PAWSHOP_BACKUP_S3_DELETE_DISABLED', 'PAWSHOP_BACKUP_S3_ENDPOINT',
+    'PAWSHOP_BACKUP_S3_FORCE_PATH_STYLE', 'PAWSHOP_BACKUP_S3_MONTHLY_RETENTION_DAYS',
+    'PAWSHOP_BACKUP_S3_REGION', 'PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED',
+    'PAWSHOP_BACKUP_S3_YEARLY_RETENTION_DAYS',
+  ].sort());
+  assert.doesNotThrow(() => validateOffsiteConfig(values, credentials));
+  // The single-tier field from before the tiered retention work must never come back.
+  assert.equal(offsiteEnvironmentMatchesContract([...fields, 'PAWSHOP_BACKUP_S3_RETENTION_DAYS']), false);
+  assert.equal(offsiteEnvironmentMatchesContract(fields.filter(field => field !== 'PAWSHOP_BACKUP_S3_YEARLY_RETENTION_DAYS')), false);
+});
+
 test('remote keys and archive periods are isolated by approved retention tier', () => {
   const file = 'pawshop_production_20260908T000000000Z.dump.enc';
   assert.equal(remoteObjectKey(file), `pawshop/database-backups/daily/${file}`);

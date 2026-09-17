@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const {
   assertProductionBackupManifest, backupManifestHmac, digestFile, equalHex, readBackupKey,
 } = require('./backup-integrity.cjs');
-const { offsiteReceiptIsValid, validateOffsiteConfig } = require('./offsite-backup-policy.cjs');
+const { OFFSITE_ENVIRONMENT_FIELDS, offsiteReceiptIsValid, validateOffsiteConfig } = require('./offsite-backup-policy.cjs');
 const { assertRestoreVerification, backupRestoreEvidence } = require('./first-production-backup-evidence.cjs');
 const { assertBackupRestoreEvidence, assertMigrationEvidence } = require('./release-evidence.cjs');
 const { RELEASE_ID } = require('./release-manifest.cjs');
@@ -58,12 +58,9 @@ function parseOffsiteEnvironment(source) {
     if (!match || Object.hasOwn(values, match[1])) throw new Error('Backup offsite environment is invalid.');
     values[match[1]] = match[2];
   }
-  const expected = [
-    'PAWSHOP_BACKUP_S3_BUCKET', 'PAWSHOP_BACKUP_S3_DELETE_DISABLED', 'PAWSHOP_BACKUP_S3_ENDPOINT',
-    'PAWSHOP_BACKUP_S3_FORCE_PATH_STYLE', 'PAWSHOP_BACKUP_S3_REGION',
-    'PAWSHOP_BACKUP_S3_RETENTION_DAYS', 'PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED',
-  ].sort();
-  if (Object.keys(values).sort().join('\0') !== expected.join('\0')) {
+  // The contract comes from the policy module that validates these values just
+  // below, so a new retention tier cannot leave this list behind again.
+  if (Object.keys(values).sort().join('\0') !== OFFSITE_ENVIRONMENT_FIELDS.join('\0')) {
     throw new Error('Backup offsite environment fields do not match the approved contract.');
   }
   return values;
