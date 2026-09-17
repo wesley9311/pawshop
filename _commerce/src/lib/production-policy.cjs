@@ -1,5 +1,7 @@
 'use strict';
 
+const { commerceIsOpen, isProductionMode } = require('./production-modes.cjs');
+
 // Medusa's own CLI commands force MEDUSA_WORKER_MODE=server before they load the
 // config, because a CLI invocation is never the long-running worker. That
 // assignment is indistinguishable from an operator declaring "server" in the
@@ -62,8 +64,8 @@ function httpsStorageUrl(env, field, { allowPath = false } = {}) {
 }
 
 function validateProductionEnvironment(env) {
-  if (env.NODE_ENV !== 'production' || env.PAWSHOP_MODE !== 'production-admin-only') {
-    throw new Error('Production requires NODE_ENV=production and PAWSHOP_MODE=production-admin-only.');
+  if (env.NODE_ENV !== 'production' || !isProductionMode(env.PAWSHOP_MODE)) {
+    throw new Error('Production requires NODE_ENV=production and an approved PAWSHOP_MODE.');
   }
   const topology = env.PAWSHOP_INFRA_TOPOLOGY;
   if (!['managed-tls', 'single-host-private'].includes(topology)) {
@@ -130,6 +132,8 @@ function validateProductionEnvironment(env) {
     workerMode,
     topology,
     fileStorage,
+    mode: env.PAWSHOP_MODE,
+    commerceOpen: commerceIsOpen(env.PAWSHOP_MODE),
     http: { storeCors, adminCors, authCors: adminCors, jwtSecret: env.JWT_SECRET, cookieSecret: env.COOKIE_SECRET },
   };
 }

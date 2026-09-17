@@ -34,6 +34,22 @@ test('single-host production is private, authenticated, and tunnel-only', () => 
   assert.equal(config.topology, 'single-host-private');
   assert.equal(config.http.adminCors, 'http://127.0.0.1:9000');
 });
+test('only the storefront profile opens customer commerce, and a mistyped mode keeps it shut', () => {
+  const { commerceIsOpen, isProductionMode, PRODUCTION_MODES } = require('../src/lib/production-modes.cjs');
+  assert.deepEqual(PRODUCTION_MODES, ['production-admin-only', 'production-storefront']);
+  assert.equal(commerceIsOpen('production-admin-only'), false);
+  assert.equal(commerceIsOpen('production-storefront'), true);
+  for (const value of [undefined, '', 'production-Storefront', 'storefront', 'local-admin-only', 'production-storefront ', 'true', 1, null]) {
+    assert.equal(isProductionMode(value), false);
+    assert.equal(commerceIsOpen(value), false);
+  }
+  const adminOnly = validateProductionEnvironment(valid());
+  assert.equal(adminOnly.mode, 'production-admin-only');
+  assert.equal(adminOnly.commerceOpen, false);
+  const storefront = validateProductionEnvironment({ ...valid(), PAWSHOP_MODE: 'production-storefront' });
+  assert.equal(storefront.mode, 'production-storefront');
+  assert.equal(storefront.commerceOpen, true);
+});
 test('production config fails closed without exposing supplied values', () => {
   const mutations = [
     { NODE_ENV: 'development' }, { PAWSHOP_MODE: 'live' },

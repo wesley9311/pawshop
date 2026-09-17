@@ -2,6 +2,7 @@
 
 const { parseProductionEnvironmentFile, requiredFields } = require('./production-env-file.cjs');
 const { validateProductionEnvironment } = require('../src/lib/production-policy.cjs');
+const { ADMIN_ONLY, isProductionMode } = require('../src/lib/production-modes.cjs');
 
 const internalFields = ['COOKIE_SECRET', 'DATABASE_URL', 'JWT_SECRET', 'REDIS_URL'].sort();
 
@@ -35,7 +36,10 @@ function parseSingleSecret(source) {
   return value;
 }
 
-function buildProductionEnvironment({ internalSource, accessKeySource, secretKeySource }) {
+function buildProductionEnvironment({ internalSource, accessKeySource, secretKeySource, mode = ADMIN_ONLY }) {
+  if (!isProductionMode(mode)) {
+    throw new Error('The requested production mode is not an approved profile.');
+  }
   const internal = parsePrivateKeyValueFile(internalSource, internalFields);
   const values = {
     ADMIN_ORIGIN: 'http://127.0.0.1:9000',
@@ -44,7 +48,7 @@ function buildProductionEnvironment({ internalSource, accessKeySource, secretKey
     NODE_ENV: 'production',
     PAWSHOP_INFRA_TOPOLOGY: 'single-host-private',
     PAWSHOP_MIGRATIONS_CONFIRMED: '0',
-    PAWSHOP_MODE: 'production-admin-only',
+    PAWSHOP_MODE: mode,
     PORT: '9000',
     S3_ACCESS_KEY_ID: parseSingleSecret(accessKeySource),
     S3_BUCKET: 'pawlivora-products-us-west-1',

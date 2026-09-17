@@ -1,6 +1,7 @@
 'use strict';
 
 const { resolve } = require('node:path');
+const { isProductionMode } = require('../src/lib/production-modes.cjs');
 
 const EXPECTED_BACKUP_DIR = '/var/backups/pawshop';
 const EXPECTED_BACKUP_KEY_FILE = '/etc/pawshop-backup/backup.key';
@@ -39,7 +40,7 @@ function databaseConnection(databaseUrl) {
 }
 
 function validateProductionBackupEnvironment(env) {
-  if (env.NODE_ENV !== 'production' || env.PAWSHOP_MODE !== 'production-admin-only' ||
+  if (env.NODE_ENV !== 'production' || !isProductionMode(env.PAWSHOP_MODE) ||
       env.PAWSHOP_INFRA_TOPOLOGY !== 'single-host-private') {
     throw new Error('Production backup requires the approved private production topology.');
   }
