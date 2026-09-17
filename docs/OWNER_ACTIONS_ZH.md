@@ -117,7 +117,7 @@ Webhook URL 等同于"能往你频道里发消息"的写入凭据，看到它的
 
 ## 2. 备份链（P0）— 阻塞已全部清除，凭据已实测
 
-**现状（2026-09-17）**：四处硬阻塞**全部清除**，备份专用凭据**已建立并实测通过**（能写、能精确回读、**不能删**）。首次加密备份 + 离线回读 + 隔离恢复演练，会在商务 release 就绪后按既定契约执行——**那个 release 需要先把待批准的提交推送到 GitHub**（§5.1）。
+**现状（2026-09-17，含一次实测修正）**：四处硬阻塞**全部清除**，备份专用凭据**已建立并实测通过**（能写、能精确回读、**不能删**）。首次加密备份按既有脚本执行时暴露了一个**我自己的设计漏洞**：运行时原来用 `GetBucketVersioning` 做上传前检查，而备份身份按设计读不到任何桶级信息，那个检查**永远不可能通过**。已改成**对象级证明**（每次上传必须拿到版本号 + 按精确版本回读），但这意味着**需要一个包含该修复的新 release**，首次备份才能跑通。首次加密备份 + 离线回读 + 隔离恢复演练，会在那个新 release 就绪后按既定契约执行——它需要先把提交推送到 GitHub（§5.1）。
 
 | 阻塞 | 内容 | 状态 |
 | --- | --- | --- |
@@ -130,17 +130,19 @@ Webhook URL 等同于"能往你频道里发消息"的写入凭据，看到它的
 
 | 闸门 | 含义 | 我怎么测的 |
 | --- | --- | --- |
-| `PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED=1` | 桶开了版本控制，覆盖也能找回 | `GetBucketVersioning` 返回 `Status=Enabled` |
+| `PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED=1` | 桶开了版本控制，覆盖也能找回 | 用**备份凭据自己**覆盖上传同一个对象后，**旧版本仍能按版本号读回原内容**（功能性证明，比读一个状态标记更硬；2026-09-17 生产桶实测通过） |
 | `PAWSHOP_BACKUP_S3_DELETE_DISABLED=1` | 备份账号**没有删备份的能力** | 用这把凭据真的发了一次 `DeleteObject` → **403 AccessDenied**；它还**读不了**生命周期规则（同样 403） |
 
 **凭据实测记录（在生产主机上、用真实凭据跑的）**：
 
 ```
-PASS 上传（PutObject）        HTTP 200
-PASS 探测（HeadObject+版本号） HTTP 200 versionId=CAEQABiBgMD8…
-PASS 回读明文一致（GetObject） HTTP 200 内容匹配=true
-PASS 删除被拒（DeleteObject）  HTTP 403 AccessDenied
-PASS 越权检查（读生命周期）      HTTP 403
+PASS 上传（PutObject）                HTTP 200 versionId=CAEQABiBgMCf…
+PASS 覆盖上传（PutObject）            HTTP 200 versionId=CAEQABiBgMCr…
+PASS 探测（HeadObject + 版本号）       HTTP 200 versionId=CAEQABiBgMCr…
+PASS 回读明文一致（GetObject）         HTTP 200 内容匹配=true
+PASS 覆盖后旧版本仍可读（版本控制）      HTTP 200 旧版本内容匹配=true
+PASS 删除被拒（DeleteObject）          HTTP 403
+PASS 生命周期规则不可读（越权检查）      HTTP 403
 ```
 
 ### 2.1 已建好的最小权限身份（供你复核，不需要你操作）
@@ -149,6 +151,7 @@ PASS 越权检查（读生命周期）      HTTP 403
 - 自定义策略：`pawshop-backup-writer-policy`
   - 允许：`oss:PutObject` / `oss:GetObject` / `oss:GetObjectVersion`（只限 `pawlivora-backups-us-west-1/pawshop/database-backups/*`）
   - **显式拒绝**：`oss:DeleteObject`、`oss:DeleteObjectVersion`、`oss:DeleteBucket`、`oss:PutBucketLifecycle`、`oss:PutBucketVersioning`、`oss:PutBucketPolicy`、`oss:PutBucketAcl`、`oss:PutBucketReplication`
+  - 实际上这个身份**连桶级信息都读不到**（`?versioning`、`?lifecycle` 都是 `403 AccessDenied`）。这是刻意的：写备份的账号不需要、也不该看到过期规则。配套地，**备份程序不读桶的版本控制状态**，而是在每次上传时要求存储返回版本号来证明版本控制已开启——`DeleteObject` 被拒 + 读不到桶级信息，这两条越权测试因此都必须是 403。
 - 密钥：**恰好一把**，直接写在主机 `/etc/pawshop-backup/backup-s3-access-key`、`backup-s3-secret-key`（`root:root 0600`，只被 `pawshop-backup.service` 通过 systemd 的 `LoadCredential` 读取，**不进 Git、不进聊天、不落到别的文件**）
 - 复核入口：<https://ram.console.aliyun.com/users> → `pawshop-backup-writer` → 权限管理
 

@@ -36,7 +36,7 @@
 | sitemap.xml + robots 声明 | 线上 200、XML 合法、7 条 URL；`Sitemap:` 已写入 robots.txt |
 | 监控定时器 | `pawshop-monitor.timer` enabled+active，每 5 分钟；实测 **12/12** |
 | **告警双通道（飞书 + Slack）** | **2026-09-17 接入并真实投递验证**：告警与恢复各一条、四条全部送达；多通道脚本已上主机；日志会点名未确认的通道 |
-| **备份凭据 + 两个闸门** | `pawshop-backup-writer` + 最小权限策略；密钥 root-only、`LoadCredential` 注入；`DeleteObject → 403`、`GetBucketVersioning → Enabled` 均已实测；自检脚本 `ops/commerce/verify-offsite-credential.mjs` 5/5 |
+| **备份凭据 + 两个闸门** | `pawshop-backup-writer` + 最小权限策略（对象级三权限，**读不到任何桶级元数据**）；密钥 root-only、`LoadCredential` 注入；`DeleteObject → 403`、**版本控制改用功能性证明（覆盖上传后旧版本仍可读）** 均已实测；自检脚本 `ops/commerce/verify-offsite-credential.mjs` **7/7**。⚠️ 运行时改为**对象级**版本证明——原 `GetBucketVersioning` 前置检查在该权限边界下**永不通过**（首次备份实测暴露，已修） |
 | **OSS 生命周期** | 4 条规则（原有全桶非当前版本规则 + daily 90 / monthly 365 / yearly 1095），写入后回读核对 |
 | 陈旧 GitHub Pages 镜像（AR-8） | 已停用，镜像 URL 返回 404；仓库仍为 PUBLIC |
 | 隐私声明事实性 | 已改为"自管主机、同源资源、无第三方 CDN"；日期 2026-09-16 |

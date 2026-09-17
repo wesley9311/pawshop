@@ -101,10 +101,13 @@ PAWSHOP_ROLLBACK_COMPATIBLE=1 \
 
 **离线（OSS）凭据与两条闸门（2026-09-17 完成）**
 
-- RAM 身份 `pawshop-backup-writer` + 策略 `pawshop-backup-writer-policy`：只允许在 `pawlivora-backups-us-west-1/pawshop/database-backups/*` 上 `PutObject` / `GetObject` / `GetObjectVersion`，并**显式拒绝** `DeleteObject*`、`DeleteBucket`、`PutBucketLifecycle`、`PutBucketVersioning`、`PutBucketPolicy`、`PutBucketAcl`、`PutBucketReplication`。
+- RAM 身份 `pawshop-backup-writer` + 策略 `pawshop-backup-writer-policy`：只允许在 `pawlivora-backups-us-west-1/pawshop/database-backups/*` 上 `PutObject` / `GetObject` / `GetObjectVersion`，并**显式拒绝** `DeleteObject*`、`DeleteBucket`、`PutBucketLifecycle`、`PutBucketVersioning`、`PutBucketPolicy`、`PutBucketAcl`、`PutBucketReplication`。该身份**读不到任何桶级元数据**（`GET /?versioning`、`GET /?lifecycle` 一律 `403 AccessDenied`）——这是刻意的：写备份的账号既不能删备份，也不需要看到过期规则。
 - 密钥**恰好一把**，写在 `/etc/pawshop-backup/backup-s3-access-key` 与 `backup-s3-secret-key`（`root:root 0600`），只由 `pawshop-backup.service` 通过 `LoadCredential` 读取。
-- 两个闸门是**实测过的**，不是"填个 1"：`PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED=1`（`GetBucketVersioning` → `Status=Enabled`）、`PAWSHOP_BACKUP_S3_DELETE_DISABLED=1`（用该凭据发 `DeleteObject` → **403 AccessDenied**，且读 `?lifecycle` 同样 403）。
-- **凭据自检（换密钥或新环境后跑一次）**：`ops/commerce/verify-offsite-credential.mjs`，在主机上以 root 运行。它打印四行判定（能写、能拿到版本号、能回读且内容一致、`DeleteObject` 必须 403）和一行越权检查，**不打印任何密钥**。
+- 两个闸门是**实测过的**，不是"填个 1"：
+  - `PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED=1`：**功能性证明**（2026-09-17 实测）——用该凭据**覆盖上传同一对象**后，**旧版本仍能按精确版本号读回原内容**，即"版本控制已开启、覆盖也能找回"。证明只用该身份已有的三种权限，不需要任何桶级读。
+  - `PAWSHOP_BACKUP_S3_DELETE_DISABLED=1`：用该凭据发 `DeleteObject` → **403 AccessDenied**，且读 `?lifecycle` 同样 403。
+- **⚠️ 运行时【不】读桶的 versioning 状态（2026-09-17 修正）**：`offsite-s3-client.cjs` 曾经用 `GetBucketVersioning` 做上传前置检查——由于上面那条权限边界，这个检查**永远不可能通过**（首次备份实测报 `Backup bucket versioning could not be verified.`，真实原因是被 catch 吞掉的 `403 AccessDenied`）。**已改为对象级证明**：每次上传必须返回版本号（无版本号即 fail-closed），且每个远端对象都按**精确版本号**校验（复用旧版本时 HEAD 指定 `VersionId`，新上传后按 `VersionId` 回读全文）。`VERSIONING_CONFIRMED` 仍是必填闸门，记录的是**设置期**已证明的事实；**不要**为了让它通过而给该身份加桶级读权限。
+- **凭据自检（换密钥或新环境后跑一次）**：`ops/commerce/verify-offsite-credential.mjs`，在主机上以 root 运行。它打印六行判定（能写、能覆盖、能拿到版本号、能回读且内容一致、**覆盖后旧版本仍可读**、`DeleteObject` 必须 403）和一行越权检查，**不打印任何密钥**；自检脚本同样刻意不读 `?versioning`。
 
 ```bash
 # 主机侧（root）。它会写入一个小对象；本凭据故意删不掉它，用管理凭据清理，
@@ -114,7 +117,19 @@ install -o root -g root -m 0555 /srv/pawshop-source/ops/commerce/verify-offsite-
 /usr/bin/node /usr/local/libexec/pawshop/verify-offsite-credential.mjs
 ```
 
-**2026-09-17 实测记录**：五项全部通过（`PutObject 200` / `HeadObject 200 + versionId` / `GetObject 内容匹配` / `DeleteObject 403 AccessDenied` / 读 `?lifecycle` 403），校验对象随后用管理凭据彻底删除（HEAD 返回 404）。
+**2026-09-17 实测记录（自检脚本升级为功能性证明后重跑，生产桶真实凭据）**：
+
+```
+PASS 上传（PutObject）                HTTP 200 versionId=CAEQABiBgMCf…
+PASS 覆盖上传（PutObject）            HTTP 200 versionId=CAEQABiBgMCr…   ← 与上一版不同
+PASS 探测（HeadObject + 版本号）       HTTP 200 versionId=CAEQABiBgMCr…
+PASS 回读明文一致（GetObject）         HTTP 200 内容匹配=true
+PASS 覆盖后旧版本仍可读（版本控制）      HTTP 200 旧版本内容匹配=true      ← 版本控制确实已开启
+PASS 删除被拒（DeleteObject）          HTTP 403
+PASS 生命周期规则不可读（越权检查）      HTTP 403
+```
+
+七项全通过，`exit 0`。早前一版的五项记录（`PutObject 200` / `HeadObject 200 + versionId` / `GetObject 内容匹配` / `DeleteObject 403 AccessDenied` / 读 `?lifecycle` 403）同样全部通过，当时的校验对象随后用管理凭据彻底删除（HEAD 返回 404）。
 
 **OSS 生命周期规则（2026-09-17 写入并回读核对）**：`daily/` 90 天、`monthly/` 365 天、`yearly/` 1095 天，三条各自只匹配自己的前缀；原有一条"全桶清理非当前版本（3 天）"规则予以保留，但**去掉了它的 `Expiration` 元素**——OSS 不允许前缀重叠的规则有同种动作类型（`InvalidRequest: Overlap for same action type Expiration`）。副作用：被生命周期删掉的当前版本留下的删除标记不会自动清理（零字节元数据，不影响数据与费用）。回滚素材：`/root/pawshop-offsite.env.bak-20260917` 与当时的配置导出。
 
@@ -418,6 +433,6 @@ systemctl list-timers 'pawshop-*' --no-pager
 
 **第 3 步会真正验证备份链**：它跑真实备份 → `sync-production-backups.mjs` 用 `LoadCredential` 注入的凭据上传到 `oss://pawlivora-backups-us-west-1/pawshop/database-backups/daily/` → 精确版本回读比对摘要 → 再把密文恢复到一次性隔离集群并核对。任何一步失败都不会留下"以为有备份"的状态。
 
-**已知会留在桶里的无害对象**：`pawshop/database-backups/daily/.pawshop-credential-check.txt`（约 28 字节，`ops/commerce/verify-offsite-credential.mjs` 自检时写入）。写入它的凭据**故意没有删除权限**（这正是被验证的能力），所以它会随 `daily/` 的 90 天规则自然到期；想立刻清掉就用管理凭据删。
+**已知会留在桶里的无害对象**：`pawshop/database-backups/daily/.pawshop-credential-check.txt`（`ops/commerce/verify-offsite-credential.mjs` 自检时写入；**两个版本**，各约 40 字节——第二版是"覆盖上传"那一步，第一版正是"覆盖后旧版本仍可读"这条证明的取证对象）。写入它的凭据**故意没有删除权限**（这正是被验证的能力），所以它会随 `daily/` 的 90 天规则自然到期；想立刻清掉就用管理凭据删。
 
 **回滚**：`ops/commerce/rollback-commerce.sh`（切换 `current` 并重启）；监控与告警不依赖 commerce，激活失败不会影响站点与监控。

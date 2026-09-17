@@ -11,7 +11,7 @@ const {
 const {
   offsiteReceiptIsValid, remoteObjectKey, selectLocalPruneCandidates, validateOffsiteConfig,
 } = require('./offsite-backup-policy.cjs');
-const { assertVersioningEnabled, createBackupS3Client, headRemoteObject, uploadAndReadBack } = require('./offsite-s3-client.cjs');
+const { createBackupS3Client, headRemoteObject, uploadAndReadBack } = require('./offsite-s3-client.cjs');
 const {
   assertBackupArtifactStat, assertBackupDirectoryStat, assertBackupKeyStat, productionPrivatePaths,
 } = require('./production-private-paths.cjs');
@@ -47,8 +47,9 @@ let operationTimer;
 let client;
 
 async function sync(abortSignal) {
-  await assertVersioningEnabled(client, config.bucket, abortSignal);
-
+  // Bucket versioning is proved per uploaded object by the client, never by
+  // reading bucket metadata: the backup identity is denied every bucket-level
+  // action on purpose. See the contract at the top of offsite-s3-client.cjs.
   function privateJson(file, label) {
   const stat = lstatSync(file);
   assertBackupArtifactStat(stat, process.getuid());

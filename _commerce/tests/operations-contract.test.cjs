@@ -221,7 +221,11 @@ test('production identity provisioning is private, fail-closed, and keeps OSS in
 });
 
 test('offsite sync is versioned, read-back verified, credential isolated, and never deletes remote objects', () => {
-  assert.match(offsiteSync, /assertVersioningEnabled/);
+  // Versioning is proved per object, not by reading bucket metadata: the backup
+  // identity is denied every bucket-level action on purpose, so every upload
+  // must come back with a version identifier or the run fails closed.
+  assert.doesNotMatch(`${offsiteSync}\n${offsiteClient}`, /GetBucketVersioning|PutBucketVersioning/);
+  assert.match(offsiteClient, /assertVersionedUpload\(upload\)/);
   assert.match(offsiteSync, /manifest_hmac_sha256/);
   assert.match(offsiteSync, /receipt_hmac_sha256/);
   assert.match(offsiteSync, /selectLocalPruneCandidates/);

@@ -2,8 +2,27 @@
 
 const { createHash } = require('node:crypto');
 const { createReadStream } = require('node:fs');
-const { GetBucketVersioningCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } = require('@aws-sdk/client-s3');
+const { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } = require('@aws-sdk/client-s3');
 const { NodeHttpHandler } = require('@smithy/node-http-handler');
+
+// Bucket versioning is never read from the bucket.
+//
+// The backup identity is deliberately denied every bucket-level action,
+// including bucket metadata: on this bucket `GET /?versioning` and
+// `GET /?lifecycle` both answer 403 AccessDenied for the backup credential.
+// That denial is the point - the account that writes backups must not be able
+// to delete them, nor to change when they expire - so a preflight that read the
+// versioning status could never pass, and would couple the backup chain to a
+// permission this design withholds.
+//
+// Versioning is proved per object instead, with the permissions the credential
+// does have:
+//   * every upload must come back with a version identifier. Storage returns
+//     none when versioning is off, so the run fails closed;
+//   * every remote object is authenticated by its exact version identifier,
+//     both when a run reuses a recorded version and when it reads back new bytes.
+// The operator gate PAWSHOP_BACKUP_S3_VERSIONING_CONFIRMED=1 records the
+// setup-time proof, and verify-offsite-credential.mjs re-proves it functionally.
 
 function createBackupS3Client(config) {
   return new S3Client({
@@ -21,13 +40,6 @@ function createBackupS3Client(config) {
   });
 }
 
-async function assertVersioningEnabled(client, bucket, abortSignal) {
-  let result;
-  try { result = await client.send(new GetBucketVersioningCommand({ Bucket: bucket }), { abortSignal }); }
-  catch { throw new Error('Backup bucket versioning could not be verified.'); }
-  if (result.Status !== 'Enabled') throw new Error('Backup bucket versioning is not enabled.');
-}
-
 function isNotFound(error) {
   return error?.name === 'NotFound' || error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404;
 }
@@ -43,6 +55,15 @@ function validVersionId(versionId) {
   return typeof versionId === 'string' && versionId.length > 0 && versionId.length <= 1024 && versionId !== 'null';
 }
 
+// The per-object versioning proof. A versioned bucket answers an upload with a
+// version identifier; an unversioned one answers without one, which is a hard
+// stop rather than a degraded backup.
+function assertVersionedUpload(upload) {
+  if (!validVersionId(upload?.VersionId)) {
+    throw new Error('Backup object storage did not return a version identifier after upload; bucket versioning is not enabled.');
+  }
+}
+
 async function headRemoteObject(client, { bucket, key, sha256, sizeBytes, versionId = '', abortSignal }) {
   let head;
   try {
@@ -51,7 +72,7 @@ async function headRemoteObject(client, { bucket, key, sha256, sizeBytes, versio
     }), { abortSignal });
   } catch (error) {
     if (isNotFound(error)) return null;
-    throw new Error('Backup object head verification failed.');
+    throw new Error('Backup object head verification failed.', { cause: error });
   }
   if (head.ContentLength !== sizeBytes || head.Metadata?.sha256 !== sha256) {
     throw new Error('Existing backup object does not match the authenticated local artifact.');
@@ -89,8 +110,8 @@ async function uploadAndReadBack(client, {
       let existingDigest;
       try {
         existingDigest = await readRemoteDigest(client, { bucket, key, versionId: existing.versionId, abortSignal });
-      } catch {
-        throw new Error('Existing backup object exact-version read-back request failed.');
+      } catch (error) {
+        throw new Error('Existing backup object exact-version read-back request failed.', { cause: error });
       }
       if (existingDigest !== sha256) {
         throw new Error('Existing backup object failed full read-back verification.');
@@ -107,21 +128,19 @@ async function uploadAndReadBack(client, {
       ContentType: 'application/octet-stream',
       ChecksumSHA256: Buffer.from(sha256, 'hex').toString('base64'), Metadata: { sha256 },
     }), { abortSignal });
-  } catch {
-    throw new Error('Backup object upload request failed.');
+  } catch (error) {
+    throw new Error('Backup object upload request failed.', { cause: error });
   } finally {
     uploadBody.destroy();
   }
-  if (!validVersionId(upload.VersionId)) {
-    throw new Error('Backup object storage did not return a version identifier after upload.');
-  }
+  assertVersionedUpload(upload);
   let remoteDigest;
   try {
     remoteDigest = await readRemoteDigest(client, {
       bucket, key, versionId: upload.VersionId, abortSignal,
     });
-  } catch {
-    throw new Error('Backup object exact-version read-back request failed.');
+  } catch (error) {
+    throw new Error('Backup object exact-version read-back request failed.', { cause: error });
   }
   if (remoteDigest !== sha256) {
     throw new Error('Uploaded backup object failed full read-back verification.');
@@ -130,7 +149,7 @@ async function uploadAndReadBack(client, {
 }
 
 module.exports = {
-  assertVersioningEnabled,
+  assertVersionedUpload,
   createBackupS3Client,
   digestRemoteBody,
   headRemoteObject,

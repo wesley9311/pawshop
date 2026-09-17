@@ -12,7 +12,7 @@ const {
   archivePeriod, archiveReceiptIsValid, remoteObjectKey, validateOffsiteConfig,
 } = require('./offsite-backup-policy.cjs');
 const {
-  assertVersioningEnabled, createBackupS3Client, headRemoteObject, uploadAndReadBack,
+  createBackupS3Client, headRemoteObject, uploadAndReadBack,
 } = require('./offsite-s3-client.cjs');
 const {
   assertBackupArtifactStat, assertBackupDirectoryStat, assertBackupKeyStat, productionPrivatePaths,
@@ -86,7 +86,8 @@ async function verifyExistingReceipt(receipt, abortSignal) {
 }
 
 async function archive(abortSignal) {
-  await assertVersioningEnabled(client, config.bucket, abortSignal);
+  // As in the daily sync, versioning is proved per uploaded object rather than
+  // by reading bucket metadata, which this identity is denied on purpose.
   if (existsSync(receiptFile)) {
     await verifyExistingReceipt(privateJson(receiptFile, 'Archive receipt'), abortSignal);
     console.log(`The ${tier} encrypted backup archive already exists and its exact versions were verified.`);

@@ -10,7 +10,7 @@ const {
   selectLocalPruneCandidates, validateOffsiteConfig,
 } = require('../scripts/offsite-backup-policy.cjs');
 const { backupArchiveReceiptHmac, backupReceiptHmac } = require('../scripts/backup-integrity.cjs');
-const { assertVersioningEnabled, uploadAndReadBack } = require('../scripts/offsite-s3-client.cjs');
+const { assertVersionedUpload, uploadAndReadBack } = require('../scripts/offsite-s3-client.cjs');
 
 const env = {
   PAWSHOP_BACKUP_S3_ENDPOINT: 'https://s3.example.invalid',
@@ -100,7 +100,7 @@ test('offsite receipt authentication binds the current manifest bytes', () => {
   assert.equal(offsiteReceiptIsValid(receipt, { ...input, manifestHash: 'c'.repeat(64) }), false);
 });
 
-test('S3 upload requires versioning and verifies newly uploaded bytes by full read-back', async () => {
+test('S3 upload must return a version identifier and is verified by full read-back', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'pawshop-offsite-'));
   const file = join(directory, 'artifact');
   const body = Buffer.from('encrypted fixture');
@@ -109,7 +109,6 @@ test('S3 upload requires versioning and verifies newly uploaded bytes by full re
   const commands = [];
   const client = { send: async command => {
     commands.push(command.constructor.name);
-    if (command.constructor.name === 'GetBucketVersioningCommand') return { Status: 'Enabled' };
     if (command.constructor.name === 'HeadObjectCommand') throw { $metadata: { httpStatusCode: 404 } };
     if (command.constructor.name === 'PutObjectCommand') {
       for await (const _chunk of command.input.Body) {
@@ -124,13 +123,43 @@ test('S3 upload requires versioning and verifies newly uploaded bytes by full re
     throw new Error('unexpected command');
   } };
   try {
-    await assertVersioningEnabled(client, 'pawshop-backups');
     const result = await uploadAndReadBack(client, {
       bucket: 'pawshop-backups', key: 'pawshop/database-backups/artifact', file,
       sha256, sizeBytes: body.length,
     });
     assert.equal(result.readBack, true);
-    assert.deepEqual(commands, ['GetBucketVersioningCommand', 'HeadObjectCommand', 'PutObjectCommand', 'GetObjectCommand']);
+    assert.deepEqual(commands, ['HeadObjectCommand', 'PutObjectCommand', 'GetObjectCommand']);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('an upload without a version identifier fails closed instead of storing an unversioned backup', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'pawshop-offsite-unversioned-'));
+  const file = join(directory, 'artifact');
+  const body = Buffer.from('encrypted fixture');
+  writeFileSync(file, body);
+  const sha256 = require('node:crypto').createHash('sha256').update(body).digest('hex');
+  const commands = [];
+  const client = { send: async command => {
+    commands.push(command.constructor.name);
+    if (command.constructor.name === 'HeadObjectCommand') throw { $metadata: { httpStatusCode: 404 } };
+    if (command.constructor.name === 'PutObjectCommand') {
+      for await (const _chunk of command.input.Body) {}
+      return { ETag: 'etag' };
+    }
+    throw new Error('unexpected command');
+  } };
+  try {
+    await assert.rejects(() => uploadAndReadBack(client, {
+      bucket: 'pawshop-backups', key: 'pawshop/database-backups/artifact', file,
+      sha256, sizeBytes: body.length,
+    }), /bucket versioning is not enabled/);
+    assert.deepEqual(commands, ['HeadObjectCommand', 'PutObjectCommand']);
+    for (const upload of [{}, { VersionId: '' }, { VersionId: 'null' }, { VersionId: 'x'.repeat(1025) }]) {
+      assert.throws(() => assertVersionedUpload(upload), /bucket versioning is not enabled/);
+    }
+    assert.doesNotThrow(() => assertVersionedUpload({ VersionId: 'CAEQABiBgMD8' }));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
