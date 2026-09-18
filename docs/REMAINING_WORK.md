@@ -94,10 +94,12 @@
 
 1. ~~**P0｜店主账号未建**~~ → **✅ 已结项**（账号 `504533680@qq.com`，凭据只在 `/root/pawshop-production-owner-credentials.json`；2026-09-18 发版后重新做了一次真实登录验收，通过）。
 2. ~~**P0｜一个数据库只能激活一个 release**~~ → **✅ 2026-09-18 结项，且已实跑验收**：升级证据路径（`pawshop-production-migration-v2`，`initialization: 'existing-database'`）+ `ops/commerce/run-production-upgrade-migration.sh` + `write-production-upgrade-evidence.mjs`；门禁与备份证据两处断言同时接受两种证据，空库路径一字未改。**首次实跑就是 `aaa5673` 这次发版**：147 关系 / 601 行 → 147 关系 / 601 行，**一行未少**（逐表精确行数见证，`relations_*_sha256` 可由 `sha256sum` 复算），改动前加密恢复点 `pawshop_production_20260918T063311496Z` 先取后验，迁移后备份异地回读 + 隔离恢复演练通过。全程明细见 RUNBOOK §11.2。**结论：后续发版不再需要清库，店主现在可以放心往后台录真实商品与客户数据。**
-3. **P1｜Slack 告警通道已失效（2026-09-18 实测）**：`alert channel slack did not accept the payload (status 404, provider code none)` —— 该 webhook 已不存在（被删/被轮换/应用卸载）。同一次实测里**飞书通道恢复正常**（`feishu accepted the payload`，告警与恢复各一条均被接受），所以现在是"1/2 通道"，告警仍能到达店主。**需要店主重新生成 Slack Incoming Webhook URL** 才能恢复双通道。见 `docs/OWNER_ACTIONS_ZH.md`。
+3. **P1｜Slack 告警通道已失效（2026-09-18 两轮实测，定性完成）**：`alert channel slack did not accept the payload (status 404, provider code none)`，告警与恢复两轮都是如此。**配置侧原因已排除**：店主提供的地址与主机 `monitoring.env` 里现存的**逐字相同**（两者 `sha256[:12]` 均为 `cb1f84d459ef`），且 URL 结构完整（`/services/` + 标准 `T`+10 位 / `B`+10 位 / 24 位，字符集干净、无截断）→ 结论是**该 webhook 在 Slack 侧已被撤销**（被删／应用卸载），**重新贴同一个地址不会有任何效果**。同样这两轮里**飞书均正常**（`feishu accepted the payload`），所以现在是"1/2 通道"，告警仍能到达店主，但少一层冗余。**需要店主新生成一条 Slack Incoming Webhook URL** 才能恢复双通道（步骤见 `docs/OWNER_ACTIONS_ZH.md` §1.6）。
 4. **P1｜备份新鲜度缺少跨重启的可靠信号**：`backup_freshness` 仍只能读 systemd 运行时状态（重启后该属性为空）。已修成"报失败"而不是崩溃，但**重启后到下一次备份之间会误报一次**。干净做法是让备份把时间戳写进监控可读的文件（`PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` 机制已支持、**尚无写入方**），需要动 release 侧单元；注意 `/var/backups/pawshop` 是 `0700 pawshop-backup`，监控用户读不到。
 
 **已结项（同日）**：定时备份的异地同步（`ExecStartPost` 读不到 systemd 凭据 → 异地副本静默落后）已随 release `9bac8dc` 修复并实测通过；`SKIP_SYSTEMD_CHECKS` 已删除，监控不再有任何跳过行。`aaa5673` 这次发版还把 **libexec 漂移窗口关掉了**：`/usr/local/libexec/pawshop/` 四个文件与候选 release 逐字节相同（`deploy-commerce.sh` 的 `cmp` 已通过）。
+
+**同日稍后（14:59）**：**「忘记密码」的发信通道已接通并端到端实测通过** —— 店主提供的 QQ 邮箱授权码按“先真发一封自检邮件、对方接受了才写入”的顺序装到 `/etc/pawshop/email-credentials.json`（`root:pawshop 0640`；凭据指纹 `4007df34874c` 与店主文件逐字节一致），随后服务日志确认 `the subscriber handed the message to the relay for 504533680@qq.com`。**至此店主侧只剩两件事：新生成 Slack webhook、删除临时 RAM 用户。**
 
 ---
 

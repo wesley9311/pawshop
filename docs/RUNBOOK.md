@@ -679,8 +679,10 @@ Medusa 只发 `auth.password_reset` 事件，框架自带订阅者只处理 `ord
 ### 12.2 安装（一条命令，先证明再写入）
 
 ```bash
-/usr/bin/node /root/pawshop-set-email-credentials.mjs --code-file <存授权码的文件>
+/usr/bin/node /root/pawshop-set-email-credentials.mjs --address <邮箱> --code-file <存授权码的文件>
 ```
+
+**2026-09-18 实跑（成功）**：`--address 504533680@qq.com --code-file /root/pawshop-qq-authcode.tmp`。授权码由 `scp` 送进主机后 `chmod 0600`（**值不进命令行**）；先跑 `--selftest` 证明工具本身可用（通过、且不写 `/etc`），再执行安装；装完 `shred -u` 删除主机侧授权码文件，本地临时副本也覆写删除。产物 `/etc/pawshop/email-credentials.json`：`640 root:pawshop 130 bytes`，密钥指纹与店主提供的一致（`sha256[:12]=4007df34874c`）。
 
 顺序是刻意的：**先用候选凭据真发一封自检邮件** → 对方接受了才 `install -o root -g pawshop -m 0640` 覆盖目标 → 再用 `setpriv` 以服务身份复核读得到 → 最后跑 §12.4 的端到端验收。**错的授权码在写入前就被拒**，主机上不会留下"看着配好了、其实发不出去"的状态。
 
@@ -721,7 +723,19 @@ install -o root -g root -m 0700 "$REL/ops/commerce/run-password-reset-verificati
 
 > ⚠️ **取证脚本不能放进 release 目录**：`.pawshop-release.json` 的清单会与目录内实际文件集合**逐字比较**（`release-manifest.cjs` 里 `JSON.stringify(manifest.files) !== JSON.stringify(files)`），**多一个文件就校验失败**。所以它装在 `/root/`、只读 release；仓库里的版本随**下次发版**进去。
 
-**2026-09-18 证据**：`run-password-reset-verification.sh no-relay` 通过（服务如实报"无发信通道"，而非假装成功）；在无凭据时声明 `delivered` → **明确拒绝且退出非 0**；缺参数/坏参数 → 退出 2；安装器 `--selftest` 两条路通过、7 项护栏全部单行报错；单元测试 **110/110**。
+**2026-09-18 证据（凭据到位前）**：`run-password-reset-verification.sh no-relay` 通过（服务如实报"无发信通道"，而非假装成功）；在无凭据时声明 `delivered` → **明确拒绝且退出非 0**；缺参数/坏参数 → 退出 2；安装器 `--selftest` 两条路通过、7 项护栏全部单行报错；单元测试 **110/110**。
+
+**2026-09-18 14:59 实测（凭据到位后，逐字来自主机输出）**：
+
+```
+Probing smtp.qq.com:465 by sending one self-check message to 504533680@qq.com ...
+The relay accepted the credential and the message.
+Installed /etc/pawshop/email-credentials.json (root:pawshop 0640).
+The commerce service identity can read it.
+Password reset delivery verified: the subscriber handed the message to the relay for 504533680@qq.com.
+```
+
+同一轮还复核了文件本身：键集合 `from,host,password,port,secure,user` 逐字相符，`640 root:pawshop`、130 字节、非符号链接，密钥指纹与店主提供的一致。**这是"忘记密码"从假功能变成真功能的验收点。**
 
 > 📌 **libexec 漂移仍未收口**：`/usr/local/libexec/pawshop/monitor-production.mjs` 装的是 `b12a23a` 的版本，而 `current` 仍是 `466cfc5` → **下次发版的候选 release 必须包含 `b12a23a`**，否则 deploy 会在切换 `current` 之前 `cmp` 失败（见 §9.1.1）。本轮新增的这两个脚本放在 `/root/`，**不参与 libexec 比对**（deploy 只比对 §9.1.1 列出的那 4 个），随仓库自然进入下次发版。
 
