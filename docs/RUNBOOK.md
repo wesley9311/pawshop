@@ -586,3 +586,67 @@ done
 > ⚠️ **`set -Eeuo pipefail` 下 `diff a b | head` 会中止整个脚本**（`pipefail` 让管道取到 `diff` 的退出码 1，`head` 救不了）。本轮因此在"打印差异"后整段安装循环没跑，输出却看起来只是"打印了差异"。比对循环里任何可能返回非 0 的命令都要包 `if` 或 `|| true`。
 
 **本轮实测结果**：release `9bac8dc2913f4fcf9740de07aa757499ae82ccd3`，内容摘要 `9dff5f3121c1b279bfd3b4c3c0c38211eb18a00fb91258a82cd974e870f74b26`，构建 3m19s；迁移、演练、激活全绿；激活后**定时备份单元首次实测 `result=success`**（dump 与异地同步都在主进程内完成，收据带精确版本号），监控 **12/12 全部真实检查**。
+
+---
+
+## 12. 「忘记密码」发信通道（生产主机，root）
+
+Medusa 只发 `auth.password_reset` 事件，框架自带订阅者只处理 `order.created`，默认通知 provider 只写日志——所以后台点"忘记密码"回 201 却一封都不发。投递由 `_commerce/src/subscribers/password-reset.ts` + `src/lib/email-channel.cjs` + `src/lib/smtp-client.cjs`（零依赖、RFC 5321 子集）完成。
+
+### 12.1 凭据契约（写错就拒，不猜测）
+
+`/etc/pawshop/email-credentials.json`：**键集合必须逐字等于** `from, host, password, port, secure, user`（多一个或少一个都拒），`root:pawshop 0640` 或 `root:root 0600`、**不能是符号链接**、大小 1B–4KB。`secure=true`（465 隐式 TLS）或 `port=587`（STARTTLS）；**明文端口一律拒绝**。
+
+- **目录也要能穿越**：`/etc/pawshop` 是 `drwxr-x--- root:pawshop`，服务身份（`uid/gid=pawshop`）进得去；若改成 `0700 root:root`，文件权限再对也读不到。
+- **不需要重启**：`readEmailCredentials` 在**每个事件里**被调用，装/删文件立刻生效（§12.3 有实测）。
+- 生产 env 是严格白名单，邮件凭据**故意不放进 `commerce.env`**——独立文件才能在**不发版、不清库**的前提下启用或轮换。
+
+### 12.2 安装（一条命令，先证明再写入）
+
+```bash
+/usr/bin/node /root/pawshop-set-email-credentials.mjs --code-file <存授权码的文件>
+```
+
+顺序是刻意的：**先用候选凭据真发一封自检邮件** → 对方接受了才 `install -o root -g pawshop -m 0640` 覆盖目标 → 再用 `setpriv` 以服务身份复核读得到 → 最后跑 §12.4 的端到端验收。**错的授权码在写入前就被拒**，主机上不会留下"看着配好了、其实发不出去"的状态。
+
+- 授权码来源三选一：`--code-file`（最干净：不进行命令行、不进环境变量、不进日志）、终端交互（默认）、stdin。
+- `--selftest`：一次性 TLS 假中继 + 自签 CA，跑通"接受 → 恰好投递 1 封"与"拒绝 → 报 535 认证失败"两条路，**不写 `/etc`、不发外部邮件**。它**不能**证明 smtp.qq.com 信任本机，也不声称能。
+- `--selftest-ca` 只在 `--selftest` 下被接受，避免生产运行被指向非系统信任库。
+
+**这两个工具装在 `/root/`（不进 release 目录，原因见 §12.4 的警告）。它们是手工就位的，所以和 libexec 一样会有漂移风险——发版后如果改动过它们，要照下面刷新：**
+
+```bash
+REL=/srv/pawshop-commerce/releases/<RELEASE_SHA>
+install -o root -g root -m 0700 "$REL/_commerce/scripts/set-email-credentials.mjs"          /root/pawshop-set-email-credentials.mjs
+install -o root -g root -m 0700 "$REL/_commerce/scripts/verify-password-reset-delivery.mjs" /root/pawshop-verify-password-reset-delivery.mjs
+install -o root -g root -m 0700 "$REL/ops/commerce/run-password-reset-verification.sh"      /root/run-password-reset-verification.sh
+```
+
+### 12.3 实测：无需重启即生效（2026-09-18）
+
+用一个**本机不可达端口**当"中继"（无任何凭据、无外部邮件），在**不重启**的前提下触发重置：
+
+| 步骤 | 服务日志逐字输出 |
+| --- | --- |
+| 装上该文件、**不重启**、触发重置 | `password reset: no email sent to … - Could not reach the mail server: ECONNREFUSED.` |
+| 删掉该文件、**仍不重启**、再次触发 | `password reset: no email sent to … - no email relay is configured` |
+
+服务 `ActiveEnterTimestamp` 与 `NRestarts` 全程未变（重启计数仍 0）→ 同时证明三件事：**每次请求都重新读文件**、服务身份**读得到** `root:pawshop 0640`、传输真的发起并**如实报出失败发生在哪一步**。
+
+### 12.4 端到端验收（不看文件，看服务怎么说的）
+
+```bash
+/root/run-password-reset-verification.sh delivered   # 有发信通道时
+/root/run-password-reset-verification.sh no-relay    # 故意未配置时
+```
+
+**真的触发一次重置**，然后用 journal 游标只取这次请求之后的行，逐字比对订阅者的话：`delivered` 要求出现 `password reset: reset email delivered to <邮箱>`；`no-relay` 要求出现 `no email relay is configured`；出现任何别的（例如认证被拒的 SMTP 码）即失败并原样打印。只看 `message` 字段，**令牌永不进日志**。
+
+设计上**不可自欺**：期望值必须显式声明，且必须与凭据文件的实际状态一致，否则脚本**拒绝评估**——"看到发生什么、再把它写成预期"这条路被堵死。
+
+> ⚠️ **取证脚本不能放进 release 目录**：`.pawshop-release.json` 的清单会与目录内实际文件集合**逐字比较**（`release-manifest.cjs` 里 `JSON.stringify(manifest.files) !== JSON.stringify(files)`），**多一个文件就校验失败**。所以它装在 `/root/`、只读 release；仓库里的版本随**下次发版**进去。
+
+**2026-09-18 证据**：`run-password-reset-verification.sh no-relay` 通过（服务如实报"无发信通道"，而非假装成功）；在无凭据时声明 `delivered` → **明确拒绝且退出非 0**；缺参数/坏参数 → 退出 2；安装器 `--selftest` 两条路通过、7 项护栏全部单行报错；单元测试 **110/110**。
+
+> 📌 **libexec 漂移仍未收口**：`/usr/local/libexec/pawshop/monitor-production.mjs` 装的是 `b12a23a` 的版本，而 `current` 仍是 `466cfc5` → **下次发版的候选 release 必须包含 `b12a23a`**，否则 deploy 会在切换 `current` 之前 `cmp` 失败（见 §9.1.1）。本轮新增的这两个脚本放在 `/root/`，**不参与 libexec 比对**（deploy 只比对 §9.1.1 列出的那 4 个），随仓库自然进入下次发版。
+

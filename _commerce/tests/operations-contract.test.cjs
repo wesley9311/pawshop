@@ -32,6 +32,9 @@ const passwordResetSubscriber = readFileSync(resolve(root, 'src/subscribers/pass
 const ownerRotation = readFileSync(resolve(root, 'scripts/reset-production-owner-password.mjs'), 'utf8');
 const ownerRotationWrapper = readFileSync(resolve(root, '..', 'ops/commerce/reset-production-owner-password.sh'), 'utf8');
 const ownerCreation = readFileSync(resolve(root, 'scripts/create-production-owner.mjs'), 'utf8');
+const credentialInstaller = readFileSync(resolve(root, 'scripts/set-email-credentials.mjs'), 'utf8');
+const resetVerification = readFileSync(resolve(root, 'scripts/verify-password-reset-delivery.mjs'), 'utf8');
+const resetVerificationWrapper = readFileSync(resolve(root, '..', 'ops/commerce/run-password-reset-verification.sh'), 'utf8');
 
 test('real backup is encrypted and plaintext is removed', () => {
   assert.match(backup, /aes-256-cbc/);
@@ -339,4 +342,58 @@ test('the password reset path is wired, and the fallback proves itself', () => {
   assert.match(ownerCreation, /directory: serverDirectory/);
   assert.match(ownerCreation, /process\.chdir\(serverDirectory\)/);
   assert.doesNotMatch(ownerCreation, /directory: join\(release, '_commerce'\)/);
+});
+
+test('the mail relay credential is proven before it is installed', () => {
+  // A credential file that merely parses is not evidence that the mailbox will
+  // accept it. Installing a rejected code would leave "forgot password"
+  // answering 201 while nothing is delivered, so the candidate credential is
+  // used for one real message first, and only a relay that accepts it may be
+  // written to /etc. The assertion is on the order, not just on presence.
+  const probed = credentialInstaller.indexOf('await probe({ credentials, message: buildSelfTestMessage');
+  const installed = credentialInstaller.indexOf('installCredentials({ credentials, gid });');
+  assert.ok(probed > 0, 'the installer must send a self-check message');
+  assert.ok(installed > probed, 'the credential must be probed before it is installed');
+
+  // What is written has to satisfy the code that will read it, so the contract
+  // is checked with the running release's own validator rather than a copy.
+  assert.match(credentialInstaller, /validateAgainstRunningCode\(credentials\)/);
+  assert.match(credentialInstaller, /\.medusa\/server/);
+  assert.match(credentialInstaller, /require\(join\(releaseDirectory\(\), 'src', 'lib', 'smtp-client\.cjs'\)\)/);
+
+  // The credential reaches the file through a descriptor: never a command line,
+  // never an environment variable, never a log line.
+  assert.match(credentialInstaller, /writeSync\(descriptor, /);
+  assert.doesNotMatch(credentialInstaller, /console\.log\([^)]*code/);
+  assert.doesNotMatch(credentialInstaller, /execFileSync\([^)]*(password|code)\b[^)]*\)/);
+
+  // Ownership and mode are checked by the identity that has to read the file,
+  // not by whoever wrote it.
+  assert.match(credentialInstaller, /'-m', '0640'/);
+  assert.match(credentialInstaller, /--clear-groups/);
+  assert.match(credentialInstaller, /--reuid=/);
+
+  // A trust anchor other than the system store is a self-test-only affordance.
+  assert.match(credentialInstaller, /--selftest-ca is only accepted together with --selftest/);
+  assert.match(credentialInstaller, /rejectAuthentication/);
+});
+
+test('the password reset acceptance believes the running code, not a file on disk', () => {
+  // The evidence has to come from the subscriber that ran for this request:
+  // 201 and a well-formed file are both compatible with delivering nothing.
+  assert.match(resetVerification, /--after-cursor=\$\{cursor\}/);
+  assert.match(resetVerification, /parsed\?\.message/);
+  assert.match(resetVerification, /password reset: reset email delivered to \$\{ownerCredentials\.email\}/);
+  assert.match(resetVerification, /no email relay is configured/);
+
+  // The expectation is an argument and must agree with the credential file, so
+  // a run cannot be graded against whatever happened to occur.
+  assert.match(resetVerification, /refusing to grade the run against an expectation the host disagrees with/);
+  assert.match(resetVerification, /readEmailCredentials\(undefined, \{ serviceGid: pawshopGid \}\)/);
+
+  // The release manifest compares its file set verbatim, so the verifier must
+  // live outside the release and read the release it is pointed at.
+  assert.match(resetVerificationWrapper, /readlink -f "\$current"/);
+  assert.match(resetVerificationWrapper, /usage: \$0 delivered\|no-relay/);
+  assert.match(resetVerificationWrapper, /exec \/usr\/bin\/node "\$verifier" "\$release" "\$release_id" "\$expected"/);
 });
