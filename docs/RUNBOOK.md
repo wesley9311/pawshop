@@ -985,3 +985,41 @@ install -o root -g pawshop-restore -m 0640 \
 - **`ss -ltn` 的端口不在行尾**（后面还有 Peer 列），`/:(5432)$/` 这类锚定永远匹配不到；判断暴露面要看第 4 列，或用 `ss -ltnp` 全量输出人工核对。
 - **从沙箱/公网做的 TCP 连通探测不可信**：对照组（一个绝对没人监听的端口）也被报成 `OPEN`，说明出口会本地完成握手。**暴露面的权威证据是主机上的 `ss -ltnp`**，并用"主机连自己公网 IP"作为旁证。
 
+
+## 14. 后台 API 同源反代（Task B，2026-09-19 上线并全链路验收）
+
+### 14.1 拓扑与设计
+
+nginx 在 `pawlivora.com` 下新开三段反代（都在 `/etc/nginx/sites-available/pawshop`）：
+
+| location | Basic Auth | 后端 | 作用 |
+| --- | --- | --- | --- |
+| `/admin/` | **要** | `127.0.0.1:9000` | 全部 Admin API（两层：Basic + Medusa 会话） |
+| `/auth/user/` | **要** | `127.0.0.1:9000` | 登录入口（防密码爆破的第一道闸） |
+| `location = /auth/session` | **不要（有意）** | `127.0.0.1:9000` | JWT 换会话 cookie / 登出 |
+
+其余路径不变：`/app`、`/store/*`、`/health`、`/pawshop-runtime` 等对外仍然 404。
+
+**为什么 `/auth/session` 不叠 Basic**：HTTP 一个请求只有一个 `Authorization` 头。运营台登录流程是「Basic+密码 → JWT → **Bearer JWT 调 `/auth/session` 换 `connect.sid` cookie** → 之后所有 `/admin/` 请求 = Basic（浏览器自动带）+ cookie」。若 `/auth/session` 也要 Basic，第二步就无处放 Bearer（实测死锁 401）。该端点自身的鉴权就是 Medusa 验 Bearer JWT——而 JWT 只可能从被 Basic 闸住的登录拿到，所以不降安全。
+
+**限速**（`/etc/nginx/conf.d/pawshop-admin-ratelimit.conf`）：`pawshop_admin_api` 120r/m burst=40（管理 API 正常用量）；`pawshop_admin_login` 10r/m burst=5（登录与会话创建）。
+
+**文件**：`/etc/nginx/pawshop-admin.htpasswd`（apr1 加盐哈希，`root:www-data 0640`）；**明文口令只存主机 `/root/pawshop-admin-basic-auth.json`（0600）**，用户名 `owner`。给店主的方式：他 SSH 上去 `cat` 这个文件。
+
+### 14.2 验收基准（下次改 nginx 后照抄）
+
+```bash
+# 外网无凭据：/admin/products 与 /auth/user/emailpass 都必须 401（带 WWW-Authenticate: Basic realm="PawShop Admin"）
+# 主机侧全链路（不打印任何凭据）：登录→200 拿 token；POST /auth/session(Bearer)→200+set-cookie connect.sid；
+# GET /admin/users/me(cookie+Basic)→200；去掉 Basic→401；DELETE /auth/session→200；旧 cookie 再用→401。
+# 回归：/ 与 /sitemap.xml 200；/app、/store/products 404；监控 12/12。
+```
+
+### 14.3 轮换 Basic 口令 / 回滚
+
+```bash
+# 轮换（换口令不换用户名）：重新生成并写 htpasswd 与 /root/pawshop-admin-basic-auth.json，然后 systemctl reload nginx
+# 回滚整段反代：cp /root/pawshop-nginx-pawshop.bak-<TS> /etc/nginx/sites-available/pawshop && nginx -t && systemctl reload nginx
+```
+
+注意：`deploy-static.sh` / `deploy-commerce.sh` 都**不碰** `sites-available/pawshop`，此配置独立于两套发版。
