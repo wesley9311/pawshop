@@ -1,3 +1,9 @@
+// Runs `medusa db:migrate` for the database the candidate release expects. The
+// gate value is the mode, so this one runner serves both migrations: 0 means a
+// migration is pending for the release that is about to be activated, whether
+// that release creates the schema (first activation) or moves it forward
+// (upgrade). The caller supplies the matching conditions; see
+// run-first-production-migration.sh and run-production-upgrade-migration.sh.
 import { lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,18 +15,18 @@ const { assertProductionEnvironmentFileStat, parseProductionEnvironmentFile } = 
 const { validateProductionEnvironment, CLI_WORKER_OVERRIDE } = require('../src/lib/production-policy.cjs');
 
 if (process.platform !== 'linux' || process.getuid() === 0 || process.argv.length !== 2) {
-  throw new Error('First production migration must run as the unprivileged PawShop service account.');
+  throw new Error('Production migration must run as the unprivileged PawShop service account.');
 }
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 if (!/^\/srv\/pawshop-commerce\/releases\/[0-9a-f]{40}\/_commerce$/.test(root)) {
-  throw new Error('First production migration must run from an exact immutable release.');
+  throw new Error('Production migration must run from an exact immutable release.');
 }
 const environmentFile = '/etc/pawshop/commerce.env';
 assertProductionEnvironmentFileStat(lstatSync(environmentFile), process.getgid());
 const environment = parseProductionEnvironmentFile(readFileSync(environmentFile, 'utf8'));
 validateProductionEnvironment(environment);
 if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '0') {
-  throw new Error('First production migration requires the fail-closed migration gate.');
+  throw new Error('A pending production migration requires the migration gate to be closed.');
 }
 
 // The migration runs from the built directory: medusa-config exists there as

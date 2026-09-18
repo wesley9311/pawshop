@@ -87,7 +87,7 @@
 **未结项（按优先级）**：
 
 1. **P0｜店主账号未建**：等店主给一个**小写**邮箱（脚本的校验只接受小写完整地址）；密码由 `provision-production-owner-credentials.mjs` 随机生成、写入 root-only 文件、**不打印**。拿到邮箱后跑 `finalize-production-admin.sh <ID>` 即可（它还会复核 owner 登录、跑管理端验证、并 enable 服务与 3 个定时器——这几项现已手工完成，重复执行是幂等的）。
-2. **P0｜一个数据库只能激活一个 release**：`assertMigrationEvidence` 只接受 `initialization === 'empty-database'`，而每次激活都强制要求该证据 → **库里一旦有真实业务数据，下次发版必须清库**。今天两次激活、两次清库都只是"库恰好是空的"。**在补上"后续 release 升级证据路径"之前，不要往后台录真实商品/客户数据。**
+2. ~~**P0｜一个数据库只能激活一个 release**~~ → **✅ 2026-09-18 结项**：新增**升级证据路径**（`pawshop-production-migration-v2`，`initialization: 'existing-database'`），配套 `ops/commerce/run-production-upgrade-migration.sh` 与 `write-production-upgrade-evidence.mjs`；门禁与备份证据两处断言同时接受两种证据，空库路径一字未改。**为什么它比原计划更急**：核对时生产库已是 **155 关系 / 147 张表 / 601 行**（含店主账号），也就是"下一次发版必须清库"= 下一次发版会删掉这些。升级记录要求：前任 release、改动前的加密恢复点（清单 HMAC + 密文摘要/HMAC + 异地回执全部校验）、逐表行数见证（不得减少、关系不得消失）、关系数不得减少。命令见 RUNBOOK §11.2。**仍待观察**：这条路径的**首次实跑**（即下一次发版本身）——它同时是"升级能力"的验收。
 3. **P1｜备份新鲜度缺少跨重启的可靠信号**：`backup_freshness` 仍只能读 systemd 运行时状态（重启后该属性为空）。已修成"报失败"而不是崩溃，但**重启后到下一次备份之间会误报一次**。干净做法是让备份把时间戳写进监控可读的文件（`PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` 机制已支持、**尚无写入方**），需要动 release 侧单元；注意 `/var/backups/pawshop` 是 `0700 pawshop-backup`，监控用户读不到。
 
 **已结项（同日）**：定时备份的异地同步（`ExecStartPost` 读不到 systemd 凭据 → 异地副本静默落后）已随 release `9bac8dc` 修复并实测通过；`SKIP_SYSTEMD_CHECKS` 已删除，监控不再有任何跳过行。

@@ -75,6 +75,9 @@ ops/commerce/deploy-commerce.sh
 ops/commerce/run-first-production-migration.sh
 ops/commerce/run-first-production-backup-restore.sh
 ops/commerce/finalize-production-admin.sh
+
+# 6) 之后每次发版都走升级（库已非空，见 §11.2；首次流程此时会拒绝对非空库迁移）
+ops/commerce/run-production-upgrade-migration.sh
 ```
 
 ## 5. Commerce 回滚（生产主机，root）
@@ -521,9 +524,10 @@ PAWSHOP_RELEASE_ID=<RELEASE_SHA> PAWSHOP_FIRST_MIGRATION_CONFIRMED=1 \
   bash /srv/pawshop-source/ops/commerce/run-first-production-migration.sh
 
 # 3) 首次加密备份 + 离线回读 + 隔离恢复演练（产出 backup-restore.json）
+#    第一个位置参数是模式：first（首次激活）/ upgrade（后续发版，见 §11.2）
 PAWSHOP_FIRST_BACKUP_RESTORE_CONFIRMED=1 \
   bash /srv/pawshop-source/ops/commerce/run-first-production-backup-restore.sh \
-  <RELEASE_SHA> <RELEASE_CONTENT_SHA256>
+  first <RELEASE_SHA> <RELEASE_CONTENT_SHA256>
 
 # 4) 只有 3 成功后才允许激活（内容摘要由脚本自己从 release 复算，无需传参）
 PAWSHOP_RELEASE_ID=<RELEASE_SHA> PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1 \
@@ -587,6 +591,59 @@ done
 
 **本轮实测结果**：release `9bac8dc2913f4fcf9740de07aa757499ae82ccd3`，内容摘要 `9dff5f3121c1b279bfd3b4c3c0c38211eb18a00fb91258a82cd974e870f74b26`，构建 3m19s；迁移、演练、激活全绿；激活后**定时备份单元首次实测 `result=success`**（dump 与异地同步都在主进程内完成，收据带精确版本号），监控 **12/12 全部真实检查**。
 
+> 📌 **11.1 描述的"退回去再走一遍首次流程"从此只用于特殊情况**（例如要彻底重建库）。**常规发版走 §11.2 的升级流程**——11.1 那条路的代价是清空生产库，而库里现在已经有店主账号与业务数据了。
+
+### 11.2 后续发版的升级流程（数据库已有数据，2026-09-18 新增）
+
+**为什么必须有这条路**：`run-first-production-migration.sh` 的**前提就是库为空**（它自己会数关系数并拒绝非空库，见 §11 第 2 步），而 `assertMigrationEvidence` 原先只接受 `initialization: 'empty-database'`。两件事叠加的结果是：**第二次之后的每次发版都只能先清库**。2026-09-18 核对时生产库已有 **155 个关系 / 147 张表**（含店主账号），也就是下一次发版会把这些一起删掉。所以这不是"有空再补"，而是发版前必须解决的前置。
+
+**升级证据的形状**（`pawshop-production-migration-v2`，与空库证据共用同一道门禁 `verify-release-evidence.mjs`，但要求更多）：
+
+| 记录项 | 它回答的问题 |
+| --- | --- |
+| `predecessor_release_id` | 从哪个 release 升上来（必须存在且与本次不同） |
+| `pre_upgrade_backup_manifest_file` / `pre_upgrade_backup_sha256` | **改动前的恢复点**在哪、它的密文摘要是什么 |
+| `relations_before_sha256` / `relations_after_sha256` | 迁移前后逐表行数的见证；摘要就是那两个证据文件的字节摘要，`sha256sum` 可复算 |
+| `tables_before` / `tables_after` | 关系数（允许增加，不允许减少） |
+
+**命令序列（顺序是设计强制的，不要跳步）**：
+
+```bash
+# 0) 主机取到已推送的目标提交（同 §11 第 0 步：主机 git fetch 是匿名的）
+# 1) 准备不可变 release（产出 RELEASE_ID 与 RELEASE_CONTENT_SHA256）
+PAWSHOP_RELEASE_ID=<RELEASE_SHA> \
+  bash /srv/pawshop-source/ops/commerce/prepare-commerce-release.sh
+
+# 2) 升级迁移。内部顺序：先取改动前的加密备份（并校验其清单 HMAC/密文摘要/异地回执）
+#    → 门禁 1→0 → 停服务 → 迁移前逐表行数快照 → db:migrate → 迁移后快照 → 写 v2 证据。
+#    成功退出时服务是【停着】的、门禁是【关着】的，这是设计，不是故障。
+PAWSHOP_RELEASE_ID=<RELEASE_SHA> PAWSHOP_UPGRADE_CONFIRMED=1 \
+  bash /srv/pawshop-source/ops/commerce/run-production-upgrade-migration.sh
+
+# 3) 迁移后的加密备份 + 离线回读 + 隔离恢复演练（同一套演练，模式换 upgrade）
+PAWSHOP_FIRST_BACKUP_RESTORE_CONFIRMED=1 \
+  bash /srv/pawshop-source/ops/commerce/run-first-production-backup-restore.sh \
+  upgrade <RELEASE_SHA> <RELEASE_CONTENT_SHA256>
+
+# 4) 把门禁合回 1。⚠️ 这一步在高版本【必须手工做】：
+#    deploy-commerce.sh 只在 current 不存在（=首次激活）时才自己 0→1；升级时 current 已存在，
+#    它会直接要求门禁已经是 1，否则以 'An existing production release requires the migration
+#    gate to remain enabled.' 拒绝。enable 动作会先复核两个证据文件再改 env。
+REL=/srv/pawshop-commerce/releases/<RELEASE_SHA>
+/usr/bin/node "$REL/_commerce/scripts/write-production-migration-gate.mjs" \
+  "$REL" <RELEASE_SHA> <RELEASE_CONTENT_SHA256> enable
+
+# 5) 激活（同 §11 第 4 步）
+PAWSHOP_RELEASE_ID=<RELEASE_SHA> PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1 \
+  bash /srv/pawshop-source/ops/commerce/deploy-commerce.sh
+```
+
+**失败时怎么处置**（`run-production-upgrade-migration.sh` 的 trap 会自己打印这几句）：门禁保持 0、服务保持停止，**不要为了"看看数据库"而把服务起起来**——新 schema 配旧代码是这次升级刻意排除的状态。两条路：继续走完 3→4→5，或者用第 2 步打印的 `pre_manifest` 对应的加密备份回滚。
+
+**升级的见证规则（fail-closed）**：逐表精确行数（不用 `pg_stat_user_tables`，它滞后于迁移）**不得减少、关系不得消失**，否则在写证据之前就拒绝。**如果将来某次迁移确实要删表，这条会先拦住**——那是需要人工评审的例外，不是可以顺手放宽的门槛。
+
+**本轮实测的边界（如实记下）**：迁移前那份恢复点做了**密码学校验**（清单 HMAC、密文 sha256 与 HMAC、异地回执 HMAC），但**没有单独对它跑一次隔离恢复演练**；演练跑在同一次升级的迁移后备份上。两者用的是同一套备份/恢复代码，所以不是"没验证的路径"，但"改动前那份也演练一次"是下一层加固项。
+
 ---
 
 ## 12. 「忘记密码」发信通道（生产主机，root）
@@ -649,4 +706,27 @@ install -o root -g root -m 0700 "$REL/ops/commerce/run-password-reset-verificati
 **2026-09-18 证据**：`run-password-reset-verification.sh no-relay` 通过（服务如实报"无发信通道"，而非假装成功）；在无凭据时声明 `delivered` → **明确拒绝且退出非 0**；缺参数/坏参数 → 退出 2；安装器 `--selftest` 两条路通过、7 项护栏全部单行报错；单元测试 **110/110**。
 
 > 📌 **libexec 漂移仍未收口**：`/usr/local/libexec/pawshop/monitor-production.mjs` 装的是 `b12a23a` 的版本，而 `current` 仍是 `466cfc5` → **下次发版的候选 release 必须包含 `b12a23a`**，否则 deploy 会在切换 `current` 之前 `cmp` 失败（见 §9.1.1）。本轮新增的这两个脚本放在 `/root/`，**不参与 libexec 比对**（deploy 只比对 §9.1.1 列出的那 4 个），随仓库自然进入下次发版。
+
+### 12.5 发信前的连通性预检（2026-09-18 实测，**填授权码之前先跑**）
+
+授权码要走一遍手机短信验证，所以**先证明主机真的能把信发出去**，再去麻烦店主。用一个不涉及任何凭据的探测：DNS → TCP → TLS 握手 → `EHLO` 读服务端能力，证书按**运行时信任库**校验（和真实发信路径一致）。
+
+```bash
+# 在主机上（探测脚本本身不含凭据，用完即删）
+/usr/bin/node /root/.smtp-probe.mjs    # 脚本内容见本轮会话记录：tls.connect + EHLO，不认证
+```
+
+**本轮实测结果（生产主机 → `smtp.qq.com`）**：
+
+| 项目 | 结果 |
+| --- | --- |
+| DNS | `43.163.178.76` / `43.129.255.54`（IPv4）+ 两条 IPv6 |
+| TCP 465（隐式 TLS，**我们用的**） | **OPEN**，164 ms |
+| TCP 587（STARTTLS） | OPEN，159 ms |
+| TCP 25 | **超时被挡**（顺带印证：客户端拒绝明文认证是对的） |
+| TLS 465 + `EHLO` | **SMTP READY**；能力含 `AUTH LOGIN PLAIN XOAUTH XOAUTH2`、`SIZE 73400320`、`SMTPUTF8` |
+| 证书 | **`*.mail.qq.com`（DigiCert），经运行时信任库校验通过**，有效期至 2026-11-23 |
+| TLS 587 直连 | 预期失败（`ERR_SSL_WRONG_VERSION_NUMBER`）——该端口必须先明文再 STARTTLS，这正说明 587 可达且形态正确 |
+
+**结论**：计划中的凭据（`host: smtp.qq.com`、`port: 465`、`secure: true`）在**拿到授权码之前**就已经证明可用，包括证书链——所以填码这一步只剩"码对不对"，不会再撞上"端口被挡/证书不受信"这类要重来的问题。
 

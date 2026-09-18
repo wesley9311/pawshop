@@ -7,19 +7,24 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exit 1
 fi
 if [[ ${PAWSHOP_FIRST_BACKUP_RESTORE_CONFIRMED:-} != 1 ]]; then
-  echo 'Set PAWSHOP_FIRST_BACKUP_RESTORE_CONFIRMED=1 after reviewing this exact first-backup operation.' >&2
+  echo 'Set PAWSHOP_FIRST_BACKUP_RESTORE_CONFIRMED=1 after reviewing this exact backup operation.' >&2
   exit 1
 fi
-if [[ $# -ne 2 || ! $1 =~ ^[0-9a-f]{40}$ || ! $2 =~ ^[0-9a-f]{64}$ ]]; then
-  echo 'Usage: run-first-production-backup-restore.sh RELEASE_ID RELEASE_CONTENT_SHA256' >&2
+# The variable keeps its original name for both modes: it is the one confirmation
+# that a human reviewed this backup-and-drill operation, and renaming it would
+# invalidate every command already written down for the first activation. The
+# mode operand is what differs, and it decides the state the host must be in.
+if [[ $# -ne 3 || ! $1 =~ ^(first|upgrade)$ || ! $2 =~ ^[0-9a-f]{40}$ || ! $3 =~ ^[0-9a-f]{64}$ ]]; then
+  echo 'Usage: run-first-production-backup-restore.sh first|upgrade RELEASE_ID RELEASE_CONTENT_SHA256' >&2
   exit 1
 fi
 for required_command in git runuser systemd-run systemctl node install stat getent cut flock mktemp comm cmp find grep sort id rm; do
   command -v "$required_command" >/dev/null || { echo "Required command is unavailable: $required_command" >&2; exit 1; }
 done
 
-release_id=$1
-content_sha256=$2
+mode=$1
+release_id=$2
+content_sha256=$3
 source_dir=/srv/pawshop-source
 release=/srv/pawshop-commerce/releases/$release_id
 evidence_dir=/var/lib/pawshop-release-evidence/$release_id
@@ -27,6 +32,10 @@ backup_dir=/var/backups/pawshop
 restore_root=/var/lib/pawshop-restore
 restore_input=$restore_root/input
 verification_dir=$restore_root/verifications
+# The unit name is part of a contract rather than a label: the offsite sync only
+# accepts its credentials from /run/credentials/pawshop-backup.service or from a
+# unit named exactly pawshop-first-backup-<12 hex>.service, so this stays the same
+# for both modes instead of becoming pawshop-upgrade-backup.
 unit=pawshop-first-backup-${release_id:0:12}.service
 lock_file=/run/lock/pawshop-first-production-backup.lock
 snapshot=$(mktemp /run/pawshop-restore-verifications.XXXXXXXX)
@@ -47,11 +56,35 @@ trap 'exit 143' TERM
 exec 9>"$lock_file"
 flock -n 9 || { echo 'Another first production backup operation is active.' >&2; exit 1; }
 
-[[ -d $release && ! -L $release && ! -e /srv/pawshop-commerce/current &&
+[[ -d $release && ! -L $release &&
    -f $evidence_dir/migration.json && ! -e $evidence_dir/backup-restore.json ]] || {
   echo 'The exact release is not in the required post-migration, pre-activation state.' >&2
   exit 1
 }
+current_link=/srv/pawshop-commerce/current
+if [[ $mode == first ]]; then
+  [[ ! -e $current_link ]] || {
+    echo 'The first backup requires no activated commerce release.' >&2
+    exit 1
+  }
+else
+  [[ -L $current_link ]] || {
+    echo 'An upgrade backup requires the activated commerce release it is upgrading.' >&2
+    exit 1
+  }
+  upgraded=$(readlink -f -- "$current_link")
+  [[ $upgraded =~ ^/srv/pawshop-commerce/releases/[0-9a-f]{40}$ && $upgraded != "$release" ]] || {
+    echo 'The activated release is not the predecessor of this candidate.' >&2
+    exit 1
+  }
+  # The upgrade window stops the service before migrating, and it has to stay
+  # stopped here: the database already carries the new schema and no release may
+  # run against it until activation switches both at once.
+  systemctl is-active --quiet pawshop-commerce.service && {
+    echo 'An upgrade backup requires the commerce service to be stopped.' >&2
+    exit 1
+  }
+fi
 if [[ ! -d $source_dir/.git || -L $source_dir || -L $source_dir/.git ]] ||
    [[ $(stat -c '%u' -- "$source_dir") != 0 || $(stat -c '%u' -- "$source_dir/.git") != 0 ]] ||
    [[ -n $(find "$source_dir" \( ! -user root -o -perm /022 \) -print -quit) ]]; then
@@ -139,5 +172,10 @@ verification_name=$(comm -13 "$snapshot" <(find "$verification_dir" -mindepth 1 
 }
 /usr/bin/node "$release/_commerce/scripts/write-production-backup-restore-evidence.mjs" \
   "$release" "$release_id" "$content_sha256" "$manifest_name" "$verification_name"
-echo 'The first production backup passed offsite read-back and isolated restore verification.'
-echo 'Commerce activation remains disabled.'
+if [[ $mode == first ]]; then
+  echo 'The first production backup passed offsite read-back and isolated restore verification.'
+  echo 'Commerce activation remains disabled.'
+else
+  echo 'The post-migration backup passed offsite read-back and isolated restore verification.'
+  echo 'Commerce activation remains disabled until deploy-commerce.sh runs.'
+fi

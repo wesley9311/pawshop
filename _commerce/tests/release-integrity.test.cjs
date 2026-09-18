@@ -3,11 +3,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, symlinkSync, rmSync, readFileSync } = require('node:fs');
+const { createHash } = require('node:crypto');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { releaseFiles, contentSha256, sha256, assertReleaseManifest } = require('../scripts/release-manifest.cjs');
 const { assertMigrationEvidence, assertBackupRestoreEvidence } = require('../scripts/release-evidence.cjs');
 const { migrationEvidence, migrationSet } = require('../scripts/first-production-migration.cjs');
+const {
+  assertRelationsPreserved, parseRelationsSnapshot, relationsDigest, serializeRelations,
+  upgradeMigrationEvidence,
+} = require('../scripts/production-upgrade-evidence.cjs');
 const {
   assertRestoreVerification, backupRestoreEvidence,
 } = require('../scripts/first-production-backup-evidence.cjs');
@@ -132,4 +137,68 @@ test('backup evidence binds exact migration bytes and isolated restore bytes', (
       restoreVerificationFile: 'verification-1.json', restoreVerificationSource: restoreSource,
       restoreVerifiedAt: verification.verified_at,
     } }).migration_receipt_sha256);
+});
+
+test('an upgrade record is bound to the release it upgrades and to its restore point', () => {
+  const releaseId = 'a'.repeat(40);
+  const predecessor = 'b'.repeat(40);
+  const before = [
+    { schema: 'public', table: 'customer', rows: 4 },
+    { schema: 'public', table: 'product', rows: 9 },
+  ];
+  const after = [...before, { schema: 'public', table: 'order', rows: 0 }];
+  const inputs = {
+    releaseId, releaseContentSha256: 'c'.repeat(64), migrationSetSha256: 'd'.repeat(64),
+    completedAt: '2026-09-18T00:00:00.000Z', predecessorReleaseId: predecessor,
+    preUpgradeBackupManifestFile: 'pawshop_production_20260918T000000000Z.manifest.json',
+    preUpgradeBackupSha256: 'e'.repeat(64), relationsBefore: before, relationsAfter: after,
+  };
+  const evidence = upgradeMigrationEvidence(inputs);
+  assert.doesNotThrow(() => assertMigrationEvidence(evidence, releaseId));
+  assert.equal(evidence.initialization, 'existing-database');
+  assert.equal(evidence.predecessor_release_id, predecessor);
+  assert.equal(evidence.tables_before, 2);
+  assert.equal(evidence.tables_after, 3);
+  // An upgrade record is not evidence for any other release, and it may not
+  // describe itself as a first activation of an empty database.
+  assert.throws(() => assertMigrationEvidence(evidence, predecessor));
+  assert.throws(() => assertMigrationEvidence({ ...evidence, initialization: 'empty-database' }, releaseId));
+  assert.throws(() => assertMigrationEvidence({ ...evidence, schema: 'pawshop-production-migration-v1' }, releaseId));
+  // The release it upgrades has to exist and has to be a different release.
+  assert.throws(() => upgradeMigrationEvidence({ ...inputs, predecessorReleaseId: releaseId }));
+  assert.throws(() => upgradeMigrationEvidence({ ...inputs, predecessorReleaseId: 'not-a-sha' }));
+  // A missing or malformed restore point is refused.
+  assert.throws(() => upgradeMigrationEvidence({ ...inputs, preUpgradeBackupManifestFile: 'backup.manifest.json' }));
+  assert.throws(() => upgradeMigrationEvidence({ ...inputs, preUpgradeBackupSha256: 'nope' }));
+  // Data has to survive: a relation that loses rows, or disappears, fails the
+  // record before any evidence is produced.
+  assert.throws(() => upgradeMigrationEvidence({ ...inputs, relationsAfter: [after[0]] }));
+  assert.throws(() => upgradeMigrationEvidence({
+    ...inputs, relationsAfter: [{ schema: 'public', table: 'customer', rows: 3 }, after[1]],
+  }));
+  assert.throws(() => upgradeMigrationEvidence({ ...inputs, relationsBefore: [], relationsAfter: after }));
+});
+
+test('relation snapshots are canonical and reproducible from the stored bytes', () => {
+  const parsed = parseRelationsSnapshot(JSON.stringify([
+    { schema: 'public', table: 'product', rows: 2 },
+    { schema: 'public', table: 'customer', rows: 0 },
+  ]));
+  assert.deepEqual(parsed.map(entry => entry.table), ['customer', 'product']);
+  // The recorded digest is the digest of the bytes kept as evidence, so an
+  // auditor can reproduce it with sha256sum on the stored snapshot.
+  assert.equal(relationsDigest(parsed),
+    createHash('sha256').update(serializeRelations(parsed)).digest('hex'));
+  assert.equal(serializeRelations(parsed), `${JSON.stringify(parsed, null, 2)}\n`);
+  assert.throws(() => parseRelationsSnapshot('[]'));
+  assert.throws(() => parseRelationsSnapshot('not json'));
+  assert.throws(() => parseRelationsSnapshot(JSON.stringify([
+    { schema: 'public', table: 'product', rows: 2 },
+    { schema: 'public', table: 'product', rows: 2 },
+  ])));
+  assert.throws(() => parseRelationsSnapshot(JSON.stringify([{ schema: 'public', table: 'product', rows: -1 }])));
+  assert.throws(() => parseRelationsSnapshot(JSON.stringify([{ schema: 'public', table: 'product' }])));
+  assert.throws(() => parseRelationsSnapshot(JSON.stringify([{ schema: 'public', table: 'a b', rows: 1 }])));
+  assert.doesNotThrow(() => assertRelationsPreserved(parsed, parsed));
+  assert.throws(() => assertRelationsPreserved(parsed, [parsed[1]]));
 });

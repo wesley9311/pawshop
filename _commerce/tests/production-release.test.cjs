@@ -24,6 +24,10 @@ const firstMigration = readFileSync(resolve(root, 'ops/commerce/run-first-produc
 const migrationRunner = readFileSync(resolve(root, '_commerce/scripts/run-first-production-migration.mjs'), 'utf8');
 const productionRunner = readFileSync(resolve(root, '_commerce/scripts/run-production.mjs'), 'utf8');
 const migrationWriter = readFileSync(resolve(root, '_commerce/scripts/write-production-migration-evidence.mjs'), 'utf8');
+const upgradeMigration = readFileSync(resolve(root, 'ops/commerce/run-production-upgrade-migration.sh'), 'utf8');
+const upgradeEvidenceWriter = readFileSync(resolve(root, '_commerce/scripts/write-production-upgrade-evidence.mjs'), 'utf8');
+const upgradeEvidence = readFileSync(resolve(root, '_commerce/scripts/production-upgrade-evidence.cjs'), 'utf8');
+const backupVerification = readFileSync(resolve(root, '_commerce/scripts/production-backup-verification.cjs'), 'utf8');
 const backupEvidenceWriter = readFileSync(resolve(root, '_commerce/scripts/write-production-backup-restore-evidence.mjs'), 'utf8');
 const firstBackupRestore = readFileSync(resolve(root, 'ops/commerce/run-first-production-backup-restore.sh'), 'utf8');
 const backupPointerReader = readFileSync(resolve(root, '_commerce/scripts/read-production-backup-pointer.mjs'), 'utf8');
@@ -167,6 +171,50 @@ test('first production migration is exact-release, empty-database, and fail-clos
   assert.match(migrationWriter, /assertMigrationEvidence/);
 });
 
+test('a production upgrade holds a verified restore point and a relation witness', () => {
+  // The first-activation path refuses a non-empty database by design, so the
+  // upgrade is a separate operation with its own premise. These assertions pin
+  // that premise: nothing here may be inherited from the first-migration script.
+  assert.match(upgradeMigration, /PAWSHOP_UPGRADE_CONFIRMED/);
+  assert.match(upgradeMigration, /verify-release-manifest\.mjs/);
+  assert.match(upgradeMigration, /verify-tracked-release\.mjs/);
+  assert.match(upgradeMigration, /PAWSHOP_MIGRATIONS_CONFIRMED=1/);
+  assert.doesNotMatch(upgradeMigration, /source .*commerce\.env|\. .*commerce\.env/);
+  assert.doesNotMatch(upgradeMigration, /production database is not empty/);
+  // The restore point comes from the release that owns the data, before anything
+  // changes, and a failed backup is a refusal rather than a warning.
+  assert.match(upgradeMigration, /systemctl start pawshop-backup\.service/);
+  assert.match(upgradeMigration, /read-production-backup-pointer\.mjs/);
+  assert.match(upgradeMigration, /refusing to change the database/);
+  // The window: gate closed, service stopped, and no code running against a
+  // half-migrated schema.
+  assert.match(upgradeMigration, /open-upgrade/);
+  assert.match(upgradeMigration, /systemctl stop pawshop-commerce\.service/);
+  assert.match(upgradeMigration, /The commerce service did not stop/);
+  assert.match(upgradeMigration, /no relations to upgrade/);
+  assert.match(upgradeMigration, /query_to_xml/);
+  assert.match(upgradeMigration, /run-first-production-migration\.mjs/);
+  assert.match(upgradeMigration, /write-production-upgrade-evidence\.mjs/);
+  assert.match(migrationGateWriter, /open-upgrade/);
+  assert.match(upgradeEvidenceWriter, /verifyProductionBackupSet/);
+  assert.match(upgradeEvidenceWriter, /'\/run\/pawshop-upgrade'/);
+  assert.match(upgradeEvidenceWriter, /was not taken before the upgrade window opened/);
+  assert.match(upgradeEvidenceWriter, /restore point is too old/);
+  assert.match(upgradeEvidenceWriter, /relations-before\.json/);
+  assert.match(upgradeEvidenceWriter, /assertMigrationEvidence/);
+  assert.match(upgradeEvidence, /existing-database/);
+  assert.match(upgradeEvidence, /The migration removed relations that held data/);
+  assert.match(upgradeEvidence, /The migration lost rows in relations that existed before it/);
+});
+
+test('the backup drill serves the upgrade window without relaxing its state checks', () => {
+  assert.match(firstBackupRestore, /first\|upgrade/);
+  assert.match(firstBackupRestore, /The first backup requires no activated commerce release/);
+  assert.match(firstBackupRestore, /An upgrade backup requires the activated commerce release it is upgrading/);
+  assert.match(firstBackupRestore, /An upgrade backup requires the commerce service to be stopped/);
+  assert.match(firstBackupRestore, /pawshop-first-backup-\$\{release_id:0:12\}\.service/);
+});
+
 test('server commands run from the compiled release directory, not the source root', () => {
   // medusa-config is compiled JavaScript inside .medusa/server. The CLI resolves
   // the config relative to its working directory, so running it from the source
@@ -197,12 +245,17 @@ test('server commands run from the compiled release directory, not the source ro
 });
 
 test('backup evidence requires authenticated offsite and isolated restore records', () => {
-  assert.match(backupEvidenceWriter, /offsiteReceiptIsValid/);
-  assert.match(backupEvidenceWriter, /backupManifestHmac/);
+  // The manifest, the dump and the offsite receipt are verified by the module
+  // that the pre-upgrade restore point shares, so neither writer can drift.
+  assert.match(backupVerification, /offsiteReceiptIsValid/);
+  assert.match(backupVerification, /backupManifestHmac/);
+  assert.match(backupVerification, /offsiteReceiptIsValid\(receipt, \{/);
+  assert.match(backupVerification, /manifest\.size_bytes !== encryptedStat\.size/);
+  assert.match(backupEvidenceWriter, /verifyProductionBackupSet/);
   assert.match(backupEvidenceWriter, /assertRestoreVerification/);
   assert.match(backupEvidenceWriter, /assertBackupRestoreEvidence/);
   assert.match(backupEvidenceWriter, /Production backup target does not match the exact migrated commerce database/);
-  assert.match(backupEvidenceWriter, /manifest\.value\.source_database !== migration\.value\.database/);
+  assert.match(backupEvidenceWriter, /manifest\.source_database !== migration\.value\.database/);
   assert.match(backupEvidenceWriter, /backup-restore\.json/);
   assert.match(backupEvidenceWriter, /already exists and cannot be replaced/);
   assert.doesNotMatch(backupEvidenceWriter, /S3_SECRET|secretAccessKey: process\.env/);

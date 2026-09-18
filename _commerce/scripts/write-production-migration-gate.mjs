@@ -16,8 +16,14 @@ const release = resolve(process.argv[2] || '');
 const releaseId = process.argv[3];
 const contentSha256 = process.argv[4];
 const action = process.argv[5];
+// `enable` closes the gate for a release whose evidence is complete. The two
+// opening actions close nothing: `open-upgrade` opens the window in which an
+// existing database may be migrated onto a new release, and `rollback-disable`
+// returns the gate to its fail-closed state after a failed activation.
+const GATE_ACTIONS = ['enable', 'rollback-disable', 'open-upgrade'];
+
 if (!/^[0-9a-f]{40}$/.test(releaseId || '') || !/^[0-9a-f]{64}$/.test(contentSha256 || '') ||
-    release !== `/srv/pawshop-commerce/releases/${releaseId}` || !['enable', 'rollback-disable'].includes(action)) {
+    release !== `/srv/pawshop-commerce/releases/${releaseId}` || !GATE_ACTIONS.includes(action)) {
   throw new Error('Production migration gate arguments are invalid.');
 }
 const verifiedContent = execFileSync('/usr/bin/node', [
@@ -65,6 +71,9 @@ try {
   if (directoryDescriptor !== undefined) closeSync(directoryDescriptor);
   rmSync(temporary, { force: true });
 }
-console.log(action === 'enable' ?
-  'Production migration gate enabled for the exact evidence-backed release.' :
-  'Production migration gate returned to fail-closed state after unsuccessful first activation.');
+const GATE_MESSAGES = {
+  enable: 'Production migration gate enabled for the exact evidence-backed release.',
+  'rollback-disable': 'Production migration gate returned to fail-closed state after unsuccessful first activation.',
+  'open-upgrade': 'Production migration gate opened for an upgrade of the running production database.',
+};
+console.log(GATE_MESSAGES[action]);
