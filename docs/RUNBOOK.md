@@ -651,6 +651,18 @@ for s in restore-verify-production.mjs backup-integrity.cjs monitor-production.m
   cmp -s "$REL/_commerce/scripts/$s" "/usr/local/libexec/pawshop/$s" || { echo "libexec 未收敛: $s" >&2; exit 1; }
 done
 
+# 1.6) ⚠️ 若本次发版改了 ops/commerce/ 下的【单元文件】，还要先装单元（2026-09-19 第二次
+#      升级实跑发现的第三个"就位"点）：deploy-commerce.sh 第 123-130 行会把 8 个单元与
+#      /etc/systemd/system/ 逐一 cmp，不一致直接 exit 1。install-commerce-runtime.sh 只服务
+#      "首次休眠安装"（存在 current 就拒绝、enabled 的 timer 也拒绝），升级路径没有自动入口。
+#      手工步骤（以 pawshop-backup.service 为例，先备份旧单元再装）：
+#        cp -a /etc/systemd/system/pawshop-backup.service /root/pawshop-units-backup-<TS>/
+#        install -o root -g root -m 0644 \
+#          "$REL/ops/commerce/pawshop-backup.service" /etc/systemd/system/pawshop-backup.service
+#        systemctl daemon-reload
+#        systemd-analyze verify pawshop-backup.service
+#      安装前先 diff 确认差异就是本次发版设计的那几行；装完 cmp 收敛再跑 deploy。
+
 # 2) 升级迁移。内部顺序：先取改动前的加密备份（并校验其清单 HMAC/密文摘要/异地回执）
 #    → 门禁 1→0 → 停服务 → 迁移前逐表行数快照 → db:migrate → 迁移后快照 → 写 v2 证据。
 #    成功退出时服务是【停着】的、门禁是【关着】的，这是设计，不是故障。
@@ -696,6 +708,24 @@ PAWSHOP_RELEASE_ID=<RELEASE_SHA> PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1 \
 | 激活后验收 | 店主真实登录通过（商品/订单/客户管理权限均通）；`NRestarts=0`；`/app`·`/admin`·`/admin-api/`·`/store/products`·`/pawshop-runtime`·`/health` 外部全 404；`user` 表仍为 1 行（`504533680@qq.com`） |
 
 **这次实跑回答的就是这件事**：店主账号**没有被发版删掉**——正是这条路径存在的全部理由。构建实测 **2m47s**（前端 106.44s），期间外部采样 **18/18 全 200**；迁移窗口内服务按设计停着，展示站不受影响。
+
+**第二次生产实跑：2026-09-19，成功**（`bbabde4`，钥匙环 + 备份新鲜度双来源随此 release 上线）：
+
+| 项 | 值 |
+| --- | --- |
+| `RELEASE_ID` | `bbabde4eda10979873263256a8ef6630d2d6fb1d` |
+| `RELEASE_CONTENT_SHA256` | `fb7817aff9893629f19ad54b62a7e25f92f63b1392d93c7eb2b9fea6d7a025fe` |
+| `predecessor_release_id` | `aaa56732efad4934f4d67c14dc684f8d208fbbd9` |
+| 改动前恢复点 | `pawshop_production_20260918T172132228Z.manifest.json` |
+| 迁移前 → 迁移后 | **147 关系 / 601 行 → 147 关系 / 601 行**（一行未少） |
+| 唯一执行的迁移脚本 | `@medusajs/medusa` 的 `create-super-admin-role.js` |
+| 迁移后备份回执 | `pawshop_production_20260918T174012019Z.manifest.json`（异地回读 + 隔离恢复演练通过，`owner_users=1`） |
+| 激活后验收 | `NRestarts=0`；监控 **12/12**；`/` 200、六个后台路径外部 404；`user` 表 1 行 |
+
+这次实跑暴露并当场处置了**两个"写了但从未跑过"的空档**（都已修/已记）：
+
+1. **升级窗口残留**：上一次成功升级把 before/after 快照留在 `/run/pawshop-upgrade/`，本次在第 2 步被 `The upgrade window directory is not empty` 拒绝（停在停服务之前，无中间态）。处置：两份快照归档到 `/root/pawshop-upgrade-window-archive-20260918T172013Z/` 后重跑。代码修复（成功路径清理窗口）已入库，**随下一次发版生效**。
+2. **单元文件差异**：本次发版改了 `pawshop-backup.service`（`StateDirectory=pawshop-backup`），第 5 步 deploy 被单元 cmp 拒绝。处置见新增的 1.6 步（备份旧单元 → install → daemon-reload）。旧单元备份在 `/root/pawshop-units-backup-20260918T174836Z/`。
 
 **操作细节（比文档更重要）**：三段长活（构建 / 升级迁移 / 备份演练 / 激活）全部用 `setsid` 脱离 ssh 会话跑，日志写 `/root/`，靠日志里的 `BUILD_EXIT=` / `UPGRADE_EXIT=` / `DRILL_EXIT=` / `DEPLOY_EXIT=` 判成败——**不要用前台 ssh 的退出码**（前台命令默认 2 分钟被杀，远端却还在跑，极易误判；本轮备份演练期间 ssh 还真出现过一次 banner 超时）。
 
@@ -919,6 +949,13 @@ systemctl show pawshop-backup.service -p Result -p ExecMainStatus --value   # �
 #   Encrypted production database backup completed.
 #   Offsite encrypted backup sync completed
 ```
+
+**首次执行：2026-09-19 01:51，成功**（在 `bbabde4` 发版 + libexec 刷新 + 双来源上线之后，顺序符合上面的铁律）：
+
+- 退役钥目录 `0750` 就位；现钥按指纹归档为 `retired-keys/backup-0168d887dfa4.key`（0640）。
+- 新钥原子替换（`root:pawshop-backup 640 65`），钥匙环复核为 2 把：`current:67f9d337ab5e` + `retired:0168d887dfa4`（只打印指纹）。
+- 验收备份 `Result=success`：新集合（`pawshop_production_20260918T175135693Z`）由新钥签发，同时同步进程**逐条重验了全部历史 manifest**（旧集合用退役钥）——即"轮换没打断历史"的直接证据。轮换后监控 12/12。
+- **当前在位的退役钥 1 把（`0168d887dfa4`）**：它签发的所有 dump 过期之前**不得删除**该文件；人工恢复旧集合时把它拷进 `/var/lib/pawshop-restore/input/backup.key` 即可。
 
 **失败回滚**：若第 5 步失败，退役目录里那份与旧钥**逐字节相同**，`install -o root -g pawshop-backup -m 0640 "/etc/pawshop-backup/retired-keys/backup-$fp.key" /etc/pawshop-backup/backup.key` 即可回到轮换前状态；随后删掉本次失败运行产生的残件（新 manifest / dump / 回执），再排查。
 

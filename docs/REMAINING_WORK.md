@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-19（WorkBuddy 第十轮）
+更新：2026-09-19（WorkBuddy 第十一轮：`bbabde4` 发版 + 密钥轮换已上线）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
@@ -10,7 +10,7 @@
 
 ## 0. 当前没有阻塞项；关键路径交回店主
 
-**2026-09-18 结项**：`aaa5673` 已推送 → 主机取码 → 构建 → **升级迁移（不清库）** → 迁移后加密备份 + 离线回读 + 隔离恢复演练 → 合闸 → 激活 → 验收，全部完成。**商务后台的工程侧到这里已经通了**，生产库里店主账号与数据都还在。
+**2026-09-19 结项**：`bbabde4` 已推送并走**升级路径**（不清库）上线：构建 → 刷 libexec → 升级迁移（147 关系 / 601 行一行未少）→ 迁移后备份 + 异地回读 + 隔离恢复演练 → 合闸 → 激活 → 监控 12/12 → 备份新鲜度双来源上线 → **备份密钥已按钥匙环轮换并验收**。店主账号与数据全在。本次实跑还处置了两个"写了但从未跑过"的空档（升级窗口残留、单元文件手工安装），均已修/已记（`RUNBOOK` §11.2）。
 
 **接下来不再是"我卡住了"，而是只有店主本人能做的那几件事**（链接、点击步骤、交付方式见 `docs/OWNER_ACTIONS_ZH.md`）：
 
@@ -28,19 +28,19 @@
 
 **店主的选择**：(1) 后台暴露走 **(b) 同源反向代理**（见 A6，含"白名单不可用"的修正）；(2) 下一轮先做 **发版侧三件小改动**（不是运营台）。
 
-### 任务 A：发版侧三件小改动（**Agent 独立完成，店主不参与**）
+### 任务 A：发版侧三件小改动（**✅ 2026-09-19 全部上线，随 `bbabde4` 发版实跑验收**）
 
-一次发版打包走完，全部走已实跑的升级路径（**不清库**）。**代码已于 2026-09-19 本地完成（`120/120` 测试通过），未推送、未发版。**
+一次发版打包走完，全部走已实跑的升级路径（**不清库**）。**已于 2026-09-19 推送（店主批准）并上线。**
 
 | # | 改动 | 状态 | 落点与要点 |
 | --- | --- | --- | --- |
-| 1 | **备份密钥轮换（A7）** | ✅ **代码完成** | **钥匙环**落地：`backup-integrity.cjs`（`backupKeyFingerprint` / `manifestKeyTest` / `matchBackupKeyRing`）、`production-private-paths.cjs`（`readProductionBackupKeyRing`、退役钥目录/文件 stat 策略、`assembleBackupKeyRing`）、三个消费方接到环上（`sync-production-backups.mjs`、`archive-production-backup.mjs`、`production-backup-verification.cjs`）。**匹配语义是"查询"**（无匹配返回 `null`，由调用方保留各自那句更具体的报错）。**`backup-production.mjs` 仍只用实时钥写新 dump；恢复演练不改**——因为它钻取的永远是刚创建的那个集合（`latest.json` 由 `backup-production.mjs` 写），用实时钥就是对的。轮换步骤见 `RUNBOOK.md` §13.3。 |
-| 2 | **备份新鲜度跨重启（A3）** | ✅ **代码完成** | `run-scheduled-backup.mjs` 在 dump 与异地同步**都成功后**写 `/var/lib/pawshop-backup/last-success.txt`（先 `.staged` 再 `rename`，显式 `chmod 0644`）；`pawshop-backup.service` 加 `StateDirectory=pawshop-backup`；监控改为**文件（年龄）+ systemd（最近一次结果）两个来源都要过**。未配置该项时行为与旧版逐字相同。见 `RUNBOOK.md` §9.4。 |
-| 3 | 手册补记 | ✅ **完成** | `RUNBOOK.md` §13.3 换成可执行的轮换流程、新增 §9.4、§13.4 补四条纪律、§11.2 插入"先刷 libexec"这一步。 |
-| 4 | **本轮新增的前置（重要）** | ⚠️ **发版时必做** | 本次改动了 **3 个 libexec 文件**（`backup-integrity.cjs`、`monitor-production.mjs`、`monitoring-policy.cjs`）→ 备份演练第 126-131 行与 `deploy-commerce.sh` 第 131-136 行都会 `cmp` 失败。**必须先按 `RUNBOOK.md` §11.2 新增的「1.5) 先刷新 libexec」把 4 个文件从候选 release 装进 libexec**（该步骤行为中性，提前装不会改变在跑的监控/备份行为）。 |
-| 5 | **T2 上线顺序（反了会报假故障）** | ⚠️ **发版时必做** | 先发版 → 跑一次备份让时间戳文件出现 → **再**往 `/etc/pawshop-monitor/monitoring.env` 加 `PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE=/var/lib/pawshop-backup/last-success.txt`。提前加会如实报"文件缺失"（fail-closed，非 bug）。 |
+| 1 | **备份密钥轮换（A7）** | ✅ **已执行** | 钥匙环已上线（`bbabde4` + libexec 刷新），**轮换已于 2026-09-19 01:51 执行并验收**：`retired:0168d887dfa4` → `current:67f9d337ab5e`，验收备份 `Result=success`（含对全部历史 manifest 的逐条重验），监控 12/12。执行记录见 `RUNBOOK.md` §13.3。 |
+| 2 | **备份新鲜度跨重启（A3）** | ✅ **已上线** | `run-scheduled-backup.mjs` 写 `/var/lib/pawshop-backup/last-success.txt`；`pawshop-backup.service` 的 `StateDirectory` 已随发版安装；`monitoring.env` 已加时间戳变量（按"先有文件再加变量"的顺序）。实测：加变量后监控 12/12，新鲜度读数切换到文件来源。见 `RUNBOOK.md` §9.4。 |
+| 3 | 手册补记 | ✅ **完成** | `RUNBOOK.md` §13.3 轮换流程 + 首次执行记录、§9.4 双来源、§11.2 新增 1.5（libexec）/ 1.6（单元文件）两个"就位"步骤与第二次实跑记录。 |
+| 4 | 刷新 libexec | ✅ **已执行** | 3 个改动文件（`backup-integrity.cjs`、`monitor-production.mjs`、`monitoring-policy.cjs`）已按 §11.2 的 1.5 装入 `/usr/local/libexec/pawshop/` 并 cmp 收敛；`matchBackupKeyRing` 在主机可用。libexec 快照备份在 `/root/pawshop-libexec-backup-20260918T171313Z/`。 |
+| 5 | T2 上线顺序 | ✅ **已执行** | 发版 → 真跑一次备份（`Result=success`，`last-success.txt` 出现且 0644）→ 加 `PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` → 复跑监控 12/12。 |
 
-**验收标准**：本地 `npm run check`/`npm run check:types`/告警投递全绿（✅ 已达成）→ **推送（先问店主）** → 主机构建 release → **先刷 libexec** → **升级迁移（关系数/行数一行未少）** → 迁移后备份 + 异地回读 + 隔离恢复演练 → 合闸 → 激活 → 监控 `12/12` 无跳过行 → 加时间戳环境变量并复跑监控 → **再跑一次真实备份证明钥匙环生效** → 最后才执行钥匙轮换，并归档旧钥匙到 `retired-keys/`。
+**本次实跑新增的两个"就位"点（都已写进 RUNBOOK §11.2）**：升级窗口残留要归档（上次成功升级留下的 before/after 快照让本次在第 2 步被拒；代码已修，随下一 release 生效）；**改了单元文件的发版必须手工装单元**（`install-commerce-runtime.sh` 只服务首次休眠安装，升级没有自动入口）。
 
 ### 任务 B：后台暴露 (b)（**不依赖发版，可在任务 A 之后单独做**）
 
@@ -78,11 +78,11 @@ nginx 开 `/admin-api/` 反代 → `127.0.0.1:9000`；访问控制 = **Basic Aut
 | --- | --- | --- | --- | --- |
 | A1 | ~~**Slack 告警通道已失效**~~ → **✅ 2026-09-18 结项** | — | **Agent** | 定性：该 webhook 在 Slack 侧已被撤销（同一次实测中飞书正常）。处置：**店主选择不重建、直接摘除**；已从 `monitoring.env` 移除（只改 1 行，飞书那行逐字节未动，备份 `pawshop-monitor.env.bak-20260918T082109Z`），复验告警 + 恢复均被飞书接受、巡检 12/12。当前为**飞书单通道**。 |
 | A2 | ~~**邮件凭据（QQ SMTP 授权码）未安装**~~ → **✅ 2026-09-18 14:59 结项** | — | **店主 → Agent** | 已安装并端到端验收：`/etc/pawshop/email-credentials.json`（`root:pawshop 0640`、非符号链接、键集合恰为 `from,host,password,port,secure,user`、内容指纹 `4007df34874c` 与店主所给逐字节一致），装前先真发一封自检邮件、被接受才写入，装后服务日志出现 `the subscriber handed the message to the relay for 504533680@qq.com`。装完**不需要发版、不需要重启**。过程留档见 `docs/OWNER_ACTIONS_ZH.md` §1.2，命令见 RUNBOOK §12.4–12.5。 |
-| A3 | ~~备份新鲜度缺少跨重启的可靠信号~~ → **✅ 2026-09-19 结项（代码完成，待发版）** | — | **Agent** | 已改为**双来源**：备份成功后自写 `/var/lib/pawshop-backup/last-success.txt`（跨重启存活）+ systemd `Result`（几分钟内报真失败），两者都要过。`pawshop-backup.service` 加 `StateDirectory=pawshop-backup` 提供可写目录。**未配置该文件时行为与旧版逐字相同**，老主机不受影响。见 `RUNBOOK.md` §9.4。**发版时注意上线顺序**（先有文件、再加环境变量）。 |
+| A3 | ~~备份新鲜度缺少跨重启的可靠信号~~ → **✅ 2026-09-19 结项（已上线）** | — | **Agent** | 已改为**双来源**并随 `bbabde4` 上线：备份成功后自写 `/var/lib/pawshop-backup/last-success.txt`（跨重启存活）+ systemd `Result`（几分钟内报真失败），两者都要过。`StateDirectory` 单元已装、`monitoring.env` 已加时间戳变量，实测 12/12。见 `RUNBOOK.md` §9.4。 |
 | A4 | ~~临时 RAM 用户 `pawshop-agent-temp` 残留~~ → **✅ 2026-09-18 结项** | — | **店主** | 店主已删除。它本来就已零权限（OSS 管理面/数据面与 RAM 全 403），删除只是身份名单卫生。**⚠️ 记账性质**：删除后我没有任何可控凭据可以独立回查（该身份按设计读不了 RAM 管理面，本机也没有 RAM 凭据），所以这条是"按店主操作记账"而非我的测量结果；下次类此操作应**先留一份受控凭据再删**。故事与顺序教训见 `docs/OWNER_ACTIONS_ZH.md` §2.3。 |
 | A5 | 收款通道（Airwallex / PingPong） | P1 | **店主** | 需店主本人申请；与工程侧无耦合。 |
 | A6 | ~~后台对店主的暴露方式未定~~ → **✅ 2026-09-18 17:20 店主已定：走 (b) 同源反向代理** | P1 | **共同（已定，待执行）** | nginx 在 `pawlivora.com` 下开 `/admin-api/` → `127.0.0.1:9000`。**⚠️ 方案要改一处**：店主选的是"叠加 IP 白名单"，但实测他的来源 IP 一天内出现过 4 个不同地址段（`61.149.161.174` / `115.171.229.55` / `223.160.130.117` / `223.160.131.33`），根因是**他现在走手机热点**（网关 `172.20.10.1`）→ **静态白名单会把他本人挡在门外**。因此访问控制改为：**nginx Basic Auth（口令加盐哈希存储）+ Medusa 自身鉴权**两道，**IP 白名单降级为可选开关**（他换固定宽带出口后再开）。详见 `docs/OWNER_ACTIONS_ZH.md` §6.1。**执行顺序：等发版侧三件小改动（A7/A3）走完之后做，因为它本身不依赖发版**。 |
-| A7 | **备份加密密钥已进入对话记录 → 代码已就位，轮换待执行** | P1 | Agent（**轮换前问一句店主**） | `2026-09-18` 我读取备份凭证时，脱敏器对"单行文件带结尾换行"判断错误，把 `/etc/pawshop-backup/backup.key` 原文打印了出来。该密钥做 manifest/回执 HMAC，**同时是 dump 的 `openssl enc -aes-256-cbc -pbkdf2` 口令**。**为什么不能直接换**：`sync-production-backups.mjs` 会**遍历所有 manifest 逐个验签**，裸换当天就让每日备份+异地同步失败。**✅ 2026-09-19：钥匙环代码已完成并本地全绿**（`120/120`），因此"先发版 → 再轮换"这条路已经通了：退役钥落 `/etc/pawshop-backup/retired-keys/backup-<指纹>.key`（`root:pawshop-backup 0640`，目录 `0750` 且**服务不可写**），验签逐把试、匹配到哪把就用哪把解密 → **历史 dump 轮换后仍可验、可恢复**。**影响面**：单独持有该密钥无法利用，还需同时拿到一份加密 dump（需 OSS 凭据或主机权限，两者均**未泄露**）。**剩余动作**：随下次发版上线 → 执行 `RUNBOOK.md` §13.3 的轮换 → 归档旧钥 → 真跑一次备份验收。 |
+| A7 | ~~**备份加密密钥已进入对话记录**~~ → **✅ 2026-09-19 01:51 结项（已轮换并验收）** | — | Agent | `2026-09-18` 脱敏器把 `/etc/pawshop-backup/backup.key` 原文打印进会话记录。钥匙环代码随 `bbabde4` 上线后，已按 `RUNBOOK.md` §13.3 执行轮换：现钥归档为 `retired-keys/backup-0168d887dfa4.key`，新钥 `current:67f9d337ab5e`（只记指纹）。验收备份 `Result=success`——同步进程逐条重验了**全部历史 manifest**（旧集合用退役钥），即"轮换没打断历史"的直接证据；轮换后监控 12/12。**退役钥在它签发的所有 dump 过期前不得删除**；人工恢复旧集合时按 §13.3 把它拷进 restore input。 |
 | A8 | ~~`sshd` 多开公网 22222 端口 + `Match User admin` 块~~ → **🟢 2026-09-18 17:05 查清：建议保持原样，无需任何动作** | — | **Agent** | **更正前一版"主机上手工加的无文档配置"的说法**：`Port 22222` 是**服务器开通当天的平台初始配置**（`Server listening on :: port 22222` 最早 `Sep 06 17:43`，`99-pawshop.conf` 文件时间 `Sep 6 18:29`）。`admin` 是**阿里云 SWAS 平台创建的用户**（UID 1000、密码锁定 `L`、带 `NOPASSWD: ALL` sudo），其 `authorized_keys` 里的非生产密钥注释为 **`swas-imported-key`**（阿里云导入密钥）→ 那 ~320 次 `Accepted publickey admin from 100.104.x.x` 是**阿里云控制台「远程连接」走内网**，末次 `Sep 14 17:36`，**全发生在我 Sep 16 开始工作之前**。**处置：不关端口**——关掉收益≈0（爆破本就不可能成功，只允许密钥），却可能打断阿里云控制台那条内网通道；已写成 `RUNBOOK` 的正式约定。 |
 | A9 | 店主 `~/Downloads/AccessKey.csv` 明文凭据 | P2 | **店主** | 含一对真实 AccessKey（ID 24 位 / Secret 30 位，文件时间 `2026-09-13 17:56`）。**指纹比对确认不是生产在用的任何一把**（备份 OSS 密钥 `30f36f937bf4`/`977ae2c163a8`、商务 S3 密钥 `c5d4a2e09e69`/`816c291af801` 均不同）→ 生产不受影响。建议确认已无用后删除；若仍在使用，应改为独立 RAM 用户并尽快轮换。**我未改动该文件**（个人目录只读不写）。 |
 | A10 | `_commerce/scripts` 没有静态"未定义标识符"检查（本轮真实差点上线） | P2 | Agent（**提议**） | 本轮我把 `manifestKeyTest` 用在 `sync-production-backups.mjs` 里**却漏了导入**：`node --check` 只做语法分析（语法合法，通过），四个契约测试只匹配字符串（也通过），**本地全绿但一上生产就是 `ReferenceError`**。是逐行复核 diff 才发现的。这些脚本本地跑不起来（模块加载即抛"必须 Linux/非 root"），所以没有"跑一下就知道"的兜底。**提议**：给 `_commerce/scripts` 加 ESLint（`no-undef` + `sourceType: module`）作为本地门禁；在没做之前，改这类脚本必须**逐行核对新用到的符号是否都在导入行里**。 |
@@ -132,7 +132,7 @@ nginx 开 `/admin-api/` 反代 → `127.0.0.1:9000`；访问控制 = **Basic Aut
 1. ~~**P0｜店主账号未建**~~ → **✅ 已结项**（账号 `504533680@qq.com`，凭据只在 `/root/pawshop-production-owner-credentials.json`；2026-09-18 发版后重新做了一次真实登录验收，通过）。
 2. ~~**P0｜一个数据库只能激活一个 release**~~ → **✅ 2026-09-18 结项，且已实跑验收**：升级证据路径（`pawshop-production-migration-v2`，`initialization: 'existing-database'`）+ `ops/commerce/run-production-upgrade-migration.sh` + `write-production-upgrade-evidence.mjs`；门禁与备份证据两处断言同时接受两种证据，空库路径一字未改。**首次实跑就是 `aaa5673` 这次发版**：147 关系 / 601 行 → 147 关系 / 601 行，**一行未少**（逐表精确行数见证，`relations_*_sha256` 可由 `sha256sum` 复算），改动前加密恢复点 `pawshop_production_20260918T063311496Z` 先取后验，迁移后备份异地回读 + 隔离恢复演练通过。全程明细见 RUNBOOK §11.2。**结论：后续发版不再需要清库，店主现在可以放心往后台录真实商品与客户数据。**
 3. **✅ 已结项（2026-09-18）｜Slack 告警通道已失效**：`alert channel slack did not accept the payload (status 404, provider code none)`，告警与恢复两轮都是如此。**配置侧原因已排除**：店主提供的地址与主机 `monitoring.env` 里现存的**逐字相同**（两者 `sha256[:12]` 均为 `cb1f84d459ef`），且 URL 结构完整（`/services/` + 标准 `T`+10 位 / `B`+10 位 / 24 位，字符集干净、无截断）→ 结论是**该 webhook 在 Slack 侧已被撤销**（被删／应用卸载），**重新贴同一个地址不会有任何效果**。同样这两轮里**飞书均正常**（`feishu accepted the payload`），所以现在是"1/2 通道"，告警仍能到达店主，但少一层冗余。 **处置（2026-09-18 16:21）**：店主选择**不重建该通道**，我按他的选择把它从 `monitoring.env` 摘除——**只改 1 行**、飞书那行逐字节未动、属主权限保持 `root:pawshop 0640`、改前备份 `/root/pawshop-monitor.env.bak-20260918T082109Z`；失败模式已封：只剩 0 条通道时拒绝写入、存在 legacy `PAWSHOP_MONITOR_ALERT_WEBHOOK` 时拒绝盲改、同一键出现多次时拒绝。改完复跑真实投递验证：告警与恢复各一条**均 `feishu accepted the payload`**，巡检 `12/12`、无跳过行，日志里不再出现 slack 行。**当前告警走飞书单通道**；想恢复双通道时见 `docs/OWNER_ACTIONS_ZH.md` §1.6。
-4. **P1｜备份新鲜度缺少跨重启的可靠信号**：`backup_freshness` 仍只能读 systemd 运行时状态（重启后该属性为空）。已修成"报失败"而不是崩溃，但**重启后到下一次备份之间会误报一次**。干净做法是让备份把时间戳写进监控可读的文件（`PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` 机制已支持、**尚无写入方**），需要动 release 侧单元；注意 `/var/backups/pawshop` 是 `0700 pawshop-backup`，监控用户读不到。
+4. ~~**P1｜备份新鲜度缺少跨重启的可靠信号**~~ → **✅ 2026-09-19 结项（随 `bbabde4` 上线）**：双来源判定（`last-success.txt` + systemd `Result`）已实装，`monitoring.env` 已加时间戳变量，实测 12/12。
 
 **已结项（同日）**：定时备份的异地同步（`ExecStartPost` 读不到 systemd 凭据 → 异地副本静默落后）已随 release `9bac8dc` 修复并实测通过；`SKIP_SYSTEMD_CHECKS` 已删除，监控不再有任何跳过行。`aaa5673` 这次发版还把 **libexec 漂移窗口关掉了**：`/usr/local/libexec/pawshop/` 四个文件与候选 release 逐字节相同（`deploy-commerce.sh` 的 `cmp` 已通过）。
 

@@ -185,6 +185,14 @@ capture_relations "$after_snapshot"
   "$release" "$PAWSHOP_RELEASE_ID" "$release_content_sha256" "$predecessor" "$pre_manifest" \
   "$before_snapshot" "$after_snapshot"
 
+# The success path clears the scratch window. The durable witness is the evidence
+# set just written (relations-before/after.json, 0444, same row counts), and a
+# non-empty window makes the NEXT upgrade refuse as if this one had failed.
+# (2026-09-19: the second production upgrade hit exactly that refusal because
+# the first one left these two files in /run/pawshop-upgrade.)
+rm -f -- "$before_snapshot" "$after_snapshot" ||
+  echo 'Warning: upgrade window snapshots were not removed; the next upgrade will refuse until they are reviewed.' >&2
+
 trap - ERR INT TERM
 echo 'The production database was upgraded onto the candidate release with a verified restore point.'
 echo "The migration gate is closed and the commerce service is stopped. Next: the post-migration"

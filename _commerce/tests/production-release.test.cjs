@@ -195,6 +195,10 @@ test('a production upgrade holds a verified restore point and a relation witness
   assert.match(upgradeMigration, /query_to_xml/);
   assert.match(upgradeMigration, /run-first-production-migration\.mjs/);
   assert.match(upgradeMigration, /write-production-upgrade-evidence\.mjs/);
+  // The success path clears the scratch window: a leftover makes the next
+  // upgrade refuse as if the previous one had failed (2026-09-19, second
+  // production upgrade was blocked by the first one's leftovers).
+  assert.match(upgradeMigration, /rm -f -- "\$before_snapshot" "\$after_snapshot"/);
   assert.match(migrationGateWriter, /open-upgrade/);
   assert.match(upgradeEvidenceWriter, /verifyProductionBackupSet/);
   assert.match(upgradeEvidenceWriter, /'\/run\/pawshop-upgrade'/);
