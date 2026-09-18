@@ -764,3 +764,73 @@ Password reset delivery verified: the subscriber handed the message to the relay
 
 **结论**：计划中的凭据（`host: smtp.qq.com`、`port: 465`、`secure: true`）在**拿到授权码之前**就已经证明可用，包括证书链——所以填码这一步只剩"码对不对"，不会再撞上"端口被挡/证书不受信"这类要重来的问题。
 
+---
+
+## 13. 凭据读取与轮换纪律（2026-09-18 立，因两次自己造成的泄漏）
+
+这一节的每一条都是**用一次真实事故换来的**，不是预防性建议。
+
+### 13.1 铁律：不许用临时正则去读含凭据的文件
+
+**事故**：我用 `grep -E 'KEY|SECRET|TOKEN|PASS'` 过滤 `/etc/pawshop-backup/backup.env`，**漏掉了 URL 形态的凭据**——`DATABASE_URL=postgresql://user:password@host/db` 的字段名里没有 KEY/SECRET/PASS，于是**密码原文被打印**。
+
+**事故二**：修好上面那条后，我自己的脱敏脚本对"**单行文件 + 结尾换行**"判断错误（`split` 出两个元素，掉进了"未解析行"分支），把 `/etc/pawshop-backup/backup.key` 的**密钥原文**打印了出来。
+
+**因此**：读任何 `*env` / credential 文件的输出，**必须**走专用脱敏器，禁止现场写正则：
+
+```bash
+# 主机上（root）
+/usr/bin/node /root/pawshop-redact.cjs /etc/pawshop-backup/backup.env /etc/pawshop-backup/backup-offsite.env
+# 单一文件（systemd 凭据那种裸值文件）直接给路径即可，脚本会识别为 [bare secret]
+/usr/bin/node /root/pawshop-redact.cjs /etc/pawshop-backup/backup-s3-access-key
+```
+
+脱敏器覆盖：键名命中 `KEY|SECRET|TOKEN|PASS|PWD|CRED|DSN|CONN|AUTH|SIGNATURE|SALT`、**URL 里的 userinfo**、**URL 路径里的长令牌**（webhook / 预签名）、**查询参数里的长值**、**裸密钥单行文件**、以及**无法解析的行里的不透明长串**。输出只有 `len` + `sha256[:12]` 指纹。
+
+**自检方式（改了这个工具就必须先自检）**：造一个含上述六种形态的样本文件，跑一遍，用 `grep -F` 逐一确认**原文没出现在输出里**。我这次的样本自检是 6/6 通过 —— 也就是说，工具本身也可能是漏的那一环，**自检要针对真实形态，不能凭直觉**。
+
+> 反面教训：我第一次写"自检样本"时，**又把真实密码当样本粘了一遍**。**自检样本必须是假值**（`deadbeef…`），因为自检命令本身也会进入日志/记录。
+
+### 13.2 数据库密码轮换（已实测的一键流程）
+
+适用：`pawshop` 库里任何角色的密码疑似外泄。脚本在主机 `/root/pawshop-rotate-backup-db-password.sh`（**不含任何密钥**，可长期保留）。
+
+```bash
+# 1) 干跑：只做前置校验与"旧密码当前是否可用"，不写任何东西
+PAWSHOP_ROTATE_DRY_RUN=1 bash /root/pawshop-rotate-backup-db-password.sh
+
+# 2) 真跑：改密码 + 原子改 env + 新旧密码各验一次
+bash /root/pawshop-rotate-backup-db-password.sh
+# 期望输出：ROTATION_OK，且 "new password authenticates: yes" / "old password authenticates: no"
+```
+
+设计要点（改脚本时不要破坏）：
+- 新密码**在主机上生成、全程不打印**；`ALTER ROLE` 语句**走 psql 的 stdin**（放 `-v pw=…` 会进 `ps` 进程列表，全机用户可见）。
+- 只改 `DATABASE_URL` 里密码那一段，**其余字节逐一比对必须相同**（防止静默丢配置）；写临时文件再 `mv`，保留 `640 root:pawshop-backup`。
+- 新旧密码**双向验证**；新密码不通则从备份回滚 env 并退出。
+- 干跑与真跑算出的旧密码指纹若不一致 → **说明读错了对象，停下来查**（这次两处指纹都是 `4f4f9407f5fe`，互为交叉验证）。
+
+**轮换后必须做的一步**：真跑一次备份服务，证明新凭据在完整 systemd 沙箱（`User=pawshop-backup` + `ProtectSystem=strict`）里可用：
+
+```bash
+systemctl start pawshop-backup.service
+systemctl show pawshop-backup.service -p Result -p ExecMainStatus --value
+# 期望 Result=success，日志含 "Encrypted production database backup completed." 与
+# "Offsite encrypted backup sync completed"
+```
+
+### 13.3 备份密钥（`/etc/pawshop-backup/backup.key`）**不能裸换**
+
+它同时是 manifest/回执的 **HMAC 密钥**和 dump 的 **`openssl enc -aes-256-cbc -pbkdf2` 口令**。而 `sync-production-backups.mjs`（约 76–88 行）**遍历目录里所有 manifest 逐个用当前密钥验签**，任一不匹配即抛错。
+
+**所以**：直接替换密钥 ⇒ 当天就打断每日备份+异地同步；而且只保护"以后"的 dump，历史 dump 仍只认旧钥匙。
+
+**唯一正确的换法**（需代码改动，随发版走）：验签/解密路径支持**当前密钥 + 已退役密钥**两级 → 发布后执行轮换 → 旧钥匙归档为"退役"，仅用于历史 dump 的校验与恢复。**在店主点头前不执行。**
+
+### 13.4 其余两条本轮踩到的纪律
+
+- **`grep` 在 macOS/BSD 上必须用 `-E`**：`grep "a\|b"` 在 BSD grep 下会被当成**字面量**，返回空结果却不报错——**空结果不等于没有**。本轮我又踩了一次。
+- **`cut -c1-N` 会按字节切断中文**，读回的"乱码"不是文件坏了。核对内容用 `grep -c`/Node 读全文，不要用 `cut` 截中文。
+- **`ss -ltn` 的端口不在行尾**（后面还有 Peer 列），`/:(5432)$/` 这类锚定永远匹配不到；判断暴露面要看第 4 列，或用 `ss -ltnp` 全量输出人工核对。
+- **从沙箱/公网做的 TCP 连通探测不可信**：对照组（一个绝对没人监听的端口）也被报成 `OPEN`，说明出口会本地完成握手。**暴露面的权威证据是主机上的 `ss -ltnp`**，并用"主机连自己公网 IP"作为旁证。
+
