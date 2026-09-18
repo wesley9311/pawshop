@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  assertProductionBackupManifest, backupArchiveReceiptHmac, backupManifestHmac, digestFile, equalHex, readBackupKey,
+  assertProductionBackupManifest, backupArchiveReceiptHmac, digestFile, equalHex, manifestKeyTest, matchBackupKeyRing,
 } = require('./backup-integrity.cjs');
 const {
   archivePeriod, archiveReceiptIsValid, remoteObjectKey, validateOffsiteConfig,
@@ -15,7 +15,7 @@ const {
   createBackupS3Client, headRemoteObject, uploadAndReadBack,
 } = require('./offsite-s3-client.cjs');
 const {
-  assertBackupArtifactStat, assertBackupDirectoryStat, assertBackupKeyStat, productionPrivatePaths,
+  assertBackupArtifactStat, assertBackupDirectoryStat, productionPrivatePaths, readProductionBackupKeyRing,
 } = require('./production-private-paths.cjs');
 
 if (process.platform !== 'linux' || process.getuid() === 0) {
@@ -24,10 +24,12 @@ if (process.platform !== 'linux' || process.getuid() === 0) {
 const tier = process.env.PAWSHOP_BACKUP_ARCHIVE_TIER || '';
 if (!['monthly', 'yearly'].includes(tier)) throw new Error('Production backup archive tier is invalid.');
 
-const { backupDir, backupKeyFile } = productionPrivatePaths(process.env);
+const { backupDir } = productionPrivatePaths(process.env);
 assertBackupDirectoryStat(lstatSync(backupDir), process.getuid());
-assertBackupKeyStat(lstatSync(backupKeyFile), process.getgid());
-const backupKey = readBackupKey(backupKeyFile);
+// The archived set is the newest backup, but it is matched against the ring all
+// the same: an archive job that runs after a rotation must still authenticate
+// whichever key signed the set it is about to upload.
+const keyRing = readProductionBackupKeyRing({ serviceGid: process.getgid() });
 const credentialsDir = resolve(process.env.CREDENTIALS_DIRECTORY || '');
 if (credentialsDir !== `/run/credentials/pawshop-backup-${tier}.service`) {
   throw new Error('Backup archive credentials must come from the exact systemd credential directory.');
@@ -71,7 +73,13 @@ function atomicPrivateWrite(file, content) {
 }
 
 async function verifyExistingReceipt(receipt, abortSignal) {
-  if (!archiveReceiptIsValid(receipt, { tier, period, bucket: config.bucket, backupKey })) {
+  // The receipt carries a keyed MAC but no key identifier, so the ring - not the
+  // live key - decides which key signed it, and a retry of an archive that
+  // predates a rotation still authenticates.
+  const keyEntry = matchBackupKeyRing(keyRing, (key) => archiveReceiptIsValid(receipt, {
+    tier, period, bucket: config.bucket, backupKey: key,
+  }));
+  if (!keyEntry) {
     throw new Error('Existing archive receipt failed authentication; operator review is required.');
   }
   for (const [key, hash, size, versionId] of [
@@ -104,9 +112,8 @@ async function archive(abortSignal) {
   if (archivePeriod(tier, new Date(manifest.created_at)) !== period) {
     throw new Error(`The latest encrypted backup does not belong to the current ${tier} archive period.`);
   }
-  if (!equalHex(backupManifestHmac(manifest, backupKey), manifest.manifest_hmac_sha256)) {
-    throw new Error('Production backup manifest authentication failed.');
-  }
+  const keyEntry = matchBackupKeyRing(keyRing, manifestKeyTest(manifest));
+  if (!keyEntry) throw new Error('Production backup manifest authentication failed.');
   const encryptedFile = join(backupDir, expectedEncrypted);
   const encryptedStat = lstatSync(encryptedFile);
   assertBackupArtifactStat(encryptedStat, process.getuid());
@@ -135,7 +142,7 @@ async function archive(abortSignal) {
     manifest_object_key: manifestKey, manifest_version_id: manifestRemote.versionId,
   };
   const receipt = {
-    ...receiptCore, archive_receipt_hmac_sha256: backupArchiveReceiptHmac(receiptCore, backupKey),
+    ...receiptCore, archive_receipt_hmac_sha256: backupArchiveReceiptHmac(receiptCore, keyEntry.key),
   };
   atomicPrivateWrite(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`);
   console.log(`The ${tier} encrypted backup archive was uploaded and exact-version verified.`);

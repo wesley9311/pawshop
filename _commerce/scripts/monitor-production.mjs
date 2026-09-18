@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  EXIT_CODES, adminRouteRequiresAuth, alertDeliveryAccepted, alertProviderErrorCode, backupAgeHours,
+  EXIT_CODES, adminRouteRequiresAuth, alertDeliveryAccepted, alertProviderErrorCode,
   backupFreshnessCheck,
   buildAlertPayload,
   buildAlertRequest, checkResult, daysUntilExpiry, describeAlertProviderCode,
@@ -223,23 +223,20 @@ async function runChecks() {
     { port: config.redisPort },
   ));
 
+  // Both sources are read, not one or the other: the unit supplies an immediate
+  // failure verdict, the file supplies an age that survives a reboot. The file is
+  // configured here rather than assumed so that a host which has not adopted it
+  // keeps the previous systemd-only behaviour.
   const backupTimestampFile = process.env.PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE;
+  let recordedBackup;
   if (backupTimestampFile) {
     try {
-      const recorded = readFileSync(backupTimestampFile, 'utf8').trim();
-      const ageHours = backupAgeHours(recorded, now);
-      results.push(checkResult(
-        'backup_freshness',
-        ageHours <= config.maxBackupAgeHours,
-        `last backup ${ageHours.toFixed(1)}h ago (limit ${config.maxBackupAgeHours}h)`,
-        { age_hours: Number(ageHours.toFixed(1)) },
-      ));
+      recordedBackup = { contents: readFileSync(backupTimestampFile, 'utf8') };
     } catch {
-      results.push(checkResult('backup_freshness', false, 'backup timestamp file is missing or unreadable'));
+      recordedBackup = { error: 'backup timestamp file is missing or unreadable' };
     }
-  } else {
-    results.push(backupFreshnessCheck(systemdUnitState('pawshop-backup.service'), now, config.maxBackupAgeHours));
   }
+  results.push(backupFreshnessCheck(systemdUnitState('pawshop-backup.service'), now, config.maxBackupAgeHours, recordedBackup));
 
   try {
     const stats = statfsSync('/');

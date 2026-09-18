@@ -30,4 +30,10 @@ RestrictSUIDSGID=true
 LockPersonality=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# ProtectSystem=strict makes /var read-only, so the timestamp that outlives a
+# reboot needs an explicit writable location. StateDirectory is that location and
+# it also owns the directory: systemd creates /var/lib/pawshop-backup as
+# pawshop-backup and leaves it world-traversable, which is what lets the monitor
+# account read the recorded instant.
+StateDirectory=pawshop-backup
 ReadWritePaths=/var/backups/pawshop

@@ -4,9 +4,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
-const { assertProductionBackupManifest, backupManifestHmac, constrainedBackupPath, equalHex } = require('../scripts/backup-integrity.cjs');
+const {
+  assertProductionBackupManifest, backupKeyFingerprint, backupManifestHmac, constrainedBackupPath, equalHex,
+  manifestKeyTest, matchBackupKeyRing,
+} = require('../scripts/backup-integrity.cjs');
 
 const root = resolve(__dirname, '..');
+const backupIntegrity = readFileSync(resolve(root, 'scripts/backup-integrity.cjs'), 'utf8');
 const backup = readFileSync(resolve(root, 'scripts/backup-real.mjs'), 'utf8');
 const restore = readFileSync(resolve(root, 'scripts/restore-verify-real.mjs'), 'utf8');
 const runtime = readFileSync(resolve(root, 'scripts/private-runtime.cjs'), 'utf8');
@@ -87,6 +91,41 @@ test('production manifest authentication covers archive identity and provenance'
   assert.doesNotThrow(() => assertProductionBackupManifest(complete, 'pawshop_production_20260908T000000000Z.manifest.json'));
   assert.throws(() => assertProductionBackupManifest({ ...complete, extra: true }));
   assert.throws(() => assertProductionBackupManifest(complete, 'pawshop_production_20260909T000000000Z.manifest.json'));
+});
+
+test('a rotated key ring keeps authenticating the sets the retired key signed', () => {
+  const live = Buffer.alloc(32, 7);
+  const retired = Buffer.alloc(32, 9);
+  assert.notEqual(backupKeyFingerprint(live), backupKeyFingerprint(retired));
+  assert.match(backupKeyFingerprint(live), /^[0-9a-f]{12}$/);
+  const manifest = {
+    schema: 'pawshop-production-backup-v1', created_at: '2026-09-08T00:00:00.000Z',
+    source_database: 'pawshop', encrypted_file: 'pawshop_production_20260908T000000000Z.dump.enc',
+    encryption: 'AES-256-CBC PBKDF2', sha256: 'a'.repeat(64), hmac_sha256: 'b'.repeat(64), size_bytes: 123,
+  };
+  const ring = [
+    { fingerprint: backupKeyFingerprint(live), key: live, source: 'current' },
+    { fingerprint: backupKeyFingerprint(retired), key: retired, source: 'retired' },
+  ];
+
+  // The point of the ring: a set written before the rotation still authenticates,
+  // and it is matched to the retired key rather than the live one. The matched key
+  // is also the key that decrypts the archive and re-signs the receipt, so getting
+  // this wrong on an old set would fail the daily sync the day after rotating.
+  const oldSet = { ...manifest, manifest_hmac_sha256: backupManifestHmac(manifest, retired) };
+  const matchedOld = matchBackupKeyRing(ring, manifestKeyTest(oldSet));
+  assert.equal(matchedOld.source, 'retired');
+  assert.equal(Buffer.compare(matchedOld.key, retired), 0);
+
+  const newSet = { ...manifest, manifest_hmac_sha256: backupManifestHmac(manifest, live) };
+  assert.equal(matchBackupKeyRing(ring, manifestKeyTest(newSet)).source, 'current');
+
+  // Matching is a query, not a verdict: an artifact no key signed returns null so
+  // that each caller can raise the message that names its own artifact.
+  const forged = { ...manifest, manifest_hmac_sha256: 'c'.repeat(64) };
+  assert.equal(matchBackupKeyRing(ring, manifestKeyTest(forged)), null);
+  assert.throws(() => matchBackupKeyRing([], manifestKeyTest(newSet)), /key ring is empty/);
+  assert.throws(() => matchBackupKeyRing(ring, null), /requires an authentication test/);
 });
 
 test('production admin verifier keeps customer commerce closed', () => {
@@ -241,7 +280,8 @@ test('offsite sync is versioned, read-back verified, credential isolated, and ne
   // must come back with a version identifier or the run fails closed.
   assert.doesNotMatch(`${offsiteSync}\n${offsiteClient}`, /GetBucketVersioning|PutBucketVersioning/);
   assert.match(offsiteClient, /assertVersionedUpload\(upload\)/);
-  assert.match(offsiteSync, /manifest_hmac_sha256/);
+  assert.match(offsiteSync, /matchBackupKeyRing\(keyRing, manifestKeyTest\(manifest\)\)/);
+  assert.match(offsiteSync, /readProductionBackupKeyRing\(\{ serviceGid: process\.getgid\(\) \}\)/);
   assert.match(offsiteSync, /receipt_hmac_sha256/);
   assert.match(offsiteSync, /selectLocalPruneCandidates/);
   assert.match(offsiteSync, /remote\.versionId !== versionId/);
@@ -267,11 +307,17 @@ test('offsite sync is versioned, read-back verified, credential isolated, and ne
   assert.match(scheduledBackup, /process\.getuid\(\) === 0/);
   assert.match(scheduledBackup, /realpathSync\('\/srv\/pawshop-commerce\/current\/_commerce'\)/);
   assert.doesNotMatch(backupService, /BACKUP_S3_ACCESS_KEY|BACKUP_S3_SECRET/);
+  // The manifest MAC itself now lives in the shared module, expressed once as the
+  // test that a manifest is authentic under a given key. Asserting it there keeps
+  // the invariant pinned even though the consumers no longer spell it out.
+  assert.match(backupIntegrity, /manifest_hmac_sha256/);
+  assert.match(backupIntegrity, /function manifestKeyTest\(manifest\)/);
+  assert.match(backupIntegrity, /function matchBackupKeyRing\(keyRing, authenticates\)/);
 });
 
 test('monthly and yearly archives reuse authenticated encrypted backups and are persistent', () => {
   assert.match(archiveBackup, /assertProductionBackupManifest/);
-  assert.match(archiveBackup, /backupManifestHmac/);
+  assert.match(archiveBackup, /matchBackupKeyRing\(keyRing, manifestKeyTest\(manifest\)\)/);
   assert.match(archiveBackup, /backupArchiveReceiptHmac/);
   assert.match(archiveBackup, /archiveReceiptIsValid/);
   assert.match(archiveBackup, /headRemoteObject/);

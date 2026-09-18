@@ -286,15 +286,38 @@ function systemdTimestampToIso(value) {
   return parsed.toISOString();
 }
 
-// The backup freshness verdict is decided here, not in the monitor, because the
-// systemd properties it reads are runtime state: a unit that has not run since
-// the host booted still reports Result=success while its completion timestamp is
-// empty. Parsing that empty timestamp inline killed the whole monitoring run
-// with an unhandled RangeError on the first real use, and a crashed monitor
-// dispatches no alert at all - a silent death, which is the one outcome the
-// fail-closed design exists to prevent. An unknown age is reported as a failed
-// check with a reason, never as a passing one.
-function backupFreshnessCheck(unitState, now, maxAgeHours) {
+// The scheduled backup records a UTC instant, so unlike the systemd property
+// above there is no timezone abbreviation to interpret. A value that is not
+// exactly one instant is still rejected rather than coerced, for the same reason:
+// a date the constructor silently normalised would produce a plausible age from
+// a value that was never written by the backup.
+function recordedTimestampToIso(contents) {
+  const trimmed = typeof contents === 'string' ? contents.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(trimmed)) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== trimmed) return null;
+  return trimmed;
+}
+
+// The verdict reads two independent sources, because either alone reports the
+// wrong thing. systemd knows whether the most recent attempt failed, which is the
+// only signal that arrives within minutes of a backup breaking. The recorded file
+// knows when the last success actually happened, which is the only signal that
+// outlives a reboot - judging on systemd alone reported a false failure after
+// every reboot until the next 03:20 run, and judging on the file alone would keep
+// describing the last success while every attempt since then was failing.
+//
+// `recorded` is undefined when no timestamp file is configured, which falls back
+// to the systemd timestamp and keeps the pre-existing behaviour on hosts that
+// have not adopted the file yet.
+//
+// The verdict stays here rather than in the monitor for the reason it always did:
+// a unit that has not run since the host booted reports Result=success with an
+// empty completion timestamp, and parsing that inline killed the whole monitoring
+// run with an unhandled RangeError on the first real use. A crashed monitor
+// dispatches no alert at all, so an unknown age is reported as a failed check
+// with a reason, never as a passing one.
+function backupFreshnessCheck(unitState, now, maxAgeHours, recorded) {
   if (!unitState || typeof unitState !== 'object') {
     return checkResult('backup_freshness', false, 'the backup unit state could not be read');
   }
@@ -305,11 +328,22 @@ function backupFreshnessCheck(unitState, now, maxAgeHours) {
   if (unitState.result !== 'success') {
     return checkResult('backup_freshness', false, `last backup unit result is ${unitState.result}`);
   }
-  const lastRun = systemdTimestampToIso(unitState.lastRun);
-  if (lastRun === null) {
-    return checkResult('backup_freshness', false, 'the backup unit has no completed run recorded since the host booted');
+  let lastSuccess;
+  if (recorded === undefined) {
+    lastSuccess = systemdTimestampToIso(unitState.lastRun);
+    if (lastSuccess === null) {
+      return checkResult('backup_freshness', false, 'the backup unit has no completed run recorded since the host booted');
+    }
+  } else {
+    if (recorded && typeof recorded.error === 'string') {
+      return checkResult('backup_freshness', false, recorded.error);
+    }
+    lastSuccess = recordedTimestampToIso(recorded && recorded.contents);
+    if (lastSuccess === null) {
+      return checkResult('backup_freshness', false, 'the recorded backup timestamp is invalid');
+    }
   }
-  const ageHours = backupAgeHours(lastRun, now);
+  const ageHours = backupAgeHours(lastSuccess, now);
   return checkResult(
     'backup_freshness',
     ageHours <= maxAgeHours,
@@ -510,6 +544,7 @@ module.exports = {
   formatLogLine,
   missingSecurityHeaders,
   nextAlertState,
+  recordedTimestampToIso,
   redactUrl,
   resolveAlertChannels,
   shouldDispatchAlert,

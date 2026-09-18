@@ -14,15 +14,16 @@ const { execFileSync } = require('node:child_process');
 const { lstatSync, readFileSync } = require('node:fs');
 const { basename, join } = require('node:path');
 const {
-  assertProductionBackupManifest, backupManifestHmac, digestFile, equalHex, readBackupKey,
+  assertProductionBackupManifest, digestFile, equalHex, manifestKeyTest, matchBackupKeyRing,
 } = require('./backup-integrity.cjs');
 const {
   OFFSITE_ENVIRONMENT_FIELDS, offsiteReceiptIsValid, validateOffsiteConfig,
 } = require('./offsite-backup-policy.cjs');
-const { validateProductionBackupEnvironment } = require('./production-private-paths.cjs');
+const {
+  readProductionBackupKeyRing, validateProductionBackupEnvironment,
+} = require('./production-private-paths.cjs');
 
 const PRODUCTION_BACKUP_DIR = '/var/backups/pawshop';
-const PRODUCTION_BACKUP_KEY_FILE = '/etc/pawshop-backup/backup.key';
 const PRODUCTION_BACKUP_ENVIRONMENT_FILE = '/etc/pawshop-backup/backup.env';
 const PRODUCTION_OFFSITE_ENVIRONMENT_FILE = '/etc/pawshop-backup/backup-offsite.env';
 // The name carries the authenticated creation timestamp, so the manifest cannot
@@ -101,16 +102,16 @@ async function verifyProductionBackupSet({ manifestName, expectedDatabase }) {
   if (manifest.size_bytes !== encryptedStat.size) {
     throw new Error('Encrypted production backup size does not match its manifest.');
   }
-  assertPrivateFile(PRODUCTION_BACKUP_KEY_FILE, {
-    uid: 0, gid: backupGid, mode: 0o640, label: 'Production backup key', maximum: 1024,
-  });
-  const backupKey = readBackupKey(PRODUCTION_BACKUP_KEY_FILE);
-  if (!equalHex(backupManifestHmac(manifest, backupKey), manifest.manifest_hmac_sha256)) {
-    throw new Error('Production backup manifest authentication failed.');
-  }
+  // This runs long after the release was built and the set it judges may predate
+  // a rotation, so the key comes from the ring: whichever key authenticates the
+  // manifest is also the key that encrypts the archive and signs the offsite
+  // receipt, and all three have to agree before any evidence is written.
+  const keyRing = readProductionBackupKeyRing({ serviceGid: backupGid });
+  const keyEntry = matchBackupKeyRing(keyRing, manifestKeyTest(manifest));
+  if (!keyEntry) throw new Error('Production backup manifest authentication failed.');
   const [encryptedSha256, encryptedHmac] = await Promise.all([
     digestFile(encryptedPath),
-    digestFile(encryptedPath, { hmacKey: backupKey }),
+    digestFile(encryptedPath, { hmacKey: keyEntry.key }),
   ]);
   if (!equalHex(encryptedSha256, manifest.sha256) || !equalHex(encryptedHmac, manifest.hmac_sha256)) {
     throw new Error('Encrypted production backup does not match its manifest.');
@@ -131,7 +132,7 @@ async function verifyProductionBackupSet({ manifestName, expectedDatabase }) {
   catch { throw new Error('Offsite backup receipt is invalid JSON.'); }
   const manifestSha256 = await digestFile(manifestPath);
   if (!offsiteReceiptIsValid(receipt, {
-    manifest, manifestFile: manifestPath, manifestHash: manifestSha256, bucket: offsite.bucket, backupKey,
+    manifest, manifestFile: manifestPath, manifestHash: manifestSha256, bucket: offsite.bucket, backupKey: keyEntry.key,
   })) throw new Error('Versioned offsite backup receipt is invalid.');
   return {
     manifest, manifestPath, manifestSha256, encryptedFile: basename(encryptedPath), encryptedPath,

@@ -16,7 +16,12 @@
 // The two imports are deliberately sequential and both are already
 // unprivileged, release-local modules that validate their own environment.
 
-import { realpathSync } from 'node:fs';
+import { chmodSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+
+// Created and made writable by StateDirectory=pawshop-backup in the unit, which
+// is also what lets this write succeed under ProtectSystem=strict. The monitor
+// reads the same path from PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE.
+const BACKUP_TIMESTAMP_FILE = '/var/lib/pawshop-backup/last-success.txt';
 
 if (process.platform !== 'linux' || process.getuid() === 0) {
   throw new Error('The scheduled production backup requires the unprivileged backup account.');
@@ -32,3 +37,23 @@ if (realpathSync(process.cwd()) !== activeReleaseDirectory) {
 
 await import('./backup-production.mjs');
 await import('./sync-production-backups.mjs');
+
+// Only reached when the dump and the offsite upload both succeeded, so the file
+// means exactly "the last fully successful scheduled backup", which is the
+// question the freshness check asks.
+//
+// Why a file exists at all: systemd only knows about runs since the host booted.
+// A reboot before the daily 03:20 run therefore left the monitor with an empty
+// completion timestamp and it reported a failure that had not happened, once per
+// reboot. The recorded instant outlives the boot, while the unit's own Result
+// keeps reporting a genuine failure within minutes - the monitor reads both.
+//
+// The instant is not a secret, and the monitor runs as a different account, so
+// the file is deliberately world-readable: UMask=0077 in the unit would
+// otherwise create it 0600 and the check would only ever see "unreadable". The
+// staged-then-renamed write means a reader never observes a half-written file.
+const recordedAt = `${new Date().toISOString()}\n`;
+const stagedTimestamp = `${BACKUP_TIMESTAMP_FILE}.staged`;
+writeFileSync(stagedTimestamp, recordedAt, { mode: 0o644 });
+chmodSync(stagedTimestamp, 0o644);
+renameSync(stagedTimestamp, BACKUP_TIMESTAMP_FILE);

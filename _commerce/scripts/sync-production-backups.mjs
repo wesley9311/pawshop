@@ -6,23 +6,27 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  assertProductionBackupManifest, backupManifestHmac, backupReceiptHmac, digestFile, equalHex, readBackupKey,
+  assertProductionBackupManifest, backupReceiptHmac, digestFile, equalHex, manifestKeyTest, matchBackupKeyRing,
 } = require('./backup-integrity.cjs');
 const {
   offsiteReceiptIsValid, remoteObjectKey, selectLocalPruneCandidates, validateOffsiteConfig,
 } = require('./offsite-backup-policy.cjs');
 const { createBackupS3Client, headRemoteObject, uploadAndReadBack } = require('./offsite-s3-client.cjs');
 const {
-  assertBackupArtifactStat, assertBackupDirectoryStat, assertBackupKeyStat, productionPrivatePaths,
+  assertBackupArtifactStat, assertBackupDirectoryStat, productionPrivatePaths, readProductionBackupKeyRing,
 } = require('./production-private-paths.cjs');
 
 if (process.platform !== 'linux' || process.getuid() === 0) {
   throw new Error('Production offsite backup sync requires the unprivileged Ubuntu service account.');
 }
-const { backupDir, backupKeyFile } = productionPrivatePaths(process.env);
+const { backupDir } = productionPrivatePaths(process.env);
 assertBackupDirectoryStat(lstatSync(backupDir), process.getuid());
-assertBackupKeyStat(lstatSync(backupKeyFile), process.getgid());
-const backupKey = readBackupKey(backupKeyFile);
+// Every manifest in the directory is verified against the whole key ring rather
+// than the live key alone. After a rotation the older sets were encrypted with a
+// key that is now retired, and the daily sync has to keep authenticating,
+// uploading and pruning them, so the per-manifest match below decides which key
+// applies instead of assuming the newest one does.
+const keyRing = readProductionBackupKeyRing({ serviceGid: process.getgid() });
 
 const credentialsDir = resolve(process.env.CREDENTIALS_DIRECTORY || '');
 if (credentialsDir !== '/run/credentials/pawshop-backup.service' &&
@@ -85,9 +89,12 @@ for (const manifestName of manifestNames) {
   const manifestFile = join(backupDir, manifestName);
   const manifest = privateJson(manifestFile, 'Production backup manifest');
   const { expectedEncrypted } = assertProductionBackupManifest(manifest, manifestName);
-  if (!equalHex(backupManifestHmac(manifest, backupKey), manifest.manifest_hmac_sha256)) {
-    throw new Error('Production backup manifest authentication failed.');
-  }
+  // The key that authenticates this manifest is the key that encrypts its
+  // archive, signs its offsite receipt, and must sign any receipt written now.
+  // Taking it from the ring instead of the live key file is what lets the daily
+  // sync keep serving sets that were encrypted before a rotation.
+  const keyEntry = matchBackupKeyRing(keyRing, manifestKeyTest(manifest));
+  if (!keyEntry) throw new Error('Production backup manifest authentication failed.');
   const encryptedFile = join(backupDir, expectedEncrypted);
   const encryptedStat = lstatSync(encryptedFile);
   assertBackupArtifactStat(encryptedStat, process.getuid());
@@ -98,7 +105,7 @@ for (const manifestName of manifestNames) {
   const receiptFile = join(backupDir, manifestName.replace(/\.manifest\.json$/, '.offsite.json'));
   const priorReceipt = existsSync(receiptFile) ? privateJson(receiptFile, 'Offsite backup receipt') : null;
   const priorVerified = offsiteReceiptIsValid(priorReceipt, {
-    manifest, manifestFile, manifestHash, bucket: config.bucket, backupKey,
+    manifest, manifestFile, manifestHash, bucket: config.bucket, backupKey: keyEntry.key,
   });
   const encryptedRemote = await uploadAndReadBack(client, {
     bucket: config.bucket, key: remoteObjectKey(expectedEncrypted), file: encryptedFile,
@@ -120,7 +127,7 @@ for (const manifestName of manifestNames) {
     encrypted_object_key: remoteObjectKey(expectedEncrypted), encrypted_version_id: encryptedRemote.versionId,
     manifest_object_key: remoteObjectKey(manifestName), manifest_version_id: manifestRemote.versionId,
   };
-  const receipt = { ...receiptCore, receipt_hmac_sha256: backupReceiptHmac(receiptCore, backupKey) };
+  const receipt = { ...receiptCore, receipt_hmac_sha256: backupReceiptHmac(receiptCore, keyEntry.key) };
   atomicPrivateWrite(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`);
   entries.push({
     createdAtMs: Date.parse(manifest.created_at), manifestFile: manifestName, encryptedFile: expectedEncrypted,
@@ -132,9 +139,11 @@ let pruned = 0;
 for (const entry of selectLocalPruneCandidates(entries, latest.manifest_file, Date.now())) {
   const receipt = privateJson(join(backupDir, entry.receiptFile), 'Offsite backup receipt');
   const manifest = privateJson(join(backupDir, entry.manifestFile), 'Production backup manifest');
+  const keyEntry = matchBackupKeyRing(keyRing, manifestKeyTest(manifest));
+  if (!keyEntry) throw new Error('Production backup manifest authentication failed.');
   if (!offsiteReceiptIsValid(receipt, {
     manifest, manifestFile: entry.manifestFile, manifestHash: entry.manifestHash,
-    bucket: config.bucket, backupKey,
+    bucket: config.bucket, backupKey: keyEntry.key,
   })) {
     throw new Error('Local deletion refused because the offsite receipt is invalid.');
   }

@@ -433,6 +433,25 @@ rm -f /root/pawshop-verify.env /root/pawshop-verify-recover.env \
 
 **2026-09-17 傍晚的实测**：18 个候选（含 `PawShop` 本身）全部 `19024`。两小时前 `[PawShop]` 还能命中——**同一天内第三次漂移**，正是这一轮把结论从"适配关键词"推向"改用 IP 白名单"。探针跑完脚本即删；生产 `alert-state.json` 全程未被触碰。
 
+### 9.4 备份新鲜度的两个来源（2026-09-19 修掉跨重启误报）
+
+**原来的缺陷**：`backup_freshness` 只读 systemd 的 `Result` + `ExecMainExitTimestamp`。而 systemd **只知道本次开机以来跑过没有** —— 开机时若还没到 03:20，完成时间戳是空的，监控就报一次"没有完成记录"的**假故障**。每次重启都会来一次。
+
+**现在的判定：两个来源都要过，各自回答不同的问题。**
+
+| 来源 | 回答的问题 | 为什么不能只看它 |
+| --- | --- | --- |
+| `systemctl show pawshop-backup.service` | **最近一次尝试是不是失败了** | 唯一能在几分钟内报警的信号；但它不知道重启前的历史 |
+| `/var/lib/pawshop-backup/last-success.txt` | **上一次成功是什么时候** | 唯一能跨重启存活的信号；但它不会因为后来一直失败而变旧，只看它会"一直说 3 小时前" |
+
+**写入方**：`run-scheduled-backup.mjs` 在 dump 与异地同步**都成功后**才写（单行 ISO-8601 UTC，先写 `.staged` 再 `rename`，读者永远看不到半截文件）。该可写目录由 `pawshop-backup.service` 的 `StateDirectory=pawshop-backup` 提供（`ProtectSystem=strict` 下必须显式给出），系统会建为 `pawshop-backup` 属主、**对其它账户可遍历**。
+
+**权限为什么是 0644**：文件里只有一个时间点，不是秘密；而监控以另一个账户运行。单元里的 `UMask=0077` 会把新建文件压成 0600，所以脚本写完显式 `chmod 0644` —— 否则监控永远只能看到"unreadable"。
+
+**上线顺序（重要，反了会报假故障）**：先发版（`run-scheduled-backup.mjs` 开始有能力写）→ 跑一次备份让文件出现 → **再**往 `/etc/pawshop-monitor/monitoring.env` 加 `PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE=/var/lib/pawshop-backup/last-success.txt`。**在文件存在之前就加这一行，监控会如实报"文件缺失"（fail-closed 的设计，不是 bug）。**
+
+**未配置该项时**的行为与旧版**逐字相同**（回落到 systemd 时间戳），所以老主机不会因为这次改动而改变行为。
+
 ## 10. 主机侧安全缺口修复（生产主机，root）
 
 2026-09-16 对抗审查（`docs/ADVERSARIAL_REVIEW.md`）确认线上存在两项主机侧缺口。仓库内提供**机器校验** `npm run verify:production:strict`。
@@ -615,6 +634,22 @@ done
 # 1) 准备不可变 release（产出 RELEASE_ID 与 RELEASE_CONTENT_SHA256）
 PAWSHOP_RELEASE_ID=<RELEASE_SHA> \
   bash /srv/pawshop-source/ops/commerce/prepare-commerce-release.sh
+
+# 1.5) ⚠️ 先刷新 libexec，再往下走（2026-09-19 起，本次发版改了其中 3 个文件）
+#      两个比对点会用同一个理由挡住你：
+#        · 备份演练第 126-131 行 cmp restore-verify-production.mjs + backup-integrity.cjs（演练【只比对不安装】）
+#        · deploy-commerce.sh 第 131-136 行 cmp 全部 4 个（不安装，不一致直接 exit 1）
+#      必须先手装。这段行为是「中性」的，所以提前装不会让在跑的监控/备份产生新行为：
+#        · monitor-production.mjs + monitoring-policy.cjs：monitoring.env 里还没加
+#          PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE，走的是 systemd 那一支，与旧版逐字等价（见 §9.4）
+#        · backup-integrity.cjs：备份目录里没有 retired-keys，钥匙环长度恒为 1
+REL=/srv/pawshop-commerce/releases/<RELEASE_SHA>
+for s in restore-verify-production.mjs backup-integrity.cjs monitor-production.mjs monitoring-policy.cjs; do
+  if ! cmp -s "$REL/_commerce/scripts/$s" "/usr/local/libexec/pawshop/$s"; then
+    install -o root -g root -m 0555 "$REL/_commerce/scripts/$s" "/usr/local/libexec/pawshop/$s"
+  fi
+  cmp -s "$REL/_commerce/scripts/$s" "/usr/local/libexec/pawshop/$s" || { echo "libexec 未收敛: $s" >&2; exit 1; }
+done
 
 # 2) 升级迁移。内部顺序：先取改动前的加密备份（并校验其清单 HMAC/密文摘要/异地回执）
 #    → 门禁 1→0 → 停服务 → 迁移前逐表行数快照 → db:migrate → 迁移后快照 → 写 v2 证据。
@@ -819,17 +854,96 @@ systemctl show pawshop-backup.service -p Result -p ExecMainStatus --value
 # "Offsite encrypted backup sync completed"
 ```
 
-### 13.3 备份密钥（`/etc/pawshop-backup/backup.key`）**不能裸换**
+### 13.3 备份密钥轮换（**钥匙环随本次发版就位；发版成功并刷新 libexec 之后才可执行**）
 
-它同时是 manifest/回执的 **HMAC 密钥**和 dump 的 **`openssl enc -aes-256-cbc -pbkdf2` 口令**。而 `sync-production-backups.mjs`（约 76–88 行）**遍历目录里所有 manifest 逐个用当前密钥验签**，任一不匹配即抛错。
+这把钥匙（`/etc/pawshop-backup/backup.key`，64 位十六进制 = 32 字节）同时是三个东西：manifest 的 HMAC 密钥、异地回执的 HMAC 密钥、以及 dump 的 `openssl enc -aes-256-cbc -pbkdf2` 口令。`sync-production-backups.mjs` **遍历备份目录里每一个 manifest**逐个验签，任一条不匹配即抛错。
 
-**所以**：直接替换密钥 ⇒ 当天就打断每日备份+异地同步；而且只保护"以后"的 dump，历史 dump 仍只认旧钥匙。
+**所以裸换会当天打断每日备份+异地同步**。2026-09-18 我误把它打印进会话记录，但当时**不能换**，只能先做代码改动。
 
-**唯一正确的换法**（需代码改动，随发版走）：验签/解密路径支持**当前密钥 + 已退役密钥**两级 → 发布后执行轮换 → 旧钥匙归档为"退役"，仅用于历史 dump 的校验与恢复。**在店主点头前不执行。**
+**现在的机制：钥匙环。** 验签/解密不再假设"存在的那把就是当初那把"，而是**逐把试，哪把通过就用哪把**：
 
-### 13.4 其余两条本轮踩到的纪律
+- 目录：`/etc/pawshop-backup/retired-keys/`，属主 `root:pawshop-backup`、模式 **0750**（服务可读、**不可写**——能写就能伪造历史）。
+- 退役钥文件：`backup-<指纹>.key`，属主 `root:pawshop-backup`、模式 **0640**。**文件名里的指纹就是内容的指纹**，装错文件会被读出来时拒绝（不会静默用错钥匙）。
+- 指纹 = **32 字节原始密钥**的 `sha256` 前 12 位。**不是**密钥文件的 `sha256sum`——文件里存的是十六进制文本，直接 `sha256sum` 得到的是文本摘要，**是两个完全不同的值**（2026-09-19 用合成密钥实测：真实函数 `6c8b284eb884` vs 文本摘要 `c0fe93ed8dd2`）。用真实函数算：
 
-- **`grep` 在 macOS/BSD 上必须用 `-E`**：`grep "a\|b"` 在 BSD grep 下会被当成**字面量**，返回空结果却不报错——**空结果不等于没有**。本轮我又踩了一次。
+```bash
+# 主机上（root）。走已安装的代码算，避免手算出错
+fp=$(/usr/bin/node -e "const{readBackupKey,backupKeyFingerprint}=require('/usr/local/libexec/pawshop/backup-integrity.cjs');process.stdout.write(backupKeyFingerprint(readBackupKey('/etc/pawshop-backup/backup.key')))")
+echo "$fp"    # 期望 12 位十六进制
+# 等价写法（同上已实测一致）：xxd -r -p /etc/pawshop-backup/backup.key | sha256sum | cut -c1-12
+```
+
+**执行顺序（铁律：先发版支持钥匙环 → 再轮换；反过来会当天打断同步）**
+
+```bash
+# 0) 前置：确认线上代码已带钥匙环（本次发版后）
+/usr/bin/node -e "console.log(typeof require('/usr/local/libexec/pawshop/backup-integrity.cjs').matchBackupKeyRing)"   # 期望 function
+# 同时按 §11.2 完成「刷新 libexec 的 4 个文件」（§9.1.1 会让 deploy 在切换 current 前先 cmp 它们）
+
+# 1) 建退役钥目录（幂等；模式必须是 0750）
+install -d -o root -g pawshop-backup -m 0750 /etc/pawshop-backup/retired-keys
+stat -c '%U:%G %a' /etc/pawshop-backup/retired-keys    # 期望 root:pawshop-backup 750
+
+# 2) 归档现钥（文件名 = 现钥指纹）
+#    ⚠️ 先查：若这个文件已存在，说明"当前钥已经退役过"——要么轮换做过了、要么上次跑到一半。
+#       两种情况都停下来查清，不要继续往下走（代码也会以 "repeats a key" 拒绝这种环）。
+fp=$(…见上…)
+test -e "/etc/pawshop-backup/retired-keys/backup-$fp.key" && { echo "该钥已在退役目录，停止"; exit 1; }
+install -o root -g pawshop-backup -m 0640 /etc/pawshop-backup/backup.key \
+  "/etc/pawshop-backup/retired-keys/backup-$fp.key"
+ls -l /etc/pawshop-backup/retired-keys/     # 期望 1 个文件，root:pawshop-backup 640
+
+# 3) 生成并原子替换新钥（新钥全程不打印；先写同目录临时文件再 mv）
+umask 077
+tmp=$(mktemp /etc/pawshop-backup/.backup.key.XXXXXX)
+openssl rand -hex 32 > "$tmp"
+chown root:pawshop-backup "$tmp"; chmod 0640 "$tmp"
+mv -f "$tmp" /etc/pawshop-backup/backup.key
+stat -c '%U:%G %a %s' /etc/pawshop-backup/backup.key   # 期望 root:pawshop-backup 640 65
+
+# 4) 复核钥匙环：应为 2 把，且只打印指纹（不打印密钥）
+bp_gid=$(id -g pawshop-backup)          # 986
+/usr/bin/node -e '
+  const { readProductionBackupKeyRing } = require("/srv/pawshop-commerce/current/_commerce/scripts/production-private-paths.cjs");
+  console.log(readProductionBackupKeyRing({ serviceGid: Number(process.argv[1]) })
+    .map(e => e.source + ":" + e.fingerprint).join(" "));
+' "$bp_gid"
+# 期望：current:<新指纹> retired:<旧指纹>（顺序固定：当前钥恒在第一）
+# 若报 "repeats a key" → 新钥与旧钥相同（openssl 出错或第 3 步没生效），回退重来
+
+# 5) 验收（这一步同时是「旧集合仍可验」的证明）：真跑一次备份
+systemctl start pawshop-backup.service
+systemctl show pawshop-backup.service -p Result -p ExecMainStatus --value   # 期望 success / 0
+# 该次运行会按目录顺序重新验签【所有】历史 manifest：只要有一条不认退役钥就会整体失败，
+# 所以 Result=success 就是「轮换没打断历史」的证据。期望日志含：
+#   Encrypted production database backup completed.
+#   Offsite encrypted backup sync completed
+```
+
+**失败回滚**：若第 5 步失败，退役目录里那份与旧钥**逐字节相同**，`install -o root -g pawshop-backup -m 0640 "/etc/pawshop-backup/retired-keys/backup-$fp.key" /etc/pawshop-backup/backup.key` 即可回到轮换前状态；随后删掉本次失败运行产生的残件（新 manifest / dump / 回执），再排查。
+
+**退役钥什么时候能删**：只有**当它签过的所有 dump 都已超出保留期**才可删（本地 prune 见 `selectLocalPruneCandidates`，OSS 侧受生命周期规则约束）。删早了 = 那些备份永远无法再验签/恢复。上限 32 把（`MAXIMUM_RETIRED_BACKUP_KEYS`）。
+
+**隔离恢复验证器（`restore-verify-production.mjs`）不认钥匙环，这是有意的、也不影响任何自动流程。** 它读的是 `/var/lib/pawshop-restore/input/backup.key` —— 一个由调用方拷进去的副本；它装在 `libexec` 里，只加载同样在 `libexec` 的 `backup-integrity.cjs`，**不会**去加载 `production-private-paths.cjs`（那个模块依赖 release 树）。所以：
+
+- **演练脚本放的是实时钥，恒正确**：`run-first-production-backup-restore.sh` 钻取的永远是**刚创建的最新集合**（`read-production-backup-pointer.mjs` 指向刚写的那份），而最新集合必然由实时钥加密 → 两者总是同一把。§11.2 发版前的恢复点同理（每次都新做一份）。
+- **唯一需要人工介入的场景**：轮换之后要**手工验/恢复一份旧集合**。把匹配的那把退役钥拷过去即可（指纹指的是**那把钥**的指纹，就在文件名里；全程不需要打印任何密钥材料）：
+
+```bash
+install -o root -g pawshop-restore -m 0640 \
+  /etc/pawshop-backup/retired-keys/backup-<那把钥的指纹>.key \
+  /var/lib/pawshop-restore/input/backup.key
+```
+
+**哪把才是匹配的，无法从 manifest 直接算出来**（manifest 里只有 HMAC 值，没有钥匙标识），所以只能**逐个试**：放错会明确失败（`Production backup manifest authentication failed.`），不会静默用错钥匙去解密；放对了就通过。轮换次数很少（每把退役钥对应一次轮换），所以这个"试"在实践上就是一次或两次。
+
+**为什么钥匙环同时也是恢复能力的保护**：manifest 的 `manifest_hmac_sha256` 用的就是"加密该 dump 的那把钥"，所以"哪把钥能验签这条 manifest"和"哪把钥能解密它"是**同一个问题**——匹配到哪把就用哪把解密，历史 dump 在轮换后依然可验、可恢复。
+
+### 13.4 其余几条踩到的纪律
+
+- **shell 里的 `grep` 不能用 `\|` 做"或"**（2026-09-19 复现定位）：本机 shell 的 `grep` 是 **toybox 0.8.13 的替身**（`grep --version` 会自己写明 `is not GNU grep`），`grep "a\|b"` 里的 `\|` 被当**字面量**，于是**返回空却不报错——空结果不等于没有**。本机**也没有 `rg`**。本轮我因此两次误判"文件里没有这个字符串"，实际是模式写错了。**搜代码做"存在性判断"时不要用 shell `grep`**，改用带 ripgrep 内核的搜索工具；shell `grep` 只用于 `-q` 存在性判断这种单一字面量场景。
+- **`node --check` 过不了"用了没导入的函数"**（本轮真实差点上线）：我把 `manifestKeyTest` 用在 `sync-production-backups.mjs` 里却漏了导入，`node --check` 只做语法分析、**语法通过**，而四个文本型契约测试也只匹配字符串，**全部绿灯**。是逐行复核 diff 才发现的。这类脚本在本地跑不起来（模块加载即抛"必须 Linux/非 root"），所以**改完之后必须逐行核对"新用到的符号是否都在导入行里"**；根治办法是给 `_commerce/scripts` 加 ESLint `no-undef`（本轮未做，见 `REMAINING_WORK.md`）。
+- **别把"路径来自环境变量"当成天然可用**（同上，同类错误）：`readProductionBackupKeyRing` 最初从 `process.env` 取路径。备份服务带 `backup.env` 没问题，但**证据写入器是以 root 直跑、不经过任何带 `EnvironmentFile` 的单元**，那里两个变量未设置 → `resolve('')` 落到工作目录 → 一个"位置完全正确"的密钥被拒绝加载。**凡函数同时被"有 env 的单元"和"没 env 的手工命令"调用，路径就必须来自常量，不能来自 env。**
 - **`cut -c1-N` 会按字节切断中文**，读回的"乱码"不是文件坏了。核对内容用 `grep -c`/Node 读全文，不要用 `cut` 截中文。
 - **`ss -ltn` 的端口不在行尾**（后面还有 Peer 列），`/:(5432)$/` 这类锚定永远匹配不到；判断暴露面要看第 4 列，或用 `ss -ltnp` 全量输出人工核对。
 - **从沙箱/公网做的 TCP 连通探测不可信**：对照组（一个绝对没人监听的端口）也被报成 `OPEN`，说明出口会本地完成握手。**暴露面的权威证据是主机上的 `ss -ltnp`**，并用"主机连自己公网 IP"作为旁证。

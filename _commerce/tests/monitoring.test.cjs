@@ -11,16 +11,19 @@ const {
   buildAlertRequest,
   checkResult, daysUntilExpiry, describeAlertProviderCode, feishuAccepted, formatAlertText, formatLogLine,
   missingSecurityHeaders,
-  nextAlertState, redactUrl, shouldDispatchAlert, storeRouteIsClosed, summarize, systemdTimestampToIso,
+  nextAlertState, recordedTimestampToIso, redactUrl, shouldDispatchAlert, storeRouteIsClosed, summarize, systemdTimestampToIso,
   telegramAccepted,
   validateMonitoringConfig,
 } = require('../scripts/monitoring-policy.cjs');
 
 const root = resolve(__dirname, '..');
 const monitor = readFileSync(resolve(root, 'scripts/monitor-production.mjs'), 'utf8');
+const monitoringPolicy = readFileSync(resolve(root, 'scripts/monitoring-policy.cjs'), 'utf8');
 const monitorService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-monitor.service'), 'utf8');
 const monitorTimer = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-monitor.timer'), 'utf8');
 const monitorEnvExample = readFileSync(resolve(root, '..', 'ops/commerce/monitoring.env.example'), 'utf8');
+const scheduledBackup = readFileSync(resolve(root, 'scripts/run-scheduled-backup.mjs'), 'utf8');
+const backupService = readFileSync(resolve(root, '..', 'ops/commerce/pawshop-backup.service'), 'utf8');
 
 const env = {
   PAWSHOP_MONITOR_STOREFRONT_ORIGIN: 'https://pawlivora.com',
@@ -351,7 +354,10 @@ test('monitor runner bounds every call and never logs secret material', () => {
   // The closed-route invariant and the backup freshness gate must be real checks.
   assert.match(monitor, /store_api_closed/);
   assert.match(monitor, /admin_requires_auth/);
-  assert.match(monitor, /backup_freshness/);
+  assert.match(monitor, /backupFreshnessCheck/);
+  // The freshness check name is emitted where the verdict is computed, which is
+  // the shared policy module, so that is where the name has to exist.
+  assert.match(monitoringPolicy, /checkResult\('backup_freshness'/);
   assert.match(monitor, /pawshop-backup\.service/);
   assert.match(monitor, /disk_space/);
   assert.match(monitor, /tls_certificate/);
@@ -417,6 +423,81 @@ test('backup freshness survives an unrecorded run and reads systemd timestamps i
   // The runner delegates the verdict instead of parsing the timestamp itself.
   assert.match(monitor, /backupFreshnessCheck\(systemdUnitState\('pawshop-backup\.service'\)/);
   assert.doesNotMatch(monitor, /new Date\(unit\.lastRun\)/);
+});
+
+test('backup freshness survives a reboot without hiding a failing unit', () => {
+  // The recorded instant is written by the backup itself in UTC, so it carries no
+  // timezone abbreviation to interpret - but a value that is not exactly one
+  // instant is refused rather than coerced.
+  assert.equal(recordedTimestampToIso('2026-09-17T14:18:07.000Z\n'), '2026-09-17T14:18:07.000Z');
+  for (const value of [
+    '2026-09-17T14:18:07Z', '2026-09-17 14:18:07', '2026-09-17T14:18:07.000+08:00',
+    '2026-13-40T25:61:61.000Z', '', '   ', undefined, null, 7,
+  ]) assert.equal(recordedTimestampToIso(value), null, String(value));
+  // The value Date would silently normalise an out-of-range day for is refused by
+  // the parse, so a corrupt file cannot produce a plausible-looking age.
+  assert.equal(recordedTimestampToIso('2026-09-31T00:00:00.000Z'), null);
+
+  const at = iso => new Date(iso);
+  const now = at('2026-09-17T17:18:07.000Z');
+
+  // The false alarm this exists to remove: after a reboot, systemd reports
+  // Result=success with an empty completion timestamp, and the recorded file is
+  // the only source that still knows when the last success happened.
+  const afterReboot = backupFreshnessCheck(
+    { result: 'success', lastRun: '' }, now, 36, { contents: '2026-09-17T14:18:07.000Z\n' },
+  );
+  assert.equal(afterReboot.ok, true);
+  assert.match(afterReboot.detail, /3\.0h ago/);
+
+  // A genuinely stale recorded instant still fails even though the unit is happy.
+  const stale = backupFreshnessCheck(
+    { result: 'success', lastRun: '' }, now, 36, { contents: '2026-09-15T14:18:07.000Z\n' },
+  );
+  assert.equal(stale.ok, false);
+  assert.match(stale.detail, /limit 36h/);
+
+  // Reading the file must not cost the immediate signal: a failing unit is caught
+  // now, not thirty-six hours later when the recorded age finally exceeds the limit.
+  const failingUnit = backupFreshnessCheck(
+    { result: 'exit-code', lastRun: '' }, now, 36, { contents: '2026-09-17T17:00:07.000Z\n' },
+  );
+  assert.equal(failingUnit.ok, false);
+  assert.match(failingUnit.detail, /result is exit-code/);
+
+  // A configured but unreadable file is a failure, not a silent fallback: falling
+  // back would keep reporting a fresh age from a file that never gets written.
+  const unreadable = backupFreshnessCheck(
+    { result: 'success', lastRun: '' }, now, 36, { error: 'backup timestamp file is missing or unreadable' },
+  );
+  assert.equal(unreadable.ok, false);
+  assert.match(unreadable.detail, /missing or unreadable/);
+
+  const malformed = backupFreshnessCheck(
+    { result: 'success', lastRun: '' }, now, 36, { contents: 'not-a-timestamp' },
+  );
+  assert.equal(malformed.ok, false);
+  assert.match(malformed.detail, /recorded backup timestamp is invalid/);
+
+  // Unset keeps the previous systemd-only behaviour, which is what every host that
+  // has not adopted the file still runs.
+  assert.equal(backupFreshnessCheck({ result: 'success', lastRun: '' }, now, 36).ok, false);
+  assert.equal(backupFreshnessCheck({ skipped: true }, now, 36, { contents: 'nonsense' }).ok, true);
+
+  // The monitor reads both sources, and the runner writes the file only after the
+  // dump and the offsite upload have both succeeded.
+  assert.match(monitor, /process\.env\.PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE/);
+  assert.match(monitor, /systemdUnitState\('pawshop-backup\.service'\), now, config\.maxBackupAgeHours, recordedBackup/);
+  assert.match(scheduledBackup, /const BACKUP_TIMESTAMP_FILE = '\/var\/lib\/pawshop-backup\/last-success\.txt'/);
+  const syncImport = scheduledBackup.indexOf("await import('./sync-production-backups.mjs')");
+  assert.ok(syncImport > -1);
+  assert.ok(scheduledBackup.indexOf('renameSync(stagedTimestamp, BACKUP_TIMESTAMP_FILE)') > syncImport);
+  // UMask=0077 would create the file 0600 and the monitor, which runs as another
+  // account, would only ever see "unreadable".
+  assert.match(scheduledBackup, /chmodSync\(stagedTimestamp, 0o644\)/);
+  assert.match(backupService, /^StateDirectory=pawshop-backup$/m);
+  assert.match(backupService, /^ReadWritePaths=\/var\/backups\/pawshop$/m);
+  assert.match(monitorEnvExample, /^PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE=\/var\/lib\/pawshop-backup\/last-success\.txt$/m);
 });
 
 test('monitor units are hardened, non-privileged, and read a non-secret config', () => {

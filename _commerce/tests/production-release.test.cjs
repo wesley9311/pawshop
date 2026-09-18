@@ -248,7 +248,9 @@ test('backup evidence requires authenticated offsite and isolated restore record
   // The manifest, the dump and the offsite receipt are verified by the module
   // that the pre-upgrade restore point shares, so neither writer can drift.
   assert.match(backupVerification, /offsiteReceiptIsValid/);
-  assert.match(backupVerification, /backupManifestHmac/);
+  // The manifest is authenticated against the key ring rather than the live key, so
+  // a pre-upgrade restore point that predates a rotation is still verifiable.
+  assert.match(backupVerification, /matchBackupKeyRing\(keyRing, manifestKeyTest\(manifest\)\)/);
   assert.match(backupVerification, /offsiteReceiptIsValid\(receipt, \{/);
   assert.match(backupVerification, /manifest\.size_bytes !== encryptedStat\.size/);
   assert.match(backupEvidenceWriter, /verifyProductionBackupSet/);
