@@ -644,6 +644,24 @@ PAWSHOP_RELEASE_ID=<RELEASE_SHA> PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1 \
 
 **本轮实测的边界（如实记下）**：迁移前那份恢复点做了**密码学校验**（清单 HMAC、密文 sha256 与 HMAC、异地回执 HMAC），但**没有单独对它跑一次隔离恢复演练**；演练跑在同一次升级的迁移后备份上。两者用的是同一套备份/恢复代码，所以不是"没验证的路径"，但"改动前那份也演练一次"是下一层加固项。
 
+**首次生产实跑：2026-09-18，成功**（`aaa5673` 是第一个走升级路径激活的 release；它的前任 `466cfc5` 走的还是空库首次流程）。
+
+| 项 | 值 |
+| --- | --- |
+| `RELEASE_ID` | `aaa56732efad4934f4d67c14dc684f8d208fbbd9` |
+| `RELEASE_CONTENT_SHA256` | `9adec36b8504326ee5dbbd9d7f2698da55e727dd5fe4d03b73ff20811a95ac40` |
+| `predecessor_release_id` | `466cfc58245ed6e99da0bedce57eae0cfe5c88ab` |
+| 改动前恢复点 | `pawshop_production_20260918T063311496Z.manifest.json` |
+| 迁移前 → 迁移后 | **147 关系 / 601 行 → 147 关系 / 601 行**（一行未少、一个关系未消失） |
+| `relations_before/after_sha256` | 均 `cde5c43db8b68e22b77c9b6052f97b0b6d9e9546104c9296be8d08c2e3bd6dac`（`sha256sum` 那两份证据文件可复算一致） |
+| 唯一执行的迁移脚本 | `@medusajs/medusa` 的 `create-super-admin-role.js` |
+| 迁移后备份回执 | `pawshop_production_20260918T063458176Z.manifest.json`（异地回读 + 隔离恢复演练通过） |
+| 激活后验收 | 店主真实登录通过（商品/订单/客户管理权限均通）；`NRestarts=0`；`/app`·`/admin`·`/admin-api/`·`/store/products`·`/pawshop-runtime`·`/health` 外部全 404；`user` 表仍为 1 行（`504533680@qq.com`） |
+
+**这次实跑回答的就是这件事**：店主账号**没有被发版删掉**——正是这条路径存在的全部理由。构建实测 **2m47s**（前端 106.44s），期间外部采样 **18/18 全 200**；迁移窗口内服务按设计停着，展示站不受影响。
+
+**操作细节（比文档更重要）**：三段长活（构建 / 升级迁移 / 备份演练 / 激活）全部用 `setsid` 脱离 ssh 会话跑，日志写 `/root/`，靠日志里的 `BUILD_EXIT=` / `UPGRADE_EXIT=` / `DRILL_EXIT=` / `DEPLOY_EXIT=` 判成败——**不要用前台 ssh 的退出码**（前台命令默认 2 分钟被杀，远端却还在跑，极易误判；本轮备份演练期间 ssh 还真出现过一次 banner 超时）。
+
 ---
 
 ## 12. 「忘记密码」发信通道（生产主机，root）

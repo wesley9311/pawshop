@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-17（WorkBuddy 第七轮）
+更新：2026-09-18（WorkBuddy 第八轮）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
@@ -8,20 +8,18 @@
 
 ---
 
-## 0. 当前唯一的关键路径阻塞：**推送**
+## 0. 当前没有阻塞项；关键路径交回店主
 
-**一句话**：本轮所有工程改动都已完成、已本地提交、**未推送**（店主的规矩是推送前先问）。而**激活商务后台要求主机源码树停在已推送的提交上**（主机 `git fetch` 是匿名、且 release 校验要求 `HEAD` == release ID 且工作树干净）。所以：
+**2026-09-18 结项**：`aaa5673` 已推送 → 主机取码 → 构建 → **升级迁移（不清库）** → 迁移后加密备份 + 离线回读 + 隔离恢复演练 → 合闸 → 激活 → 验收，全部完成。**商务后台的工程侧到这里已经通了**，生产库里店主账号与数据都还在。
 
-```
-说出"可以推送"
-  → 主机取码 → prepare release → 首次迁移 → 首次加密备份 + 离线回读 + 隔离恢复演练
-  → 激活商务后台 → 删掉监控那两行临时跳过 → 启用备份定时器
-  → 开工中文运营台
-```
+**接下来不再是"我卡住了"，而是只有店主本人能做的那几件事**（链接、点击步骤、交付方式见 `docs/OWNER_ACTIONS_ZH.md`）：
 
-**为什么不能用主机上现成的 `79a045c`**：它**不含** `write-production-backup-restore-evidence.mjs`，走不了首次备份的证据流程（`run-first-production-backup-restore.sh` 第 140 行会调用它）。所以必须准备一个新 release。
+1. **QQ 邮箱 SMTP 授权码** → 装上后"忘记密码"才真的会发信（工具已就位、先真发自检再写入）。
+2. **重新生成 Slack Incoming Webhook URL** → 恢复双通道告警（本轮实测 Slack 404、飞书正常）。
+3. **删掉接管期遗留的 RAM 用户 `pawshop-agent-temp`**（需控制台手工删）。
+4. **Airwallex / PingPong 收款申请**、**后台对店主的暴露方式**（SSH 隧道 vs 自建中文运营台）。
 
-命令序列已写入 `docs/RUNBOOK.md` **§11 商务后台激活序列**（含前置校验与回滚）。
+工程侧下一个里程碑是**中文运营台**（要不要做、做到哪，见 C 节）。基线：`docs/RUNBOOK.md` §11 与 §11.2（激活序列与升级序列，均已实跑）。
 
 ---
 
@@ -45,21 +43,29 @@
 
 | # | 项 | 级别 | 归属 | 说明与前置条件 |
 | --- | --- | --- | --- | --- |
-| A0 | **待批准的提交未推送** | **P0** | 店主 → Agent | 见上面 §0。这是 A2/A5/B1 现在唯一的共同前置。 |
-| A1 | 告警 webhook 未配置 | P0 | ⏳ **待发版** | ✅ 2026-09-17 完成接入：飞书 + Slack 双通道，真实投递验证通过。当日的"已验证送达"结论**当天晚上即被推翻**：生产真触发一次告警时飞书回 `code:19024`，逐候选探测发现该群关键词已从 `[PawShop 告警]` 变成 `[PawShop]`，**飞书通道自那一刻起静默丢弃全部告警**（只有 Slack 在响），而监控始终 12/12 全绿。已把信封改为 `[PawShop] 告警`（同时含两种写法）、日志补上厂商错误码与含义、`run.sh` 加关键词拒收用例，并用真实通道复验通过（RUNBOOK §9.3/§9.3.1）。**修复只改了 libexec 的 2 个文件，需要一次 release 才生效**；不需要重新激活商务，也不需要清库。 |
-| A2 | **加密备份链未启用** | **P0** | Agent（待 A0） | 原有四处硬阻塞，**2026-09-17 全部清除**：① 首次备份流程用 release 自身目录（`--property=WorkingDirectory=$release/_commerce`，不需要 `current`）；② `backup-offsite.env` 已写入**且两个闸门已打开**（留空会让离线同步 fail-closed，这是设计而非缺陷）；③ `backup-s3-access-key` / `backup-s3-secret-key` 已写入（`root:root 0600`）并用真实凭据实测（能写、能回读版本、**删除被拒 403**、读不了生命周期规则）；④ `Requires=postgresql.service` → `postgresql@17-main.service`（⚙️ 纠正：`postgresql.service` 是空壳单元 `ExecStart=/bin/true`，依赖它等于没有任何保证，并非"inactive 起不来"）。<br>**仍剩**：首次加密备份 + 离线回读 + 隔离恢复演练尚未执行——**它要求一个已推送的 release 提交（A0）**。<br>**当前后果：生产库没有任何加密备份。** 库现在是空的（见 A4）所以暂时无数据可丢，但**必须在开放下单前解决**。 |
-| A3 | 监控有两项**临时跳过** | P1 | Agent（待 A5） | `/etc/pawshop-monitor/monitoring.env` 里 `PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS=1` 与 `PAWSHOP_MONITOR_SKIP_SYSTEMD_CHECKS=1`。前者让 3 项 commerce 检查记为"显式跳过"，后者让备份新鲜度检查跳过。**commerce 激活并启用备份后必须删掉这两行**，否则真实的 commerce 宕机与备份中断会被掩盖。删掉后监控应变成 12/12 且全部为真实检查。 |
-| A4 | 生产库 `pawshop` 存在但**空** | 提示 | Agent | 库已创建（⚙️ 纠正上轮"未创建"的说法），但 `public` schema **0 张表**——首次迁移从未执行。这正是"目前没有可丢数据"的原因。 |
-| A5 | commerce release 从未部署 | P0 | Agent（待 A0） | `/srv/pawshop-commerce/current` 不存在；`releases/` 里有 3 个旧构建，其中 `79a045c` 早于监控模块，**且不含 `write-production-backup-restore-evidence.mjs`**，因此走不了首次备份的证据流程。这是 A2、B1 的共同根因，**必须准备新 release**。 |
-| A6 | 临时 RAM 用户 `pawshop-agent-temp` 残留 | P2（非关键路径） | **店主**（1 分钟） | 我用它完成了备份凭据与生命周期配置；收尾时**先解除策略、后删密钥**的顺序错误让我失去了 RAM 权限，删不掉自己这个用户。**它已彻底作废**（OSS 管理/数据面与 RAM 全部 403）。删除步骤见 `docs/OWNER_ACTIONS_ZH.md` §2.3。 |
+| A1 | **Slack 告警通道已失效** | P1 | **店主** | 2026-09-18 真实投递实测：`alert channel slack did not accept the payload (status 404, provider code none)` —— 该 webhook 已不存在。**同一次实测中飞书恢复正常**（告警与恢复各一条均 `accepted`），所以当前是"1/2 通道"、告警仍能到达店主。需店主重新生成 Slack Incoming Webhook URL。见 `docs/OWNER_ACTIONS_ZH.md`。 |
+| A2 | **邮件凭据（QQ SMTP 授权码）未安装** | P0 | **店主 → Agent** | "忘记密码"的实现、订阅者、SMTP 客户端、装凭据工具、端到端验收脚本**全部就位且已用假中继实测**；只差店主提供的授权码。装凭据的工具会**先真发一封自检邮件、对方接受了才写入**，所以错的码不会在主机上留下"看着配好了其实发不出去"的状态。拿到码后装完**不需要发版、不需要重启**。 |
+| A3 | 备份新鲜度缺少跨重启的可靠信号 | P1 | Agent | `backup_freshness` 读的是 systemd 运行时状态，主机重启后到下一次备份之间会**误报一次**（已从"崩溃"修成"报失败"）。干净做法是让备份写 `PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE`，需动 release 侧单元。 |
+| A4 | 临时 RAM 用户 `pawshop-agent-temp` 残留 | P2（非关键路径） | **店主**（1 分钟） | 接管期用过；收尾时"先解策略、后删密钥"的顺序错误导致它删不掉自己。**已彻底作废**（OSS 管理/数据面与 RAM 全部 403）。删除步骤见 `docs/OWNER_ACTIONS_ZH.md` §2.3。 |
+| A5 | 收款通道（Airwallex / PingPong） | P1 | **店主** | 需店主本人申请；与工程侧无耦合。 |
+| A6 | 后台对店主的暴露方式未定 | P1 | **共同** | 当前后台只监听回环，店主本人访问要走 SSH 隧道；另一条路是自建中文运营台（见 C 节）。这是产品决策，不是缺陷。 |
+
+**已结项（2026-09-18，全部有实跑证据）**：
+
+- **提交已推送**（`aaa5673`），主机已取码并构建 release。
+- **加密备份链已启用**：首次备份 + OSS 精确版本回读 + 隔离恢复演练通过；**且此后每次发版都会再跑一次**（升级流程的第 3 步）。
+- **监控临时跳过已删除**：`monitoring.env` **0 跳过行**，实测 **12/12 全部真实检查**。
+- **生产库已非空**：**155 关系 / 147 表 / 601 行**，含店主账号 `504533680@qq.com`。
+- **商务 release 已部署并在跑**：`current` → `aaa56732efad4934f4d67c14dc684f8d208fbbd9`，服务 enabled+active、`NRestarts=0`、只监听 `127.0.0.1:9000`。
+- **一个数据库只能激活一个 release** 的隐患已消除，且已用本次发版实跑验收（147 关系 / 601 行 **一行未少**）。
 
 ---
 
-## B. 商务后台（Medusa）激活 —— 下一个里程碑
+## B. 商务后台（Medusa）激活 —— ✅ 已完成（2026-09-18 走升级路径发版到 `aaa5673`）
 
-这是 Codex 方案里"先激活生产后台并验证商品草稿上传"那一步，也是 A2/A3/A5 的统一解锁点。
+这是 Codex 方案里"先激活生产后台并验证商品草稿上传"那一步，于 2026-09-17 首次打通、2026-09-18 用**升级路径**完成第二次发版（不清库、店主账号与数据全在）。**A2/A3/A5 都由它解锁并已结项**（详见 A 节与 B3）。
 
-**激活链（可执行命令已整理进 `docs/RUNBOOK.md` §11，全部为已审查脚本）**
+**激活链（可执行命令已整理进 `docs/RUNBOOK.md` §11 首次激活 / §11.2 后续升级，全部为已审查脚本）**
 
 1. 更新 `/srv/pawshop-source` 到目标 commit（它是**商务**构建源，与展示站的 `/srv/pawshop/source` 是两棵独立的树）。⚠️ **必须是已推送的提交**（A0）。
 2. `prepare-commerce-release.sh` → 产出 `/srv/pawshop-commerce/releases/<sha>`（带 manifest + evidence）与内容摘要。
@@ -80,17 +86,18 @@
 
 **我的判断：走 (b)**，但要在运营台开工前先定，否则运营台做完发现调不通。
 
-### B3 2026-09-17 状态与未结项
+### B3 2026-09-18 状态与未结项
 
-**已完成**：商务后台**已激活并在跑**（`current` → `9bac8dc`，服务 enabled+active、NRestarts=0，只监听回环），4 个定时器（3 个备份 + 监控）全部 enabled，服务已 enable 开机自启，首次加密备份 + OSS 精确版本回读 + 隔离恢复演练全部通过，线上店铺全程 200 无中断，**监控 12/12 全部真实检查（无任何跳过行）**。
+**已完成**：商务后台**已激活并在跑**，且**已于 2026-09-18 用升级路径发版到 `aaa5673`**（`current` → `/srv/pawshop-commerce/releases/aaa56732efad4934f4d67c14dc684f8d208fbbd9`，服务 enabled+active、NRestarts=0，只监听回环 `127.0.0.1:9000`），4 个定时器（3 个备份 + 监控）全部 enabled，首次加密备份 + OSS 精确版本回读 + 隔离恢复演练全部通过，线上店铺全程 200 无中断，**监控 12/12 全部真实检查（无任何跳过行）**。**店主账号仍在**（`504533680@qq.com`，`user` 表 1 行）——这正是升级路径要保住的东西。⚠️ 更正：此前文档写的"`current` → `9bac8dc`"与主机不符，实测 `9bac8dc` 早于 `d316bd4`，即 9 月 17 日最终停在 `466cfc5`；现已由 `aaa5673` 取代。
 
 **未结项（按优先级）**：
 
-1. **P0｜店主账号未建**：等店主给一个**小写**邮箱（脚本的校验只接受小写完整地址）；密码由 `provision-production-owner-credentials.mjs` 随机生成、写入 root-only 文件、**不打印**。拿到邮箱后跑 `finalize-production-admin.sh <ID>` 即可（它还会复核 owner 登录、跑管理端验证、并 enable 服务与 3 个定时器——这几项现已手工完成，重复执行是幂等的）。
-2. ~~**P0｜一个数据库只能激活一个 release**~~ → **✅ 2026-09-18 结项**：新增**升级证据路径**（`pawshop-production-migration-v2`，`initialization: 'existing-database'`），配套 `ops/commerce/run-production-upgrade-migration.sh` 与 `write-production-upgrade-evidence.mjs`；门禁与备份证据两处断言同时接受两种证据，空库路径一字未改。**为什么它比原计划更急**：核对时生产库已是 **155 关系 / 147 张表 / 601 行**（含店主账号），也就是"下一次发版必须清库"= 下一次发版会删掉这些。升级记录要求：前任 release、改动前的加密恢复点（清单 HMAC + 密文摘要/HMAC + 异地回执全部校验）、逐表行数见证（不得减少、关系不得消失）、关系数不得减少。命令见 RUNBOOK §11.2。**仍待观察**：这条路径的**首次实跑**（即下一次发版本身）——它同时是"升级能力"的验收。
-3. **P1｜备份新鲜度缺少跨重启的可靠信号**：`backup_freshness` 仍只能读 systemd 运行时状态（重启后该属性为空）。已修成"报失败"而不是崩溃，但**重启后到下一次备份之间会误报一次**。干净做法是让备份把时间戳写进监控可读的文件（`PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` 机制已支持、**尚无写入方**），需要动 release 侧单元；注意 `/var/backups/pawshop` 是 `0700 pawshop-backup`，监控用户读不到。
+1. ~~**P0｜店主账号未建**~~ → **✅ 已结项**（账号 `504533680@qq.com`，凭据只在 `/root/pawshop-production-owner-credentials.json`；2026-09-18 发版后重新做了一次真实登录验收，通过）。
+2. ~~**P0｜一个数据库只能激活一个 release**~~ → **✅ 2026-09-18 结项，且已实跑验收**：升级证据路径（`pawshop-production-migration-v2`，`initialization: 'existing-database'`）+ `ops/commerce/run-production-upgrade-migration.sh` + `write-production-upgrade-evidence.mjs`；门禁与备份证据两处断言同时接受两种证据，空库路径一字未改。**首次实跑就是 `aaa5673` 这次发版**：147 关系 / 601 行 → 147 关系 / 601 行，**一行未少**（逐表精确行数见证，`relations_*_sha256` 可由 `sha256sum` 复算），改动前加密恢复点 `pawshop_production_20260918T063311496Z` 先取后验，迁移后备份异地回读 + 隔离恢复演练通过。全程明细见 RUNBOOK §11.2。**结论：后续发版不再需要清库，店主现在可以放心往后台录真实商品与客户数据。**
+3. **P1｜Slack 告警通道已失效（2026-09-18 实测）**：`alert channel slack did not accept the payload (status 404, provider code none)` —— 该 webhook 已不存在（被删/被轮换/应用卸载）。同一次实测里**飞书通道恢复正常**（`feishu accepted the payload`，告警与恢复各一条均被接受），所以现在是"1/2 通道"，告警仍能到达店主。**需要店主重新生成 Slack Incoming Webhook URL** 才能恢复双通道。见 `docs/OWNER_ACTIONS_ZH.md`。
+4. **P1｜备份新鲜度缺少跨重启的可靠信号**：`backup_freshness` 仍只能读 systemd 运行时状态（重启后该属性为空）。已修成"报失败"而不是崩溃，但**重启后到下一次备份之间会误报一次**。干净做法是让备份把时间戳写进监控可读的文件（`PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` 机制已支持、**尚无写入方**），需要动 release 侧单元；注意 `/var/backups/pawshop` 是 `0700 pawshop-backup`，监控用户读不到。
 
-**已结项（同日）**：定时备份的异地同步（`ExecStartPost` 读不到 systemd 凭据 → 异地副本静默落后）已随 release `9bac8dc` 修复并实测通过；`SKIP_SYSTEMD_CHECKS` 已删除，监控不再有任何跳过行。
+**已结项（同日）**：定时备份的异地同步（`ExecStartPost` 读不到 systemd 凭据 → 异地副本静默落后）已随 release `9bac8dc` 修复并实测通过；`SKIP_SYSTEMD_CHECKS` 已删除，监控不再有任何跳过行。`aaa5673` 这次发版还把 **libexec 漂移窗口关掉了**：`/usr/local/libexec/pawshop/` 四个文件与候选 release 逐字节相同（`deploy-commerce.sh` 的 `cmp` 已通过）。
 
 ---
 
