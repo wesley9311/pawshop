@@ -385,6 +385,25 @@ rm -f /root/pawshop-verify.env /root/pawshop-verify-recover.env \
 
 > ⚠️ **同日晚间的复查推翻了"已验证"的长期效力。** 当天生产上真的触发了一次告警，飞书却回 `19024`；逐候选探测发现该群当时只接受 `[PawShop]`，而上午被接受的 `[PawShop 告警]` 已不再被接受。**两者不可能同时为真，唯一自洽的解释是群侧关键词当天被改过**（群里改设置不会通知主机）。结论：**"通道能送达"是一次性的实测结论，不是可以继承的配置事实**——任何一次发版后都值得按上面的 `run-monitor-verification.sh` 复跑一次，成本约 1 分钟。
 
+**2026-09-18 实测记录（webhook 轮换后重跑，飞书恢复）**：店主重建了飞书机器人、并重建/重置了 Slack webhook（两个 URL 都是新的），我把新地址写入 `monitoring.env` 后复跑：
+
+| 运行 | 结果 |
+| --- | --- |
+| 故意失败（`PAWSHOP_MONITOR_MIN_TLS_DAYS=99999`） | `alert channel feishu accepted the payload` + `alert channel slack accepted the payload` + `monitoring failed 1/12 checks: tls_certificate` |
+| 恢复（同一 state 文件） | 两条 `accepted` + `monitoring passed 12/12 checks` |
+
+**飞书这条终于不再回 `19024`** —— 店主换掉了过滤方式，等于坐实了上面那条结论：**治本在群侧设置，不在代码**。轮换与安装的可复用要点：
+
+1. 新 URL 从店主的桌面文件读入（RTF 需先 `textutil -convert txt`），**按格式逐个正则校验**（飞书须为 UUID 形 36 位、Slack 须为三段），不合格就拒绝使用。
+2. 传主机走 **stdin**（`ssh … 'cat > /tmp/x' < file`），URL 不进命令行、不进 `ps`；替换脚本同样从 stdin 喂给 `python3 -`，**脚本正文不含任何凭据**。
+3. 替换前先 `cp -a` 备份；脚本**先证明"只有 channels 那一行会变"**，否则 `raise SystemExit` 拒绝落盘（本轮实测：只改第 19 行，行数与字节数均不变）。
+4. 装完 `install -o root -g pawshop -m 0640`，再确认**全机只有这一个文件**持有有效 hook（把所有历史 `.bak` 与该 URL 做交集判定，而不是只 grep 域名）。
+5. 收尾清理：验证用 override/state、主机 `/tmp` 中转文件、本机 `/tmp` 副本一并删除。
+
+> 🔐 **脱敏正则要按格式写，不要用贪婪的通用模式。** 本轮用 `s#(https://[^,]*/)[^,]*#\1<redacted>#` 打印配置时，Slack 的**中间两段**（workspace ID、bot ID）被漏了出来（真正的密钥是第三段，未泄漏）。正确写法是整段遮蔽：飞书保留到 `hook/`、Slack 保留到 `services/`，之后全部替换为 `<masked>`。
+>
+> 🧹 **一次轮换会顺手作废所有历史备份里的旧 URL**，所以本轮删掉了 `/root` 下三个含旧 URL 的 `monitoring.env` 备份（删前记 sha256 作审计）。同一轮排查还发现**本机 `/tmp/pawshop-probe/` 留有当前有效的生产凭据副本**（`commerce.env` 的 `COOKIE_SECRET` / `JWT_SECRET` / 库 DSN，以及 OSS AccessKey ID）——已删除并复查 `/tmp` 无残留。**探测凭据时用一次性目录，用完立刻删。**
+
 **接入后的运维注意**
 
 - 恢复通知也会进群（`[PawShop] 告警 已恢复: …`），这是有意的：让你知道"已经好了"，而不是只有坏消息。
