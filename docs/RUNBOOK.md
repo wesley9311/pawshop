@@ -182,6 +182,8 @@ PAWSHOP_MONITOR_STATE_FILE=/tmp/pawshop-monitor-state.json \
 
 **执行状态：2026-09-17 已在生产接入飞书 + Slack 双通道并完成真实投递验证**（告警与恢复各一条，四条全部送达）。配置在 `/etc/pawshop-monitor/monitoring.env`（`root:pawshop 0640`），换通道只需改那一行。
 
+**2026-09-18 16:21 变更：告警收成飞书单通道**（店主选择摘除那条已被 Slack 撤销的地址）。摘除 = 只改 `PAWSHOP_MONITOR_ALERT_CHANNELS` 那一行、删掉 `slack:` 那一段，其余逐字节不动；改前备份 `/root/pawshop-monitor.env.bak-<TS>`。**摘除的守卫**（一个都不能省）：拒绝在只剩 0 条通道时写入；拒绝在存在 legacy `PAWSHOP_MONITOR_ALERT_WEBHOOK` 时盲改（两者同时声明会让策略模块直接报错）；要求该键在文件里**只出现一次**；写入走同目录临时文件 + 原属主/权限 `rename`，避免属主或 0640 权限在改写中掉档。改完必须两件事：① 用**当前 release 自己的 `monitoring-policy.cjs`** 复核（`resolveAlertChannels` 应返回 1 条 `feishu`）；② **复跑一次真实投递验证**。本轮实测结果：`alert channels configured: feishu` / `alert channel feishu accepted the payload`（告警与恢复各一条）/ `monitoring passed 12/12 checks`，日志里不再有 slack 行。
+
 **执行状态：定时器已于 2026-09-16 由 WorkBuddy 在生产主机安装并验证通过**（`pawshop-monitor.timer` enabled+active，实测 16:30:13 一次调度运行 **12/12 通过**）。以下为执行记录、验证与回滚。
 
 ### 9.1 为什么要从 `/usr/local/libexec/pawshop` 运行（2026-09-16 修正）
@@ -306,7 +308,7 @@ PAWSHOP_MONITOR_ALERT_CHANNELS=feishu:https://open.feishu.cn/open-apis/bot/v2/ho
 
 - 告警**发往每一条通道**，**任一条被对方确认即算送达**（`exit 1`）；**全部失败**才算"告警系统坏了"（`exit 2`）。
 - 只送达了一部分时，日志会**点名**没确认的通道：`alert reached 1/2 channels; no acknowledgement from: slack`。这条 WARN 是故意的：一条死掉的通道绝不能躲在另一条后面。
-- 每次运行都会记录通道清单（**只有标签，没有 URL**）：`alert channels configured: feishu, slack`。
+- 每次运行都会记录通道清单（**只有标签，没有 URL**）：`alert channels configured: feishu`（**2026-09-18 16:21 起为飞书单通道**；此前为 `feishu, slack`）。
 - **两种写法不能同时出现**：同时设置 `PAWSHOP_MONITOR_ALERT_CHANNELS` 与 `PAWSHOP_MONITOR_ALERT_WEBHOOK` 会在启动期直接报错（而不是猜一个）。
 - 单通道的旧写法仍然支持（`PAWSHOP_MONITOR_ALERT_PROVIDER` + `PAWSHOP_MONITOR_ALERT_WEBHOOK`），用于只有一条通道的场景。
 - 同一平台可以出现多次，日志里会区分：`feishu`、`feishu#2`。

@@ -15,7 +15,7 @@
 **接下来不再是"我卡住了"，而是只有店主本人能做的那几件事**（链接、点击步骤、交付方式见 `docs/OWNER_ACTIONS_ZH.md`）：
 
 1. **QQ 邮箱 SMTP 授权码** → 装上后"忘记密码"才真的会发信（工具已就位、先真发自检再写入）。
-2. **重新生成 Slack Incoming Webhook URL** → 恢复双通道告警（本轮实测 Slack 404、飞书正常）。
+2. ~~**重新生成 Slack Incoming Webhook URL**~~ → **✅ 2026-09-18 结项（店主选择摘除）**：那条地址在 Slack 侧已被撤销，店主选择**不重建、直接摘掉**。已从 `monitoring.env` 摘除（**只改 1 行**，飞书那行逐字节未动，属主/权限保持 `root:pawshop 0640`，备份 `/root/pawshop-monitor.env.bak-20260918T082109Z`），改完复跑真实投递验证：告警与恢复各一条**均 `feishu accepted the payload`**，巡检 `12/12`、0 跳过行。当前告警走**飞书单通道**；将来想恢复双通道，见 `docs/OWNER_ACTIONS_ZH.md` §1.6。
 3. **删掉接管期遗留的 RAM 用户 `pawshop-agent-temp`**（需控制台手工删）。
 4. **Airwallex / PingPong 收款申请**、**后台对店主的暴露方式**（SSH 隧道 vs 自建中文运营台）。
 
@@ -43,7 +43,7 @@
 
 | # | 项 | 级别 | 归属 | 说明与前置条件 |
 | --- | --- | --- | --- | --- |
-| A1 | **Slack 告警通道已失效** | P1 | **店主** | 2026-09-18 真实投递实测：`alert channel slack did not accept the payload (status 404, provider code none)` —— 该 webhook 已不存在。**同一次实测中飞书恢复正常**（告警与恢复各一条均 `accepted`），所以当前是"1/2 通道"、告警仍能到达店主。需店主重新生成 Slack Incoming Webhook URL。见 `docs/OWNER_ACTIONS_ZH.md`。 |
+| A1 | ~~**Slack 告警通道已失效**~~ → **✅ 2026-09-18 结项** | — | **Agent** | 定性：该 webhook 在 Slack 侧已被撤销（同一次实测中飞书正常）。处置：**店主选择不重建、直接摘除**；已从 `monitoring.env` 移除（只改 1 行，飞书那行逐字节未动，备份 `pawshop-monitor.env.bak-20260918T082109Z`），复验告警 + 恢复均被飞书接受、巡检 12/12。当前为**飞书单通道**。 |
 | A2 | **邮件凭据（QQ SMTP 授权码）未安装** | P0 | **店主 → Agent** | "忘记密码"的实现、订阅者、SMTP 客户端、装凭据工具、端到端验收脚本**全部就位且已用假中继实测**；只差店主提供的授权码。装凭据的工具会**先真发一封自检邮件、对方接受了才写入**，所以错的码不会在主机上留下"看着配好了其实发不出去"的状态。拿到码后装完**不需要发版、不需要重启**。 |
 | A3 | 备份新鲜度缺少跨重启的可靠信号 | P1 | Agent | `backup_freshness` 读的是 systemd 运行时状态，主机重启后到下一次备份之间会**误报一次**（已从"崩溃"修成"报失败"）。干净做法是让备份写 `PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE`，需动 release 侧单元。 |
 | A4 | 临时 RAM 用户 `pawshop-agent-temp` 残留 | P2（非关键路径） | **店主**（1 分钟） | 接管期用过；收尾时"先解策略、后删密钥"的顺序错误导致它删不掉自己。**已彻底作废**（OSS 管理/数据面与 RAM 全部 403）。删除步骤见 `docs/OWNER_ACTIONS_ZH.md` §2.3。 |
@@ -94,7 +94,7 @@
 
 1. ~~**P0｜店主账号未建**~~ → **✅ 已结项**（账号 `504533680@qq.com`，凭据只在 `/root/pawshop-production-owner-credentials.json`；2026-09-18 发版后重新做了一次真实登录验收，通过）。
 2. ~~**P0｜一个数据库只能激活一个 release**~~ → **✅ 2026-09-18 结项，且已实跑验收**：升级证据路径（`pawshop-production-migration-v2`，`initialization: 'existing-database'`）+ `ops/commerce/run-production-upgrade-migration.sh` + `write-production-upgrade-evidence.mjs`；门禁与备份证据两处断言同时接受两种证据，空库路径一字未改。**首次实跑就是 `aaa5673` 这次发版**：147 关系 / 601 行 → 147 关系 / 601 行，**一行未少**（逐表精确行数见证，`relations_*_sha256` 可由 `sha256sum` 复算），改动前加密恢复点 `pawshop_production_20260918T063311496Z` 先取后验，迁移后备份异地回读 + 隔离恢复演练通过。全程明细见 RUNBOOK §11.2。**结论：后续发版不再需要清库，店主现在可以放心往后台录真实商品与客户数据。**
-3. **P1｜Slack 告警通道已失效（2026-09-18 两轮实测，定性完成）**：`alert channel slack did not accept the payload (status 404, provider code none)`，告警与恢复两轮都是如此。**配置侧原因已排除**：店主提供的地址与主机 `monitoring.env` 里现存的**逐字相同**（两者 `sha256[:12]` 均为 `cb1f84d459ef`），且 URL 结构完整（`/services/` + 标准 `T`+10 位 / `B`+10 位 / 24 位，字符集干净、无截断）→ 结论是**该 webhook 在 Slack 侧已被撤销**（被删／应用卸载），**重新贴同一个地址不会有任何效果**。同样这两轮里**飞书均正常**（`feishu accepted the payload`），所以现在是"1/2 通道"，告警仍能到达店主，但少一层冗余。**需要店主新生成一条 Slack Incoming Webhook URL** 才能恢复双通道（步骤见 `docs/OWNER_ACTIONS_ZH.md` §1.6）。
+3. **✅ 已结项（2026-09-18）｜Slack 告警通道已失效**：`alert channel slack did not accept the payload (status 404, provider code none)`，告警与恢复两轮都是如此。**配置侧原因已排除**：店主提供的地址与主机 `monitoring.env` 里现存的**逐字相同**（两者 `sha256[:12]` 均为 `cb1f84d459ef`），且 URL 结构完整（`/services/` + 标准 `T`+10 位 / `B`+10 位 / 24 位，字符集干净、无截断）→ 结论是**该 webhook 在 Slack 侧已被撤销**（被删／应用卸载），**重新贴同一个地址不会有任何效果**。同样这两轮里**飞书均正常**（`feishu accepted the payload`），所以现在是"1/2 通道"，告警仍能到达店主，但少一层冗余。 **处置（2026-09-18 16:21）**：店主选择**不重建该通道**，我按他的选择把它从 `monitoring.env` 摘除——**只改 1 行**、飞书那行逐字节未动、属主权限保持 `root:pawshop 0640`、改前备份 `/root/pawshop-monitor.env.bak-20260918T082109Z`；失败模式已封：只剩 0 条通道时拒绝写入、存在 legacy `PAWSHOP_MONITOR_ALERT_WEBHOOK` 时拒绝盲改、同一键出现多次时拒绝。改完复跑真实投递验证：告警与恢复各一条**均 `feishu accepted the payload`**，巡检 `12/12`、无跳过行，日志里不再出现 slack 行。**当前告警走飞书单通道**；想恢复双通道时见 `docs/OWNER_ACTIONS_ZH.md` §1.6。
 4. **P1｜备份新鲜度缺少跨重启的可靠信号**：`backup_freshness` 仍只能读 systemd 运行时状态（重启后该属性为空）。已修成"报失败"而不是崩溃，但**重启后到下一次备份之间会误报一次**。干净做法是让备份把时间戳写进监控可读的文件（`PAWSHOP_MONITOR_BACKUP_TIMESTAMP_FILE` 机制已支持、**尚无写入方**），需要动 release 侧单元；注意 `/var/backups/pawshop` 是 `0700 pawshop-backup`，监控用户读不到。
 
 **已结项（同日）**：定时备份的异地同步（`ExecStartPost` 读不到 systemd 凭据 → 异地副本静默落后）已随 release `9bac8dc` 修复并实测通过；`SKIP_SYSTEMD_CHECKS` 已删除，监控不再有任何跳过行。`aaa5673` 这次发版还把 **libexec 漂移窗口关掉了**：`/usr/local/libexec/pawshop/` 四个文件与候选 release 逐字节相同（`deploy-commerce.sh` 的 `cmp` 已通过）。
