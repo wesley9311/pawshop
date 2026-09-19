@@ -24,7 +24,7 @@ const {
   buildAlertPayload,
   buildAlertRequest, checkResult, daysUntilExpiry, describeAlertProviderCode,
   formatLogLine, missingSecurityHeaders, nextAlertState, redactUrl, shouldDispatchAlert,
-  storeRouteIsClosed, summarize, validateMonitoringConfig,
+  storeApiIsOpen, summarize, validateMonitoringConfig,
 } = require('./monitoring-policy.cjs');
 
 const now = new Date();
@@ -57,13 +57,17 @@ async function timedFetch(url, options = {}) {
     headers: { 'user-agent': 'pawshop-monitor/1' },
     ...options,
   });
-  // Bodies are consumed but never logged or stored.
+  // Bodies are never logged and never stored. A parsed copy is returned so a
+  // probe can assert on the shape of a documented response (the storefront check
+  // reads `products`, nothing else), and a body that is not JSON yields null
+  // instead of masking the status code.
+  let json = null;
   try {
-    await response.arrayBuffer();
+    json = await response.json();
   } catch {
-    /* an unreadable body must not mask the status code */
+    /* a non-JSON body must not mask the status code */
   }
-  return { status: response.status, headers: response.headers, latencyMs: Date.now() - startedAt };
+  return { status: response.status, headers: response.headers, latencyMs: Date.now() - startedAt, json };
 }
 
 function tcpProbe(host, port) {
@@ -167,7 +171,7 @@ async function runChecks() {
 
   if (skipCommerceChecks) {
     log('WARN', 'commerce checks are skipped by explicit configuration; unset PAWSHOP_MONITOR_SKIP_COMMERCE_CHECKS once a commerce release is active');
-    for (const name of ['commerce_health', 'store_api_closed', 'admin_requires_auth']) {
+    for (const name of ['commerce_health', 'store_api_open', 'admin_requires_auth']) {
       results.push(checkResult(name, true, 'commerce checks skipped by explicit configuration'));
     }
   } else {
@@ -183,16 +187,34 @@ async function runChecks() {
       results.push(checkResult('commerce_health', false, `commerce health unreachable: ${error.name}`));
     }
 
-    try {
-      const response = await timedFetch(`${config.commerceOrigin}/store/products`, { headers: { 'user-agent': 'pawshop-monitor/1', 'x-publishable-api-key': 'monitor-probe' } });
+    // The shop is open, so the invariant is now the opposite one: the store API
+    // must answer 200 to the real publishable key. A probe without it cannot tell
+    // an open shop from a shut one - Medusa answers 400 to a missing key and to a
+    // wrong key alike - so an unconfigured key is reported as a failed check
+    // rather than quietly skipped, because a check that cannot fail is not a check.
+    if (!config.storefrontPublishableKey) {
       results.push(checkResult(
-        'store_api_closed',
-        storeRouteIsClosed(response.status),
-        `store route answered ${response.status}`,
-        { status: response.status },
+        'store_api_open',
+        false,
+        'PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY is not configured, so the storefront cannot be verified',
       ));
-    } catch (error) {
-      results.push(checkResult('store_api_closed', false, `store route probe failed: ${error.name}`));
+    } else {
+      try {
+        const response = await timedFetch(`${config.commerceOrigin}/store/products`, {
+          headers: { 'user-agent': 'pawshop-monitor/1', 'x-publishable-api-key': config.storefrontPublishableKey },
+        });
+        const products = response.json && Array.isArray(response.json.products) ? response.json.products : null;
+        results.push(checkResult(
+          'store_api_open',
+          storeApiIsOpen(response.status, response.json),
+          response.status === 200
+            ? `store route answered 200${products === null ? ' without a product list' : ` with ${products.length} product(s)`}`
+            : `store route answered ${response.status}`,
+          { status: response.status, ...(products === null ? {} : { products: products.length }) },
+        ));
+      } catch (error) {
+        results.push(checkResult('store_api_open', false, `store route probe failed: ${error.name}`));
+      }
     }
 
     try {

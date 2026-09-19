@@ -57,6 +57,15 @@ const ALERT_PROVIDER_HOSTS = Object.freeze({
 const ALERT_CHANNEL_SEPARATOR = ',';
 const ALERT_CHANNEL_SPEC = /^(generic|slack|feishu|telegram)\s*[:=]\s*(https:\/\/\S+)$/;
 
+// Medusa refuses every /store request that does not carry the storefront's
+// publishable key, and it answers that refusal with HTTP 400 for a missing key
+// and for a wrong one alike. A probe with a made-up key therefore proves nothing
+// about whether the shop is open - it fails the same way in both profiles - so
+// the open storefront can only be observed with the real key. The value is
+// public by design (it is embedded in the storefront the browser loads), which is
+// why it belongs in this non-secret file rather than behind a credential.
+const STOREFRONT_PUBLISHABLE_KEY_PATTERN = /^pk_[A-Za-z0-9_-]{8,128}$/;
+
 // Monitoring exit codes: 0 healthy, 1 checks failed, 2 alerting itself is broken.
 const EXIT_CODES = Object.freeze({
   healthy: 0,
@@ -176,6 +185,17 @@ function resolveAlertChannels(env, telegramChatId) {
   return Object.freeze([]);
 }
 
+// Absent is allowed (a host whose storefront is still shut does not need it), but
+// a present value must be recognisable: a truncated or copied-by-hand key would
+// otherwise turn the storefront check into a permanent false failure.
+function optionalStorefrontPublishableKey(value) {
+  if (value === undefined || value === '') return null;
+  if (typeof value !== 'string' || !STOREFRONT_PUBLISHABLE_KEY_PATTERN.test(value)) {
+    throw new Error('PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY must be a Medusa publishable key (pk_...).');
+  }
+  return value;
+}
+
 // Fail-closed: monitoring must never be pointed at localhost or a test host in
 // production, and it must never treat a plaintext storefront as valid.
 function validateMonitoringConfig(env) {
@@ -185,6 +205,7 @@ function validateMonitoringConfig(env) {
     throw new Error('PAWSHOP_MONITOR_STOREFRONT_ORIGIN must be the real public host.');
   }
   const commerceOrigin = requireLoopbackOrigin(env.PAWSHOP_MONITOR_COMMERCE_ORIGIN, 'PAWSHOP_MONITOR_COMMERCE_ORIGIN');
+  const storefrontPublishableKey = optionalStorefrontPublishableKey(env.PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY);
 
   const chatIdValue = env.PAWSHOP_MONITOR_TELEGRAM_CHAT_ID;
   const telegramChatId = chatIdValue === undefined || chatIdValue === '' ? null : String(chatIdValue).trim();
@@ -198,6 +219,7 @@ function validateMonitoringConfig(env) {
   return Object.freeze({
     storefrontOrigin,
     commerceOrigin,
+    storefrontPublishableKey,
     alertChannels,
     // Kept for callers that predate multi-channel: they describe the single
     // channel case and are null/absent when several channels are configured.
@@ -364,11 +386,23 @@ function summarize(results) {
   });
 }
 
-// The closed-route invariant is a first-class monitoring target: the public
-// store APIs must never answer 200 in admin-only mode.
-function storeRouteIsClosed(status) {
-  if (!Number.isInteger(status) || status <= 0) return false;
-  return status !== 200 && status !== 201 && status !== 204;
+// The storefront invariant is the one check whose direction follows the
+// deployment profile, and it flipped on 2026-09-19 when the shop opened.
+//
+// While the shop was shut the invariant was "the store namespace never answers
+// 2xx". Once it is open that assertion is worthless: Medusa's publishable-key
+// gate answers 400 to a key it does not recognise, in both profiles, so the old
+// probe would have gone on reporting a healthy closed store while the shop was
+// open, and a broken open one while it was closed.
+//
+// The only honest test of "open" is the real key reaching the real route, so the
+// check asserts 200 *and* a product list in the body. The list may be empty -
+// that is a valid empty shop - but its presence proves the request travelled
+// through the key gate, past the mode gate and into the database.
+function storeApiIsOpen(status, body) {
+  if (status !== 200) return false;
+  if (!body || typeof body !== 'object') return false;
+  return Array.isArray(body.products);
 }
 
 function adminRouteRequiresAuth(status) {
@@ -548,7 +582,7 @@ module.exports = {
   redactUrl,
   resolveAlertChannels,
   shouldDispatchAlert,
-  storeRouteIsClosed,
+  storeApiIsOpen,
   summarize,
   systemdTimestampToIso,
   telegramAccepted,

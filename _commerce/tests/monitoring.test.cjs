@@ -11,7 +11,7 @@ const {
   buildAlertRequest,
   checkResult, daysUntilExpiry, describeAlertProviderCode, feishuAccepted, formatAlertText, formatLogLine,
   missingSecurityHeaders,
-  nextAlertState, recordedTimestampToIso, redactUrl, shouldDispatchAlert, storeRouteIsClosed, summarize, systemdTimestampToIso,
+  nextAlertState, recordedTimestampToIso, redactUrl, shouldDispatchAlert, storeApiIsOpen, summarize, systemdTimestampToIso,
   telegramAccepted,
   validateMonitoringConfig,
 } = require('../scripts/monitoring-policy.cjs');
@@ -34,6 +34,7 @@ test('monitoring configuration is fail-closed for origins and thresholds', () =>
   const config = validateMonitoringConfig(env);
   assert.equal(config.storefrontOrigin, 'https://pawlivora.com');
   assert.equal(config.commerceOrigin, 'http://127.0.0.1:9000');
+  assert.equal(config.storefrontPublishableKey, null);
   assert.equal(config.alertWebhook, null);
   assert.equal(config.databasePort, 5432);
   assert.equal(config.redisPort, 6379);
@@ -54,10 +55,21 @@ test('monitoring configuration is fail-closed for origins and thresholds', () =>
     { PAWSHOP_MONITOR_MIN_TLS_DAYS: 'soon' },
     { PAWSHOP_MONITOR_ALERT_WEBHOOK: 'http://hooks.example.com/pawshop' },
     { PAWSHOP_MONITOR_ALERT_WEBHOOK: 'not-a-url' },
+    // A key that is not a key: the probe would then answer 400 forever and report
+    // a shut shop on a host whose shop is open. The api-key id is the mistake that
+    // is actually easy to make - Medusa shows the id and the token side by side,
+    // and the store API accepts only the token.
+    { PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY: 'apk_01M2Q71GAW3WBB16CMD7CBTC6F' },
+    { PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY: 'monitor-probe' },
+    { PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY: 'pk_short' },
+    { PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY: `pk_${'a'.repeat(64)} ` },
   ]) {
     assert.throws(() => validateMonitoringConfig({ ...env, ...mutation }), undefined, JSON.stringify(mutation));
   }
   assert.throws(() => validateMonitoringConfig({}));
+
+  const token = `pk_${'a'.repeat(64)}`;
+  assert.equal(validateMonitoringConfig({ ...env, PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY: token }).storefrontPublishableKey, token);
 });
 
 test('alert webhook keeps its per-channel path and is never rewritten', () => {
@@ -83,12 +95,36 @@ test('security header and certificate thresholds are enforced', () => {
   assert.throws(() => backupAgeHours('not-a-date', now));
 });
 
-test('closed store routes and authenticated admin routes are the monitored invariants', () => {
-  for (const status of [400, 401, 403, 404, 503]) assert.equal(storeRouteIsClosed(status), true);
-  for (const status of [200, 201, 204, 0, undefined]) assert.equal(storeRouteIsClosed(status), false);
+test('an open storefront and an authenticated admin route are the monitored invariants', () => {
+  // The shop is open, so "closed" is no longer an invariant worth asserting: the
+  // publishable-key gate answers 400 to a stranger's key in both profiles, which
+  // is why the old probe passed whether the shop was open or shut. Only a 200
+  // carrying a product list proves the route is really serving.
+  assert.equal(storeApiIsOpen(200, { products: [] }), true);
+  assert.equal(storeApiIsOpen(200, { products: [{ id: 'prod_1' }], count: 1 }), true);
+  assert.equal(storeApiIsOpen(200, {}), false);
+  assert.equal(storeApiIsOpen(200, { products: null }), false);
+  assert.equal(storeApiIsOpen(200, null), false);
+  assert.equal(storeApiIsOpen(200, 'products'), false);
+  for (const status of [400, 401, 403, 404, 503, 0, undefined, '200']) {
+    assert.equal(storeApiIsOpen(status, { products: [] }), false);
+  }
   assert.equal(adminRouteRequiresAuth(401), true);
   assert.equal(adminRouteRequiresAuth(403), true);
   assert.equal(adminRouteRequiresAuth(200), false);
+});
+
+test('the storefront probe sends the configured publishable key, never a stand-in', () => {
+  // Regression: the probe used to send the literal "monitor-probe". Medusa answers
+  // 400 to any key it does not know, and the old assertion only asked for a
+  // non-2xx, so the check passed for the wrong reason in both profiles and could
+  // not have noticed the shop opening or closing. The probe must send exactly what
+  // the environment declares, and the verdict must read the status and the body.
+  assert.match(monitor, /'x-publishable-api-key': config\.storefrontPublishableKey/);
+  assert.doesNotMatch(monitor, /monitor-probe/);
+  assert.match(monitor, /storeApiIsOpen\(response\.status, response\.json\)/);
+  assert.match(monitor, /PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY is not configured/);
+  assert.match(monitorEnvExample, /^PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY=/m);
 });
 
 test('alerting suppresses repeats, reports recovery, and carries no secret material', () => {
@@ -132,7 +168,7 @@ test('alert payloads are translated into each channel dialect', () => {
   const now = new Date('2026-09-16T09:00:00Z');
   const summary = summarize([
     checkResult('commerce_health', false, 'commerce health returned 503'),
-    checkResult('store_api_closed', true),
+    checkResult('store_api_open', true),
   ]);
   const payload = buildAlertPayload(summary, now, 'https://pawlivora.com');
 
@@ -351,8 +387,8 @@ test('monitor runner bounds every call and never logs secret material', () => {
   assert.match(monitor, /process\.exit\(EXIT_CODES\.healthy\)/);
   assert.match(monitor, /EXIT_CODES\.alertDeliveryFailed/);
   assert.match(monitor, /EXIT_CODES\.checksFailed/);
-  // The closed-route invariant and the backup freshness gate must be real checks.
-  assert.match(monitor, /store_api_closed/);
+  // The storefront-open invariant and the backup freshness gate must be real checks.
+  assert.match(monitor, /store_api_open/);
   assert.match(monitor, /admin_requires_auth/);
   assert.match(monitor, /backupFreshnessCheck/);
   // The freshness check name is emitted where the verdict is computed, which is
