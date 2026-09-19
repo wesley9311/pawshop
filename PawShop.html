@@ -159,9 +159,13 @@
       <span class="text-slate-500" data-i18n="subtotal">Subtotal</span>
       <span id="cartSubtotal" class="font-semibold">$0.00</span>
     </div>
-    <div class="flex justify-between mb-4 text-sm">
+    <div class="flex justify-between mb-1 text-sm">
       <span class="text-slate-500" data-i18n="shipping">Shipping</span>
-      <span class="text-slate-500" data-i18n="shipping_at_checkout">Calculated at checkout</span>
+      <span id="cartShipping" class="text-slate-600">$9.90</span>
+    </div>
+    <div class="flex justify-between mb-4 text-sm">
+      <span class="text-slate-500" data-i18n="taxes">Taxes</span>
+      <span class="text-slate-500 text-xs" data-i18n="taxes_at_checkout">Calculated at checkout</span>
     </div>
     <button onclick="checkout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="checkout">Checkout</button>
     <p class="mt-2 text-xs text-slate-400 text-center" data-i18n="checkout_note">Checkout is not open yet — payment is not connected.</p>
@@ -225,11 +229,11 @@ const LS_CART_ID = PawStore.CART_ID_KEY;
 // ===== i18n:界面双语(商品名/描述来自后台,保持原文) =====
 const I18N = {
   en: {
-    topbar_note: 'Catalog and cart are live — payment is not connected yet',
+    topbar_note: 'Flat-rate shipping on all orders',
     nav_shop: 'Shop',
     search_ph: 'Search products...',
     hero_title: 'Happier pets, easier days.',
-    hero_sub: 'Carefully selected supplies for cats and dogs. The catalog and cart are live; checkout opens when payment is connected.',
+    hero_sub: 'Carefully selected supplies for cats and dogs.',
     hero_cta: 'Shop products',
     hero_reserve: 'View launch status',
     cat_all: 'All',
@@ -239,16 +243,24 @@ const I18N = {
     no_products_note: 'The shop is being stocked. Please check back soon.',
     catalog_unavailable: 'The shop is temporarily unavailable. Please refresh later.',
     loading: 'Loading products…',
-    product_details: 'Product', desc_heading: 'Details',
+    retry: 'Try again',
+    product_details: 'Product', desc_heading: 'Details', shipping_heading: 'Shipping & returns',
     in_stock: 'In stock', out_of_stock: 'Out of stock', backorder: 'Available on backorder', availability_unknown: 'Availability pending',
+    low_stock: 'Only a few left',
     from_price: 'From',
     variant: 'Option', quantity: 'Quantity', sku: 'SKU',
     add_to_cart: 'Add to cart', adding: 'Adding…',
+    trust_flat_shipping: 'Flat shipping', trust_taxes: 'Taxes calculated at checkout',
+    trust_line: 'Ships from China · Flat-rate shipping',
+    shipping_details: 'Flat-rate shipping applies to every order in the US pilot market. Taxes are calculated at checkout.',
+    returns_details: 'Our returns and refunds policy is published before checkout opens.',
     footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
     footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds',
     cart: 'Cart', subtotal: 'Subtotal', shipping: 'Shipping', shipping_at_checkout: 'Calculated at checkout',
+    taxes: 'Taxes', taxes_at_checkout: 'Calculated at checkout',
     checkout: 'Checkout', checkout_note: 'Checkout is not open yet — payment is not connected.',
     cart_empty: 'Your cart is empty', cart_unavailable: 'The cart is temporarily unavailable. Please refresh.',
+    cart_continue: 'Continue shopping',
     line_total: 'Line total',
     toast_added: 'Added to cart',
     cart_failed: 'Could not update the cart. Please try again.',
@@ -260,11 +272,11 @@ const I18N = {
     waitlist_closed: 'Checkout opens once payment is connected. No order was created.',
   },
   zh: {
-    topbar_note: '商品与购物车已启用——支付通道尚未接通',
+    topbar_note: '所有订单统一运费',
     nav_shop: '商品',
     search_ph: '搜索商品...',
     hero_title: '让毛孩子更幸福，让生活更轻松',
-    hero_sub: '为猫狗精选的好物。商品与购物车已启用，支付接通后即可结算。',
+    hero_sub: '为猫狗精选的好物。',
     hero_cta: '浏览商品',
     hero_reserve: '查看上线状态',
     cat_all: '全部',
@@ -274,16 +286,24 @@ const I18N = {
     no_products_note: '商品正在上架中，请稍后再来。',
     catalog_unavailable: '商品暂时无法加载，请稍后刷新。',
     loading: '正在加载商品…',
-    product_details: '商品', desc_heading: '商品详情',
+    retry: '重试',
+    product_details: '商品', desc_heading: '商品详情', shipping_heading: '配送与退货',
     in_stock: '有货', out_of_stock: '缺货', backorder: '可预订', availability_unknown: '库存待确认',
+    low_stock: '仅剩少量',
     from_price: '起价',
     variant: '款式', quantity: '数量', sku: 'SKU',
     add_to_cart: '加入购物车', adding: '正在加入…',
+    trust_flat_shipping: '统一运费', trust_taxes: '税费在结算时计算',
+    trust_line: '从中国发货 · 统一运费',
+    shipping_details: '美国试运营市场所有订单适用统一运费，税费在结算时计算。',
+    returns_details: '退换与退款政策将在结算开放前公布。',
     footer_tag: '精选犬猫好物。',
     footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款',
     cart: '购物车', subtotal: '商品小计', shipping: '运费', shipping_at_checkout: '结算时计算',
+    taxes: '税费', taxes_at_checkout: '结算时计算',
     checkout: '去结算', checkout_note: '结算尚未开放——支付通道还未接通。',
     cart_empty: '购物车是空的', cart_unavailable: '购物车暂时不可用，请刷新页面。',
+    cart_continue: '继续购物',
     line_total: '小计',
     toast_added: '已加入购物车',
     cart_failed: '购物车更新失败，请重试。',
@@ -325,6 +345,7 @@ let displayedProducts = 8;
 let openProductId = null;
 let modalImages = [];
 let pendingVariantId = '';
+let modalQty = 1;
 const cardVariant = {};
 
 // ===== Availability / price helpers =====
@@ -386,12 +407,24 @@ function renderProducts() {
   const loadMore = document.getElementById('loadMoreContainer');
 
   if (catalogState === 'loading') {
-    grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-400">${t('loading')}</div>`;
+    grid.innerHTML = Array(8).fill(0).map(() => `
+      <div class="bg-white border border-slate-100 rounded-lg overflow-hidden">
+        <div class="aspect-square bg-slate-100 animate-pulse"></div>
+        <div class="p-3 space-y-2">
+          <div class="h-3 bg-slate-100 rounded animate-pulse"></div>
+          <div class="h-3 bg-slate-100 rounded w-2/3 animate-pulse"></div>
+          <div class="h-4 bg-slate-100 rounded w-1/3 animate-pulse"></div>
+        </div>
+      </div>`).join('');
     loadMore.classList.add('hidden');
     return;
   }
   if (catalogState === 'unavailable') {
-    grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-500">${t('catalog_unavailable')}</div>`;
+    grid.innerHTML = `<div class="col-span-full text-center py-12">
+      <i class="fas fa-wifi text-4xl text-slate-200 mb-4"></i>
+      <p class="text-slate-500 mb-4">${t('catalog_unavailable')}</p>
+      <button onclick="retryBootstrap()" class="px-5 py-2 border border-slate-200 text-sm rounded-lg hover:bg-slate-50">${t('retry')}</button>
+    </div>`;
     loadMore.classList.add('hidden');
     return;
   }
@@ -448,10 +481,20 @@ function openProduct(id) {
   const product = products.find(p => p.id === id);
   if (!product) return;
   openProductId = product.id;
+  modalQty = 1;
   renderProductModal();
   document.getElementById('productModal').classList.add('open');
 }
 function closeProduct() { openProductId = null; document.getElementById('productModal').classList.remove('open'); }
+
+// Stock hint: "only a few left" only when the shop actually reported a low
+// number. We never invent scarcity the server did not give us.
+function stockHint(variant) {
+  if (!variant) return '';
+  const q = variant.inventoryQuantity;
+  if (variant.availability === 'in_stock' && typeof q === 'number' && q > 0 && q <= 5) return t('low_stock');
+  return '';
+}
 
 function renderProductModal() {
   if (!openProductId) return;
@@ -460,6 +503,8 @@ function renderProductModal() {
   const variant = selectedVariantFor(product);
   const images = product.images.map(imgUrl).filter(Boolean);
   modalImages = images;
+  const addable = variant ? isAddable(variant) : false;
+  const stockNote = stockHint(variant);
   const body = document.getElementById('productModalBody');
   body.innerHTML = `
     <div class="grid gap-8 lg:grid-cols-2 lg:gap-12">
@@ -473,10 +518,24 @@ function renderProductModal() {
         <h2 class="text-2xl sm:text-3xl font-bold mb-2">${safeHtml(product.title)}</h2>
         ${product.subtitle ? `<p class="text-sm sm:text-base text-slate-500 mb-3">${safeHtml(product.subtitle)}</p>` : ''}
         <div class="flex items-center gap-3 mb-3">${priceHtml(product)}</div>
-        <p class="text-sm text-slate-500 mb-5">${variant ? safeHtml(availabilityText(variant)) : ''}</p>
+        <p class="text-sm ${addable ? 'text-emerald-600' : 'text-red-500'} mb-1">${variant ? safeHtml(availabilityText(variant)) : ''}${stockNote ? ` <span class="text-amber-600">· ${stockNote}</span>` : ''}</p>
+        ${variant && variant.sku ? `<p class="text-xs text-slate-400 mb-4">${t('sku')}: ${safeHtml(variant.sku)}</p>` : ''}
         ${variantPicker(product, `pickModalVariant('${safeToken(product.id)}', this.value)`)}
-        ${variant && variant.sku ? `<p class="text-xs text-slate-400 mb-5">${t('sku')}: ${safeHtml(variant.sku)}</p>` : ''}
-        <button onclick="addToCart('${safeToken(product.id)}', true)" ${variant && isAddable(variant) ? '' : 'disabled'} class="w-full py-3.5 ${variant && isAddable(variant) ? 'bg-slate-900 hover:bg-slate-700' : 'bg-slate-300 cursor-not-allowed'} text-white text-sm font-medium rounded-lg">${t('add_to_cart')}</button>
+        <div class="flex items-center gap-3 mb-4">
+          <label class="text-sm text-slate-600" for="modalQty">${t('quantity')}</label>
+          <div class="flex items-center border border-slate-200 rounded-lg">
+            <button onclick="setModalQty(-1)" class="w-10 h-10 flex items-center justify-center text-slate-600 hover:bg-slate-50 rounded-l-lg" aria-label="Decrease quantity">−</button>
+            <span id="modalQtyValue" class="w-10 text-center text-sm">${modalQty}</span>
+            <button onclick="setModalQty(1)" class="w-10 h-10 flex items-center justify-center text-slate-600 hover:bg-slate-50 rounded-r-lg" aria-label="Increase quantity">+</button>
+          </div>
+        </div>
+        <button onclick="addToCart('${safeToken(product.id)}', true)" ${addable ? '' : 'disabled'} class="w-full py-3.5 ${addable ? 'bg-slate-900 hover:bg-slate-700' : 'bg-slate-300 cursor-not-allowed'} text-white text-base font-medium rounded-lg transition-colors">${t('add_to_cart')}</button>
+        <p class="mt-3 text-sm text-slate-500">${t('trust_line')}</p>
+        <details class="mt-4 border-t border-slate-100 pt-3" open>
+          <summary class="text-sm font-medium cursor-pointer select-none">${t('shipping_heading')}</summary>
+          <p class="text-sm text-slate-600 mt-2">${t('shipping_details')} <a href="shipping.html" class="underline text-slate-900 hover:text-slate-500">${t('footer_shipping')}</a></p>
+          <p class="text-sm text-slate-600 mt-2">${t('returns_details')} <a href="returns.html" class="underline text-slate-900 hover:text-slate-500">${t('footer_returns')}</a></p>
+        </details>
       </div>
     </div>
     ${product.description ? `
@@ -494,6 +553,13 @@ function setModalImage(index) {
     el.classList.toggle('border-slate-900', i === index);
     el.classList.toggle('border-transparent', i !== index);
   });
+}
+
+// Quantity stepper inside the product detail modal.
+function setModalQty(delta) {
+  modalQty = Math.max(1, modalQty + delta);
+  const el = document.getElementById('modalQtyValue');
+  if (el) el.textContent = modalQty;
 }
 
 // ===== Search / filter / sort =====
@@ -569,16 +635,22 @@ async function addToCart(productId, fromModal) {
   if (!product) return;
   const variant = selectedVariantFor(product);
   if (!variant) { showToast(t('add_failed')); return; }
+  const qty = fromModal ? (modalQty || 1) : 1;
   pendingVariantId = variant.id;
   renderProducts();
   try {
     await ensureCart();
-    cart = await store.addLineItem(cart.id, variant.id, 1);
+    cart = await store.addLineItem(cart.id, variant.id, qty);
     cartState = 'ready';
     persistCartId(cart.id);
     renderCart();
     showToast(t('toast_added'));
-    if (fromModal) closeProduct();
+    if (fromModal) {
+      closeProduct();
+      openCart();
+    } else {
+      openCart();
+    }
   } catch (error) {
     cartState = cart ? 'ready' : 'error';
     renderCart();
@@ -620,6 +692,9 @@ function renderCart() {
   document.getElementById('cartCount').textContent = count;
   document.getElementById('cartItemCount').textContent = `(${count})`;
   document.getElementById('cartSubtotal').textContent = money(cart && cart.subtotal !== null ? cart.subtotal : 0);
+  const flatShipping = (typeof CONFIG.flatShipping === 'number' && CONFIG.flatShipping > 0) ? CONFIG.flatShipping : null;
+  const shipEl = document.getElementById('cartShipping');
+  if (shipEl) shipEl.textContent = count > 0 && flatShipping !== null ? money(flatShipping) : (flatShipping !== null ? money(flatShipping) : '—');
 
   const container = document.getElementById('cartItems');
   if (cartState === 'loading') {
@@ -631,7 +706,11 @@ function renderCart() {
     return;
   }
   if (!items.length) {
-    container.innerHTML = `<div class="text-center py-12 text-slate-400">${t('cart_empty')}</div>`;
+    container.innerHTML = `<div class="text-center py-12">
+      <i class="fas fa-shopping-bag text-4xl text-slate-200 mb-4"></i>
+      <p class="text-slate-500 mb-4">${t('cart_empty')}</p>
+      <button onclick="closeCart()" class="px-5 py-2 border border-slate-200 text-sm rounded-lg hover:bg-slate-50">${t('cart_continue')}</button>
+    </div>`;
     return;
   }
   container.innerHTML = items.map(item => {
@@ -705,6 +784,8 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
 
 // ===== Bootstrap: region -> products -> cart =====
 async function bootstrap() {
+  catalogState = 'loading';
+  renderProducts();
   try { await ensureRegion(); } catch (_) { regionId = ''; }
   try {
     const result = await store.products(regionId, 50);
@@ -720,6 +801,8 @@ async function bootstrap() {
   try { await restoreCart(); } catch (_) { cart = null; cartState = 'error'; }
   renderCart();
 }
+
+function retryBootstrap() { bootstrap(); }
 
 document.getElementById('langSelect').value = lang;
 applyI18n();
