@@ -1110,3 +1110,34 @@ Stripe 的 webhook 走 `POST /hooks/payment/stripe_stripe`，它**既不能叠 B
 - 该目录里是**迁移前后逐表行数**的两份快照。成功路径会自己清（`c336fa7` 之后）；**在那之前跑过的升级会把它们留下**，于是下一次升级误判成"上次失败了"。
 - 处置：先**比对**两份快照（相同即上次是无 schema 变化的干净升级），再**归档**到 `/root/pawshop-upgrade-window-archive-<TS>/` 并附一份说明，**不要直接删**。本次归档的是 `bbabde4` 那次留下的两份（比对结果：147 表 / 601 行，前后完全一致）。
 - 已知归档目录：`/root/pawshop-upgrade-window-archive-20260918T172013Z`、`/root/pawshop-upgrade-window-archive-20260919T071117Z`。
+
+### 15.7 结算还缺的那一件：region 的 payment provider（**2026-09-19 实测**）
+
+开店当天一并量过的商业基线（**都已存在，下次别重复建**）：
+
+| 对象 | 实测值 |
+| --- | --- |
+| region | `United States` / **USD** / 国家 `us` / `automatic_taxes=f` |
+| publishable key | 1 个（`Default Publishable API Key`），**已挂到默认 sales channel**（链接表 1 行） |
+| stock location | `PawShop Warehouse`（1 个） |
+| fulfillment set / shipping profile | 各 1 个 |
+| service zone | `United States` |
+| shipping option | `Standard Shipping`，`flat`，**USD 9.90** |
+| store | `default_sales_channel_id` 已设 |
+
+**唯一缺的一件**：该 region 的 `payment_providers` 是**空的**（`region_payment_provider` 链接表 0 行）。对外实证：
+
+```bash
+K=$(grep -o 'pk_[A-Za-z0-9]\{8,\}' /etc/pawshop-monitor/monitoring.env | head -1)
+curl -s -H "x-publishable-api-key: $K" https://pawlivora.com/store/regions   # 200
+#   → region=United States / usd / countries=['us'] / payment_providers=None
+```
+
+后果：**任何结账都会在"完成购物车"那一步抛错**——`Payment provider … is not enabled in the cart's region`（`@medusajs/core-flows/dist/cart/steps/validate-cart-payments.js`，它经 `listRegionPaymentProviderIds` 走 `region.payment_providers` 这个链接）。同时 `createPaymentCollectionForCart` 也拿不到任何 provider → `Payment sessions are required to complete cart`。
+
+**接线方式（P0-6）**：region 的 `payment_providers` 里加 `pp_stripe_stripe`（Admin API `POST /admin/regions/{id}` 或 Dashboard 的 region 设置页）。
+
+> 🔴 **安全红线：绝不要把 `pp_system_default` 加到"店开着"的 region。**
+> `@medusajs/payment/dist/providers/system.js` 里 `getStatus()` 恒返回 `authorized`、`authorizePayment()` 恒返回 `AUTHORIZED`、`capturePayment()` 是**空操作**——也就是说它**不收任何钱就把订单走完**。它只适合本地环境、或**关店窗口**里做一次性流程演练，**演练完必须立刻从 region 移除**。店开着时把它挂上去 = 白送商品。
+> （`payment_provider` 表里有 `pp_system_default` 且 `is_enabled=t` 是模块注册的默认行，**不代表它已对顾客可用**；可用性只看 region 的链接表。）
+

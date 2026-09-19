@@ -14,6 +14,8 @@
 
 **本轮顺带修掉一个真故障（它由"开门"这一步暴露）**：单元的启动就绪门 `verify-production-admin.mjs` 把档位写死成 admin-only，开门后**每次启动都失败 → 无限重启**（实测 `NRestarts` 涨到 3）。同一处写死还在 4 个店主账号脚本里（开门后建账号/找回密码/两项验收会全部拒跑）。两处都已改并加了契约测试，见 `RUNBOOK.md` §15.5。
 
+**本轮同时量清了"顾客要能下单，商业基线还缺哪一件"**（口径见 `RUNBOOK.md` §15.7）。**已在的**：`United States / USD` region（国家 `us`）、1 个 publishable key 且已挂到默认 sales channel、`PawShop Warehouse` 库存地、fulfillment set + shipping profile、`United States` service zone、`Standard Shipping`（flat，USD 9.90）——**P0-2 的主体已经在开门验收时建好了，下一轮不要重复建**。**唯一缺的**：该 region 的 **`payment_providers` 是空的**（`GET /store/regions` 带真 key 实证 `payment_providers=None`）→ **现在任何结账都会在"完成购物车"那步抛 `not enabled in the cart's region`**。这件正是 **P0-6 的接线段**（把 `pp_stripe_stripe` 加进 region）。⚠️ **红线：`pp_system_default` 绝不能加到这个 region**——它恒 `authorized`、`capture` 为空操作，等于"不收钱也把订单走完"，只可在关店窗口做一次性演练且必须立刻移除。
+
 **2026-09-19 第一轮结项**：`bbabde4` 已推送并走**升级路径**（不清库）上线：构建 → 刷 libexec → 升级迁移（147 关系 / 601 行一行未少）→ 迁移后备份 + 异地回读 + 隔离恢复演练 → 合闸 → 激活 → 监控 12/12 → 备份新鲜度双来源上线 → **备份密钥已按钥匙环轮换并验收**。店主账号与数据全在。本次实跑还处置了两个"写了但从未跑过"的空档（升级窗口残留、单元文件手工安装），均已修/已记（`RUNBOOK` §11.2）。
 
 **接下来不再是"我卡住了"，而是只有店主本人能做的那几件事**（链接、点击步骤、交付方式见 `docs/OWNER_ACTIONS_ZH.md`）：
