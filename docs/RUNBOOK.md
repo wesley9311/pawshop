@@ -252,14 +252,16 @@ done
 
 ### 9.2 上线首阶段的临时跳过（**激活商务后必须删除**）
 
-**2026-09-17 状态：`SKIP_COMMERCE_CHECKS` 已删除**（商务已激活，三项 commerce 检查改为真实探测，实测 `commerce_health` 200 / `store_api_closed` 400 / `admin_requires_auth` 401）。**`SKIP_SYSTEMD_CHECKS` 也已删除**——备份异地同步的缺陷修好并上线后（release `9bac8dc`），`pawshop-backup.service` 实测 `result=success`，监控回到 **12/12 全部真实检查**（`backup_freshness ok (last successful backup 0.0h ago (limit 36h))`）。原计划的"暂时保留"已不再需要，理由记录在 §9.2.1。
+**2026-09-17 状态：`SKIP_COMMERCE_CHECKS` 已删除**（商务已激活，三项 commerce 检查改为真实探测，实测 `commerce_health` 200 / `store_api` 400 / `admin_requires_auth` 401）。**`SKIP_SYSTEMD_CHECKS` 也已删除**——备份异地同步的缺陷修好并上线后（release `9bac8dc`），`pawshop-backup.service` 实测 `result=success`，监控回到 **12/12 全部真实检查**（`backup_freshness ok (last successful backup 0.0h ago (limit 36h))`）。原计划的"暂时保留"已不再需要，理由记录在 §9.2.1。
+
+> ⚠️ **2026-09-19 修正**：上句里的 `store_api_closed` 已**改名为 `store_api_open` 并反转判定**——见 §15.1。旧检查拿编造的 key 去探，而 Medusa 对"没 key"和"错 key"都回 400，**它在两个档位下都会通过**，也就是说店开门那天它会"绿灯"报平安。这条纠正值得记住：**一个永远不会失败的检查不是检查**。
 
 **当时的过渡状态（历史记录）**：`SKIP_SYSTEMD_CHECKS` 曾短暂保留，原因不是"还没上线"，而是当日实测出的一处真实缺陷：定时备份的异地上传步骤（原 `ExecStartPost`）**读不到 systemd 注入的凭据**（见 §9.2.1），`pawshop-backup.service` 因此报 `Result=exit-code`。那时删掉这一行，监控会每 30 分钟对一条**已知且已定位**的故障告警，属于噪音。
 
 `/etc/pawshop-monitor/monitoring.env` 现在**不含任何跳过行**：
 
 - `SKIP_SYSTEMD_CHECKS`（已删除）：曾跳过 `backup_freshness`。
-- `SKIP_COMMERCE_CHECKS`（已删除）：留下它的语义是"商务后台未激活时，`commerce_health` / `store_api_closed` / `admin_requires_auth` 三项记为显式跳过，**每次运行都会打一条 WARN**"，避免把"跳过"误读成"已验证"。
+- `SKIP_COMMERCE_CHECKS`（已删除）：留下它的语义是"商务后台未激活时，`commerce_health` / `store_api_open` / `admin_requires_auth` 三项记为显式跳过，**每次运行都会打一条 WARN**"，避免把"跳过"误读成"已验证"。
 
 跳过只能是**临时状态**：留着会掩盖真实的 commerce 宕机与备份中断。两行的删除都已实测确认为 12/12 全真实检查。
 
@@ -998,7 +1000,9 @@ nginx 在 `pawlivora.com` 下新开三段反代（都在 `/etc/nginx/sites-avail
 | `/auth/user/` | **要** | `127.0.0.1:9000` | 登录入口（防密码爆破的第一道闸） |
 | `location = /auth/session` | **不要（有意）** | `127.0.0.1:9000` | JWT 换会话 cookie / 登出 |
 
-其余路径不变：`/app`、`/store/*`、`/health`、`/pawshop-runtime` 等对外仍然 404。
+其余路径不变：`/app`、`/health`、`/pawshop-runtime` 等对外仍然 404。
+
+> **2026-09-19 更新**：`/store/*` 已不再属于这一行——它现在有自己的一段反代（**不叠 Basic**，见 §15）。本节验收基准里那条 `/store/products 404` 是**当时**的事实，开店后应改为"无 key 400 / 带真 key 200"。
 
 **为什么 `/auth/session` 不叠 Basic**：HTTP 一个请求只有一个 `Authorization` 头。运营台登录流程是「Basic+密码 → JWT → **Bearer JWT 调 `/auth/session` 换 `connect.sid` cookie** → 之后所有 `/admin/` 请求 = Basic（浏览器自动带）+ cookie」。若 `/auth/session` 也要 Basic，第二步就无处放 Bearer（实测死锁 401）。该端点自身的鉴权就是 Medusa 验 Bearer JWT——而 JWT 只可能从被 Basic 闸住的登录拿到，所以不降安全。
 
@@ -1012,7 +1016,7 @@ nginx 在 `pawlivora.com` 下新开三段反代（都在 `/etc/nginx/sites-avail
 # 外网无凭据：/admin/products 与 /auth/user/emailpass 都必须 401（带 WWW-Authenticate: Basic realm="PawShop Admin"）
 # 主机侧全链路（不打印任何凭据）：登录→200 拿 token；POST /auth/session(Bearer)→200+set-cookie connect.sid；
 # GET /admin/users/me(cookie+Basic)→200；去掉 Basic→401；DELETE /auth/session→200；旧 cookie 再用→401。
-# 回归：/ 与 /sitemap.xml 200；/app、/store/products 404；监控 12/12。
+# 回归：/ 与 /sitemap.xml 200；/app、/health、/pawshop-runtime 404；/store/products 见 §15.3（开店后是 400/200，不再是 404）；监控 12/12。
 ```
 
 ### 14.3 轮换 Basic 口令 / 回滚
@@ -1023,3 +1027,86 @@ nginx 在 `pawlivora.com` 下新开三段反代（都在 `/etc/nginx/sites-avail
 ```
 
 注意：`deploy-static.sh` / `deploy-commerce.sh` 都**不碰** `sites-available/pawshop`，此配置独立于两套发版。
+
+## 15. 开店与关店（storefront profile，2026-09-19 上线）
+
+`PAWSHOP_MODE` 的两个值是两套**已评审的生产档位**，不是功能开关。切到 `production-storefront` 就是"把顾客侧 API 交给公网"。
+
+### 15.1 一次开门动三件东西
+
+| 项 | 位置 | 开门 | 关门 |
+| --- | --- | --- | --- |
+| 档位 | `/etc/pawshop/commerce.env` 的 `PAWSHOP_MODE` | `production-storefront` | `production-admin-only` |
+| `location /store/` | `/etc/nginx/sites-available/pawshop` | 反代到 `127.0.0.1:9000`，**不叠 Basic** | 删掉该 location |
+| 店铺巡检 | `/etc/pawshop-monitor/monitoring.env` | 需要 `PAWSHOP_MONITOR_STOREFRONT_PUBLISHABLE_KEY=pk_...` | 留着（见下） |
+
+**为什么 `/store/` 不叠 Basic**：这是顾客浏览器自己要调的命名空间，唯一凭据是店铺的 publishable key——它**按设计就是公开的**（每个加载落地页的浏览器都拿到）。给它叠口令等于让顾客没法下单。
+
+**为什么监控必须换 key**：Medusa 对"没带 key"和"带了不认识 key"的请求**都**回 400，所以拿一个编造的 key 去探，店开没开都是 400——改前的 `store_api_closed` 正是这样，它**看不见店开门这件事**。现在的 `store_api_open` 用真 key 要 200 + 商品数组，同时证明库也答话了。
+
+> ⚠️ **关店的副作用（已知，非故障）**：`store_api_open` 断言的不变量就是"店必须是开的"。**主动关店会让这一项变红并告警**。有计划关店时，要么接受这条告警，要么按 §9.2 的方式临时声明跳过——目前**没有"只跳过一项"的开关**，这是待补的口子。
+
+### 15.2 顺序（监控那两个文件**最后**刷）
+
+升级路径的 §11.2 第 1.5 步把 libexec 刷新排在迁移之前，理由是"那段行为中性"。**本次不适用**：本次监控改动**改了语义**（要求"店已开"）。若在店还关着时提前刷，监控会每 5 分钟对一条它自己刚学会、而现实还没跟上 的断言报错。
+
+所以本次实际执行的顺序是：
+
+```bash
+# 1) 主机取码 → 准备 release → 升级迁移 → 备份/隔离恢复演练 → 合闸（§11.2 第 0~4 步）
+# 2) 先刷新【只被演练比对】的两个文件（它们没改，cmp 直接通过）
+#    演练 run-first-production-backup-restore.sh 第 126 行只比对这两个
+# 3) 记内容摘要：verify-release-manifest.mjs <release> <SHA>  → RELEASE_CONTENT_SHA256
+# 4) 【关键】发版时保持 production-admin-only 激活新 release
+#    这样即使 deploy 失败回滚，回滚到的是"旧代码 + 关闭档位"= 健康；
+#    若先把档位开了再发版，回滚会变成"旧代码 + 开店档位"= 启动门不认，服务起不来。
+PAWSHOP_RELEASE_ID=<SHA> PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1 \
+  bash /srv/pawshop-source/ops/commerce/deploy-commerce.sh
+# 5) 确认服务在 admin-only 下健康（这一步顺带证明模式感知的启动门认关闭档位）
+# 6) 开门三件一起做，然后重启：
+#    备份 commerce.env 与 monitoring.env → 改 PAWSHOP_MODE → 追加监控 key → 刷监控两文件 → systemctl restart
+#    刷新点：deploy-commerce.sh 第 131 行会把 4 个 libexec 文件逐一 cmp，装不上就 exit 1，
+#            所以监控那两个文件必须在第 4 步【之前】装好（本次在第 2 步之后、第 4 步之前装）。
+```
+
+### 15.3 验收基准（下次开店照抄）
+
+```bash
+# 主机侧（以服务身份、从确切 release 跑；这是单元 ExecStartPost 的同一个入口）
+runuser -u pawshop -- env -i HOME=/var/lib/pawshop LANG=C.UTF-8 PATH=/usr/bin:/bin \
+  /usr/bin/node /srv/pawshop-commerce/releases/<SHA>/_commerce/scripts/run-production-admin-verification.mjs
+# 开店时预期逐字：Production storefront boundary passed: ... customer commerce is open.
+# 关店时预期逐字：Production admin boundary passed: ... customer commerce remains closed.
+
+# 对外（真 key 只在主机 /etc/pawshop-monitor/monitoring.env 里；它按设计是公开值）
+curl -s -o /dev/null -w '%{http_code}\n' -H "x-publishable-api-key: $K" https://pawlivora.com/store/products   # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://pawlivora.com/store/products                                  # 400
+curl -s -X POST -H "content-type: application/json" -H "x-publishable-api-key: $K" -d '{}' \
+  https://pawlivora.com/store/carts | head -c 80                                                               # 200 + {"cart":{...}}
+# 回归：/ 200；/admin/products 与 /admin/orders 401；/app、/health、/pawshop-runtime 仍 404
+# 监控：systemctl start pawshop-monitor.service → journal 里 store_api_open ok (store route answered 200 with N product(s))
+```
+
+### 15.4 仍未开的那扇门：`/hooks/payment/`
+
+Stripe 的 webhook 走 `POST /hooks/payment/stripe_stripe`，它**既不能叠 Basic（Stripe 不会带）也不能要 publishable key**，所以它是第三个必须单独开的 location。**本次没开**（支付还没接）。接线时按 §14 的同一套做法加 `location /hooks/payment/`，并且**必须补一条自己的限速**——它是唯一一个"未鉴权、被公网直接投递"的写入口。
+
+### 15.5 档位写死在代码里的地方（本次已修）
+
+"店是关的"这个假设曾被写进 5 个脚本，开门当天全部暴露：
+
+| 脚本 | 症状 | 现在的判据 |
+| --- | --- | --- |
+| `verify-production-admin.mjs`（单元 `ExecStartPost`） | 标记必须等于 `production-admin-only`，且断 customer 认证回 503 → 开店后**每次启动都失败**，`TimeoutStartSec` 到点被杀，**无限重启**（实测 `NRestarts` 一路涨到 3） | 与**校验过的档位**比对；路由表只在两个档位真正不同的一处分支（customer 认证：关=503，开=401） |
+| `create-production-owner.mjs`、`reset-production-owner-password.mjs`、`verify-production-owner-login.mjs`、`verify-password-reset-delivery.mjs` | 要求档位等于 admin-only → 开店后**建店主账号、找回密码、这两项验收全部拒跑** | `PAWSHOP_MIGRATIONS_CONFIRMED=1` + 任意合法档位 |
+
+教训：**"某个特定的档位名"不是"这是生产环境"的同义词**。要判生产，就判档位**合法**（`isProductionMode`）加上该流程真正需要的前置条件。
+
+### 15.6 升级窗口目录残留会让下一次升级拒跑（第二次踩到）
+
+`run-production-upgrade-migration.sh` 要求 `/run/pawshop-upgrade/` 为空，否则以
+`The upgrade window directory is not empty; preserve and review it before retrying.` 拒跑。
+
+- 该目录里是**迁移前后逐表行数**的两份快照。成功路径会自己清（`c336fa7` 之后）；**在那之前跑过的升级会把它们留下**，于是下一次升级误判成"上次失败了"。
+- 处置：先**比对**两份快照（相同即上次是无 schema 变化的干净升级），再**归档**到 `/root/pawshop-upgrade-window-archive-<TS>/` 并附一份说明，**不要直接删**。本次归档的是 `bbabde4` 那次留下的两份（比对结果：147 表 / 601 行，前后完全一致）。
+- 已知归档目录：`/root/pawshop-upgrade-window-archive-20260918T172013Z`、`/root/pawshop-upgrade-window-archive-20260919T071117Z`。

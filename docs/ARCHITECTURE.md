@@ -32,7 +32,8 @@ PawShop 由两个独立部署单元组成，之间**当前没有任何运行时�
 ## 3. 商务后端（单元 B，admin-only 地基）
 
 - **框架**：Medusa.js 2.21.0（2026-09-16 由 2.19.0 升级），双模式配置（`_commerce/medusa-config.ts` + `src/lib/local-policy.cjs` / production policy）。
-- **模式门禁**：`PAWSHOP_MODE` = `local-admin-only`（本地）或 `production-admin-only`（生产）；Store 与 Customer API 无条件 503，直到店主单独批准开放。
+- **模式门禁**：`PAWSHOP_MODE` 是两套已评审的生产档位——`production-admin-only`（顾客侧 API 一律 503）与 `production-storefront`（顾客侧开放）。本地另有 `local-admin-only`。**2026-09-19 起生产运行在 `production-storefront`**（开店流程见 `docs/RUNBOOK.md` §15）；店主侧不再需要"批准开放"这个动作，改档位就是开放本身。
+- **档位感知的启动门**：单元的 `ExecStartPost` 用 `verify-production-admin.mjs` 把"启动的进程"与"环境文件声明的档位"对齐校验（而不是与某个写死的档位名比对）。两个档位都必须能起得来——这是 2026-09-19 一次真实故障的教训。
 - **本地运行**：`scripts/run-local.mjs` 读取 `~/Documents/PawShop_Private/development/commerce.env`（仓库外私有），绑定 127.0.0.1:9000。
 - **生产运行**：`scripts/run-production.mjs` 要求 TLS PG/Redis、独立 secret、HTTPS storefront origin、回环 admin origin；systemd 以无特权 `pawshop` 用户运行，768MB V8 堆 / 1200MB 硬限。
 - **文件存储**：`@medusajs/file-s3` → 阿里云 OSS `pawlivora-products-us-west-1`。
