@@ -169,15 +169,15 @@
 </div>
 
 <!-- ===== Product Detail Modal ===== -->
-<div id="productModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onclick="closeProduct()">
-  <div class="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
-    <div class="flex items-center justify-between p-4 border-b border-slate-100">
-      <h3 class="font-bold" data-i18n="product_details">Product</h3>
+<div id="productModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-4" onclick="closeProduct()">
+  <div class="bg-white rounded-xl w-full max-w-[1440px] h-[94vh] max-h-[94vh] flex flex-col overflow-hidden" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between px-5 sm:px-8 py-4 border-b border-slate-100 flex-shrink-0">
+      <h3 class="font-bold text-base sm:text-lg" data-i18n="product_details">Product</h3>
       <button onclick="closeProduct()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
         <i class="fas fa-times"></i>
       </button>
     </div>
-    <div id="productModalBody" class="p-6"></div>
+    <div id="productModalBody" class="p-4 sm:p-8 flex-1 overflow-y-auto"></div>
   </div>
 </div>
 
@@ -239,7 +239,7 @@ const I18N = {
     no_products_note: 'The shop is being stocked. Please check back soon.',
     catalog_unavailable: 'The shop is temporarily unavailable. Please refresh later.',
     loading: 'Loading products…',
-    product_details: 'Product',
+    product_details: 'Product', desc_heading: 'Details',
     in_stock: 'In stock', out_of_stock: 'Out of stock', backorder: 'Available on backorder', availability_unknown: 'Availability pending',
     from_price: 'From',
     variant: 'Option', quantity: 'Quantity', sku: 'SKU',
@@ -274,7 +274,7 @@ const I18N = {
     no_products_note: '商品正在上架中，请稍后再来。',
     catalog_unavailable: '商品暂时无法加载，请稍后刷新。',
     loading: '正在加载商品…',
-    product_details: '商品',
+    product_details: '商品', desc_heading: '商品详情',
     in_stock: '有货', out_of_stock: '缺货', backorder: '可预订', availability_unknown: '库存待确认',
     from_price: '起价',
     variant: '款式', quantity: '数量', sku: 'SKU',
@@ -323,6 +323,7 @@ let currentSort = 'popular';
 let searchQuery = '';
 let displayedProducts = 8;
 let openProductId = null;
+let modalImages = [];
 let pendingVariantId = '';
 const cardVariant = {};
 
@@ -458,26 +459,41 @@ function renderProductModal() {
   if (!product) return;
   const variant = selectedVariantFor(product);
   const images = product.images.map(imgUrl).filter(Boolean);
+  modalImages = images;
   const body = document.getElementById('productModalBody');
   body.innerHTML = `
-    <div class="grid sm:grid-cols-2 gap-6">
-      <div>
+    <div class="grid gap-8 lg:grid-cols-2 lg:gap-12">
+      <div class="min-w-0">
         ${images.length
-          ? `<div class="aspect-square bg-slate-50 rounded-lg overflow-hidden mb-3"><img src="${images[0]}" alt="${safeHtml(product.title)}" class="w-full h-full object-cover"></div>
-             ${images.length > 1 ? `<div class="flex gap-2 overflow-x-auto">${images.slice(1, 6).map(u => `<img src="${u}" class="w-14 h-14 object-cover rounded border border-slate-100">`).join('')}</div>` : ''}`
-          : `<div class="aspect-square bg-slate-50 rounded-lg flex items-center justify-center"><i class="fas fa-box text-5xl text-slate-300"></i></div>`}
+          ? `<div class="aspect-square bg-slate-50 rounded-xl overflow-hidden mb-4"><img id="modalMainImage" src="${images[0]}" alt="${safeHtml(product.title)}" class="w-full h-full object-contain"></div>
+             ${images.length > 1 ? `<div class="flex gap-2 sm:gap-3 overflow-x-auto pb-1">${images.map((u, i) => `<img src="${u}" data-thumb onclick="setModalImage(${i})" class="w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 object-cover rounded-lg cursor-pointer border-2 ${i === 0 ? 'border-slate-900' : 'border-transparent'} hover:border-slate-400">`).join('')}</div>` : ''}`
+          : `<div class="aspect-square bg-slate-50 rounded-xl flex items-center justify-center"><i class="fas fa-box text-6xl text-slate-300"></i></div>`}
       </div>
-      <div>
-        <h2 class="text-xl font-bold mb-2">${safeHtml(product.title)}</h2>
-        ${product.subtitle ? `<p class="text-sm text-slate-500 mb-2">${safeHtml(product.subtitle)}</p>` : ''}
-        <div class="flex items-center gap-3 mb-2">${priceHtml(product)}</div>
-        <p class="text-xs text-slate-500 mb-4">${variant ? safeHtml(availabilityText(variant)) : ''}</p>
+      <div class="min-w-0">
+        <h2 class="text-2xl sm:text-3xl font-bold mb-2">${safeHtml(product.title)}</h2>
+        ${product.subtitle ? `<p class="text-sm sm:text-base text-slate-500 mb-3">${safeHtml(product.subtitle)}</p>` : ''}
+        <div class="flex items-center gap-3 mb-3">${priceHtml(product)}</div>
+        <p class="text-sm text-slate-500 mb-5">${variant ? safeHtml(availabilityText(variant)) : ''}</p>
         ${variantPicker(product, `pickModalVariant('${safeToken(product.id)}', this.value)`)}
-        ${variant && variant.sku ? `<p class="text-xs text-slate-400 mb-4">${t('sku')}: ${safeHtml(variant.sku)}</p>` : ''}
-        <button onclick="addToCart('${safeToken(product.id)}', true)" ${variant && isAddable(variant) ? '' : 'disabled'} class="w-full py-3 ${variant && isAddable(variant) ? 'bg-slate-900 hover:bg-slate-700' : 'bg-slate-300 cursor-not-allowed'} text-white text-sm font-medium rounded-lg mb-4">${t('add_to_cart')}</button>
-        ${product.description ? `<p class="text-sm text-slate-600 whitespace-pre-line">${safeHtml(product.description)}</p>` : ''}
+        ${variant && variant.sku ? `<p class="text-xs text-slate-400 mb-5">${t('sku')}: ${safeHtml(variant.sku)}</p>` : ''}
+        <button onclick="addToCart('${safeToken(product.id)}', true)" ${variant && isAddable(variant) ? '' : 'disabled'} class="w-full py-3.5 ${variant && isAddable(variant) ? 'bg-slate-900 hover:bg-slate-700' : 'bg-slate-300 cursor-not-allowed'} text-white text-sm font-medium rounded-lg">${t('add_to_cart')}</button>
       </div>
-    </div>`;
+    </div>
+    ${product.description ? `
+    <div class="mt-10 pt-6 border-t border-slate-100">
+      <h3 class="font-bold mb-3">${t('desc_heading')}</h3>
+      <p class="text-sm sm:text-base text-slate-600 leading-relaxed whitespace-pre-line max-w-4xl">${safeHtml(product.description)}</p>
+    </div>` : ''}`;
+}
+
+// Clicking a thumbnail swaps the large image without re-rendering the modal.
+function setModalImage(index) {
+  const main = document.getElementById('modalMainImage');
+  if (main && modalImages[index]) main.src = modalImages[index];
+  document.querySelectorAll('#productModalBody [data-thumb]').forEach((el, i) => {
+    el.classList.toggle('border-slate-900', i === index);
+    el.classList.toggle('border-transparent', i !== index);
+  });
 }
 
 // ===== Search / filter / sort =====
