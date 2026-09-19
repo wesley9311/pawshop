@@ -36,6 +36,7 @@ const passwordResetSubscriber = readFileSync(resolve(root, 'src/subscribers/pass
 const ownerRotation = readFileSync(resolve(root, 'scripts/reset-production-owner-password.mjs'), 'utf8');
 const ownerRotationWrapper = readFileSync(resolve(root, '..', 'ops/commerce/reset-production-owner-password.sh'), 'utf8');
 const ownerCreation = readFileSync(resolve(root, 'scripts/create-production-owner.mjs'), 'utf8');
+const ownerLoginVerification = readFileSync(resolve(root, 'scripts/verify-production-owner-login.mjs'), 'utf8');
 const credentialInstaller = readFileSync(resolve(root, 'scripts/set-email-credentials.mjs'), 'utf8');
 const resetVerification = readFileSync(resolve(root, 'scripts/verify-password-reset-delivery.mjs'), 'utf8');
 const resetVerificationWrapper = readFileSync(resolve(root, '..', 'ops/commerce/run-password-reset-verification.sh'), 'utf8');
@@ -128,7 +129,7 @@ test('a rotated key ring keeps authenticating the sets the retired key signed', 
   assert.throws(() => matchBackupKeyRing(ring, null), /requires an authentication test/);
 });
 
-test('production admin verifier keeps customer commerce closed', () => {
+test('production startup verifier checks the boundary of the configured profile', () => {
   assert.match(productionVerifier, /\/admin\/products/);
   assert.match(productionVerifier, /\/admin\/orders/);
   assert.match(productionVerifier, /\/store\/products/);
@@ -139,13 +140,42 @@ test('production admin verifier keeps customer commerce closed', () => {
   assert.match(productionVerifier, /assertLoopbackListeners/);
   assert.match(productionVerifier, /validateProductionEnvironment/);
   assert.doesNotMatch(productionVerifier, /publishable|authorization|cookie/i);
+  // The verifier is the readiness gate of the service unit, so it decides whether
+  // the process is allowed to start at all. Pinning it to one profile is what made
+  // the other profile unstartable: the unit timed out and restarted forever, which
+  // is a worse failure than the one the gate was written to catch. It must derive
+  // its expectation from the validated mode instead.
+  assert.match(productionVerifier, /config\.commerceOpen/);
+  assert.match(productionVerifier, /marker\.mode !== config\.mode/);
   // Medusa's own store API-key gate answers before any user middleware or route,
-  // so the store namespace can only ever be observed refusing with 400 under this
-  // profile. Pin the exact expectations so they cannot drift back to a 503 that
-  // no request can reach.
+  // so the store namespace is observed refusing with 400 in both profiles. Pin the
+  // exact expectations so they cannot drift back to a 503 that no request can reach.
   assert.match(productionVerifier, /\['GET', '\/store\/products', 400, 'not_allowed'\]/);
   assert.match(productionVerifier, /\['POST', '\/store\/carts', 400, 'not_allowed'\]/);
+  // Customer authentication is the one place the profiles differ observably: shut,
+  // PawShop's own middleware answers 503; open, the request reaches the emailpass
+  // provider, which rejects an empty body with 401. Pin both, because a gate that
+  // only knows one of them stops the service on the day the profile changes.
   assert.match(productionVerifier, /\['POST', '\/auth\/customer\/emailpass\/register', 503, 'not_allowed'\]/);
+  assert.match(productionVerifier, /\['POST', '\/auth\/customer\/emailpass\/register', 401, 'unauthorized'\]/);
+});
+
+test('owner account tooling runs in either production profile', () => {
+  // These four scripts used "the admin-only profile" as a stand-in for "the
+  // activated production environment", which was true while only one profile
+  // existed. Keeping the stand-in would have taken owner creation, password
+  // recovery and their acceptances away on the day the storefront opened - the
+  // day they are most likely to be needed. The precondition they actually want
+  // is the confirmed migration, so the profile only has to be a real one.
+  for (const [label, source] of [
+    ['owner creation', ownerCreation],
+    ['owner rotation', ownerRotation],
+    ['owner login verification', ownerLoginVerification],
+    ['password-reset delivery', resetVerification],
+  ]) {
+    assert.match(source, /isProductionMode\(environment\.PAWSHOP_MODE\)/, label);
+    assert.doesNotMatch(source, /PAWSHOP_MODE !== 'production-admin-only'/, label);
+  }
 });
 
 test('production backup encrypts data and suppresses database command output', () => {

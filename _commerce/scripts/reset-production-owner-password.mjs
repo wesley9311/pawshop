@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { parseProductionEnvironmentFile } = require('./production-env-file.cjs');
+const { isProductionMode } = require('../src/lib/production-modes.cjs');
 const { databaseConnection } = require('./production-private-paths.cjs');
 
 // The supported way back into the admin when nobody can log in.
@@ -58,8 +59,11 @@ if (!credentials || Object.keys(credentials).sort().join('\0') !== 'email\0passw
 const environment = parseProductionEnvironmentFile(readRootFile(
   '/etc/pawshop/commerce.env', 64 * 1024, 'Production environment', { gid: pawshopGid, mode: 0o640 },
 ));
-if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '1' || environment.PAWSHOP_MODE !== 'production-admin-only') {
-  throw new Error('Production owner rotation requires the activated admin-only environment.');
+// The way back in must not depend on the shop being shut: a lost password is
+// most likely to be noticed once somebody is actually using the storefront. The
+// precondition is the confirmed migration, not one particular profile.
+if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '1' || !isProductionMode(environment.PAWSHOP_MODE)) {
+  throw new Error('Production owner rotation requires an activated production environment.');
 }
 
 // Medusa's emailpass provider stores scrypt(password, { logN: 15, r: 8, p: 1 })

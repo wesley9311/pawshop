@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { parseProductionEnvironmentFile } = require('./production-env-file.cjs');
+const { isProductionMode } = require('../src/lib/production-modes.cjs');
 
 if (process.platform !== 'linux' || process.getuid() !== 0 || process.argv.length !== 4) {
   throw new Error('Production owner login verification requires root on Linux and an exact release identity.');
@@ -38,8 +39,10 @@ if (!credentials || Object.keys(credentials).sort().join('\0') !== 'email\0passw
 const environment = parseProductionEnvironmentFile(privateSource('/etc/pawshop/commerce.env', {
   gid: pawshopGid, mode: 0o640, label: 'Production environment',
 }));
-if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '1' || environment.PAWSHOP_MODE !== 'production-admin-only') {
-  throw new Error('Production owner login verification requires the activated admin-only environment.');
+// The owner signs in to the admin plane, which both profiles keep behind
+// authentication, so this acceptance is not tied to whether the shop is open.
+if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '1' || !isProductionMode(environment.PAWSHOP_MODE)) {
+  throw new Error('Production owner login verification requires an activated production environment.');
 }
 const origin = `http://127.0.0.1:${environment.PORT}`;
 async function jsonResponse(path, options, expectedStatus = 200) {

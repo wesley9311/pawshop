@@ -26,28 +26,45 @@ try {
 } catch {
   throw new Error('Production runtime marker is missing or malformed.');
 }
-if (markerResponse.status !== 200 || marker.mode !== 'production-admin-only' ||
-    marker.topology !== 'single-host-private' || marker.commerce !== 'closed') {
-  throw new Error('Target process is not the closed production admin runtime.');
+// The process must be the one this environment file describes. Compare the
+// marker against the validated mode instead of against a written-down profile:
+// both profiles have to start, and an environment file that says "storefront"
+// while the process reports "admin-only" is exactly the mistake worth refusing.
+// Hard-coding one profile here would make the other profile unstartable rather
+// than verified, which is how a service ends up unable to come up at all.
+const expectedCommerce = config.commerceOpen ? 'open' : 'closed';
+if (markerResponse.status !== 200 || marker.mode !== config.mode ||
+    marker.topology !== 'single-host-private' || marker.commerce !== expectedCommerce) {
+  throw new Error('Target process is not the production runtime this environment configures.');
 }
 
-// The store namespace is closed by Medusa's own API-key gate, which the HTTP
-// loader installs on the app before every user middleware and every route. A
-// store request that carries no key is therefore refused by that gate with 400,
-// and our own 503 gate for the namespace can only be reached once a key is
-// presented. Assert the refusal that is observable from outside the process:
-// the store namespace answers no request without a key. Customer authentication
-// routes have no such framework gate ahead of them, so they keep returning the
-// explicit PawShop 503.
-for (const [method, path, status, type] of [
+// Both profiles share this much: the admin plane sits behind authentication, the
+// loopback runtime serves the storefront shell, and the store namespace refuses
+// every request that carries no key. That last refusal comes from Medusa's own
+// API-key gate, which the HTTP loader installs on the app before every user
+// middleware and every route, so it is answered with 400 in both profiles - and
+// our own 503 gate for the namespace can only be reached once a key is presented.
+const invariants = [
   ['GET', '/health', 200, undefined],
   ['GET', '/app', 200, undefined],
   ['GET', '/admin/products', 401, undefined],
   ['GET', '/admin/orders', 401, undefined],
   ['GET', '/store/products', 400, 'not_allowed'],
   ['POST', '/store/carts', 400, 'not_allowed'],
-  ['POST', '/auth/customer/emailpass/register', 503, 'not_allowed'],
-]) {
+];
+
+// The profiles differ in exactly one place that is observable without a
+// credential: customer authentication has no framework gate ahead of it, so it
+// is the door PawShop itself opens or closes. Closed, the middleware refuses it
+// with the explicit 503. Open, the request reaches the emailpass provider, which
+// rejects an empty body with 401 - a refusal, but one from the authentication
+// code rather than from the mode gate, which is what proves the namespace is
+// reachable. Assert the exact pair so neither answer can drift into the other.
+invariants.push(config.commerceOpen
+  ? ['POST', '/auth/customer/emailpass/register', 401, 'unauthorized']
+  : ['POST', '/auth/customer/emailpass/register', 503, 'not_allowed']);
+
+for (const [method, path, status, type] of invariants) {
   try {
     await expectHttpStatus(`${origin}${path}`, { method, status, type });
   } catch (error) {
@@ -55,4 +72,6 @@ for (const [method, path, status, type] of [
   }
 }
 
-console.log('Production admin boundary passed: private listeners and runtime identity verified; owner routes require authentication and customer commerce remains closed.');
+console.log(config.commerceOpen
+  ? 'Production storefront boundary passed: private listeners and runtime identity verified; owner routes require authentication and customer commerce is open.'
+  : 'Production admin boundary passed: private listeners and runtime identity verified; owner routes require authentication and customer commerce remains closed.');

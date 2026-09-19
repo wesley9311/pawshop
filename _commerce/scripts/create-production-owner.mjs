@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { parseProductionEnvironmentFile } = require('./production-env-file.cjs');
 const { validateProductionEnvironment, CLI_WORKER_OVERRIDE } = require('../src/lib/production-policy.cjs');
+const { isProductionMode } = require('../src/lib/production-modes.cjs');
 const { databaseConnection } = require('./production-private-paths.cjs');
 
 if (process.platform !== 'linux' || process.getuid() !== 0 || process.argv.length !== 4) {
@@ -57,8 +58,12 @@ if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials
 const environment = parseProductionEnvironmentFile(readRootFile(
   '/etc/pawshop/commerce.env', 64 * 1024, 'Production environment', { gid: pawshopGid, mode: 0o640 },
 ));
-if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '1' || environment.PAWSHOP_MODE !== 'production-admin-only') {
-  throw new Error('Production owner creation requires the activated admin-only environment.');
+// Owner creation belongs to the admin plane, which both production profiles keep
+// behind authentication, so it is not tied to whether the shop is open. The
+// precondition that matters is the confirmed migration; naming one profile here
+// would take account creation away on the day the storefront opened.
+if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '1' || !isProductionMode(environment.PAWSHOP_MODE)) {
+  throw new Error('Production owner creation requires an activated production environment.');
 }
 // Validate the declaration as stored, before any Medusa CLI code can rewrite it.
 validateProductionEnvironment(environment);

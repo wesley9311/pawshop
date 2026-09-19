@@ -56,6 +56,9 @@ function privateSource(path, { gid = 0, mode = 0o600, maximum = 64 * 1024, label
 // The release owns the strict environment whitelist; reimplementing it here
 // would create a second parser that could drift from the one the host enforces.
 const { parseProductionEnvironmentFile } = require(join(release, '_commerce', 'scripts', 'production-env-file.cjs'));
+// Loaded from the release for the same reason as the parser above: this verifier
+// is also run from /root, where a relative path to the project would not resolve.
+const { isProductionMode } = require(join(release, '_commerce', 'src', 'lib', 'production-modes.cjs'));
 
 const pawshopGid = Number(execFileSync('/usr/bin/id', ['-g', 'pawshop'], { encoding: 'utf8' }).trim());
 const ownerCredentials = JSON.parse(privateSource(OWNER_CREDENTIALS, { maximum: 4096, label: 'Owner credentials' }));
@@ -66,8 +69,10 @@ if (!ownerCredentials || Object.keys(ownerCredentials).sort().join('\0') !== 'em
 const environment = parseProductionEnvironmentFile(privateSource('/etc/pawshop/commerce.env', {
   gid: pawshopGid, mode: 0o640, label: 'Production environment',
 }));
-if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '1' || environment.PAWSHOP_MODE !== 'production-admin-only') {
-  throw new Error('Password-reset verification requires the activated admin-only environment.');
+// A password reset has to be provable in either profile: the owner may lose the
+// password at any time, and most likely while somebody is shopping.
+if (environment.PAWSHOP_MIGRATIONS_CONFIRMED !== '1' || !isProductionMode(environment.PAWSHOP_MODE)) {
+  throw new Error('Password-reset verification requires an activated production environment.');
 }
 if (!/^\d{2,5}$/.test(environment.PORT || '')) throw new Error('The production environment has no usable port.');
 const origin = `http://127.0.0.1:${environment.PORT}`;
