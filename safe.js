@@ -26,6 +26,25 @@
     return /^fa-[a-z0-9-]+$/.test(candidate) ? candidate : 'fa-box';
   }
 
+  // Product images are served from the shop's own host and from the object
+  // storage host configured in config.js. Anything else is dropped: a catalog
+  // entry must not be able to turn a product card into a tracking beacon, and
+  // no URL scheme other than http/https is ever emitted.
+  function image(value, allowedHosts) {
+    const hosts = Array.isArray(allowedHosts) ? allowedHosts : [];
+    const candidate = String(value || '').trim();
+    if (!candidate) return '';
+    try {
+      const parsed = new URL(candidate, window.location.href);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
+      if (parsed.origin === window.location.origin) return html(parsed.href);
+      if (parsed.protocol !== 'https:') return '';
+      return hosts.includes(parsed.hostname) ? html(parsed.href) : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   function token(value) {
     const candidate = String(value || '');
     return /^[a-z0-9_-]+$/i.test(candidate) ? candidate : '';
@@ -59,5 +78,5 @@
     }));
   }
 
-  window.PawSafe = Object.freeze({ html, url, icon, token, id, quantity, catalog });
+  window.PawSafe = Object.freeze({ html, url, image, icon, token, id, quantity, catalog });
 })();

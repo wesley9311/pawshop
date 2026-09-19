@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://pawlivora-products-us-west-1.oss-us-west-1.aliyuncs.com; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>PawShop - Pet Supplies for Cats &amp; Dogs</title>
-<meta name="description" content="PawShop prelaunch product preview. Payments and customer orders are not open yet.">
+<meta name="description" content="Shop pet supplies for cats and dogs. Browse the live catalog and build a cart; checkout opens once payment is connected.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 
 <link rel="stylesheet" href="assets/tailwind.css">
@@ -37,7 +37,7 @@
 <!-- ===== Top Bar ===== -->
 <div class="bg-slate-900 text-white text-xs py-2 px-4">
   <div class="max-w-6xl mx-auto flex items-center justify-between">
-    <span data-i18n="topbar_note">Prelaunch preview — payments and orders are not open yet</span>
+    <span data-i18n="topbar_note">Catalog and cart are live — payment is not connected yet</span>
     <div class="flex items-center gap-3">
       <select id="langSelect" onchange="setLang(this.value)" class="bg-transparent text-white text-xs border-none cursor-pointer">
         <option value="en">English</option>
@@ -86,8 +86,8 @@
 <section class="bg-slate-50">
   <div class="max-w-6xl mx-auto px-4 sm:px-6 py-16 lg:py-24 text-center">
     <h1 class="text-4xl lg:text-5xl font-bold tracking-tight mb-4" data-i18n="hero_title">Happier pets, easier days.</h1>
-    <p class="text-lg text-slate-500 mb-8 max-w-xl mx-auto" data-i18n="hero_sub">Product preview only — payments and orders are not open yet.</p>
-    <a href="#products" class="inline-block px-6 py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors" data-i18n="hero_cta">Shop bestsellers</a>
+    <p class="text-lg text-slate-500 mb-8 max-w-xl mx-auto" data-i18n="hero_sub">Carefully selected supplies for cats and dogs. The catalog and cart are live; checkout opens when payment is connected.</p>
+    <a href="#products" class="inline-block px-6 py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 transition-colors" data-i18n="hero_cta">Shop products</a>
     <div class="mt-4">
       <button onclick="openWaitlist()" class="text-sm text-slate-500 hover:text-slate-900 underline underline-offset-4" data-i18n="hero_reserve">View launch status</button>
     </div>
@@ -95,7 +95,7 @@
 </section>
 
 <!-- ===== Categories ===== -->
-<section class="border-b border-slate-100 bg-white sticky top-16 z-30">
+<section id="categorySection" class="border-b border-slate-100 bg-white sticky top-16 z-30 hidden">
   <div class="max-w-6xl mx-auto px-4 sm:px-6">
     <div class="flex items-center gap-1 py-3 overflow-x-auto" id="categoryBar"></div>
   </div>
@@ -105,9 +105,9 @@
 <section id="products" class="py-12">
   <div class="max-w-6xl mx-auto px-4 sm:px-6">
     <div class="flex items-center justify-between mb-8">
-      <h2 class="text-2xl font-bold" data-i18n="bestsellers">Bestsellers</h2>
+      <h2 class="text-2xl font-bold" data-i18n="bestsellers">Products</h2>
       <select id="sortSelect" onchange="sortProducts()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm">
-        <option value="popular" data-i18n="sort_popular">Popular</option>
+        <option value="popular" data-i18n="sort_popular">Featured</option>
         <option value="price-low" data-i18n="sort_price_low">Price: low to high</option>
         <option value="price-high" data-i18n="sort_price_high">Price: high to low</option>
       </select>
@@ -115,7 +115,7 @@
 
     <div id="productGrid" class="product-grid"></div>
 
-    <div id="loadMoreContainer" class="text-center mt-12">
+    <div id="loadMoreContainer" class="text-center mt-12 hidden">
       <button onclick="loadMore()" class="px-6 py-2 border border-slate-200 text-sm rounded-lg hover:bg-slate-50" data-i18n="load_more">Load more</button>
     </div>
   </div>
@@ -145,8 +145,6 @@
   </div>
 </footer>
 
-<script src="safe.js"></script>
-
 <!-- ===== Cart Drawer ===== -->
 <div id="cartDrawer" class="drawer fixed top-0 right-0 bottom-0 w-full max-w-sm bg-white z-50 flex flex-col">
   <div class="p-4 border-b border-slate-100 flex items-center justify-between">
@@ -157,11 +155,29 @@
   </div>
   <div id="cartItems" class="flex-1 overflow-y-auto p-4"></div>
   <div class="p-4 border-t border-slate-100">
-    <div class="flex justify-between mb-4 text-sm">
+    <div class="flex justify-between mb-2 text-sm">
       <span class="text-slate-500" data-i18n="subtotal">Subtotal</span>
       <span id="cartSubtotal" class="font-semibold">$0.00</span>
     </div>
-    <button onclick="checkout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="checkout">View launch status</button>
+    <div class="flex justify-between mb-4 text-sm">
+      <span class="text-slate-500" data-i18n="shipping">Shipping</span>
+      <span class="text-slate-500" data-i18n="shipping_at_checkout">Calculated at checkout</span>
+    </div>
+    <button onclick="checkout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="checkout">Checkout</button>
+    <p class="mt-2 text-xs text-slate-400 text-center" data-i18n="checkout_note">Checkout is not open yet — payment is not connected.</p>
+  </div>
+</div>
+
+<!-- ===== Product Detail Modal ===== -->
+<div id="productModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onclick="closeProduct()">
+  <div class="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between p-4 border-b border-slate-100">
+      <h3 class="font-bold" data-i18n="product_details">Product</h3>
+      <button onclick="closeProduct()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div id="productModalBody" class="p-6"></div>
   </div>
 </div>
 
@@ -172,7 +188,7 @@
       <i class="fas fa-bell text-white"></i>
     </div>
     <h2 class="text-lg font-bold mb-1 text-center" data-i18n="waitlist_title">Launch status</h2>
-    <p class="text-xs text-slate-500 text-center mb-6" data-i18n="waitlist_body">Sales and the contact channel are still being prepared. No information is submitted yet.</p>
+    <p class="text-xs text-slate-500 text-center mb-6" data-i18n="waitlist_body">The catalog and cart are live. Checkout opens once payment is connected.</p>
     <button onclick="submitWaitlist()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2" data-i18n="waitlist_cta">Check launch status</button>
     <button onclick="document.getElementById('waitlistModal').classList.remove('open')" class="w-full py-2 text-xs text-slate-400 hover:text-slate-600" data-i18n="waitlist_no">No thanks</button>
   </div>
@@ -184,88 +200,99 @@
   <span id="toastText"></span>
 </div>
 
+<script src="config.js"></script>
+<script src="safe.js"></script>
+<script src="store-api.js"></script>
 <script>
 // ============================================================
-// PRELAUNCH DATA LAYER
-// catalog.json is the public catalog source. Payments and orders are disabled
-// until a server-side commerce backend is connected.
+// STOREFRONT DATA LAYER
+// Products and the cart come from the Medusa Store API through
+// store-api.js. There is no local catalog and no fallback: if the shop
+// answers with zero products the page says so, and if it cannot be reached
+// the page says that instead. Checkout is not implemented -- payment is not
+// connected yet, and nothing here may pretend an order happened.
 // ============================================================
-const LS_CART = 'pawshop_cart';
-const { html: safeHtml, url: safeUrl, icon: safeIcon, token: safeToken, id: safeId } = PawSafe;
+const CONFIG = (typeof PAWSHOP_PUBLIC_CONFIG === 'object' && PAWSHOP_PUBLIC_CONFIG) ? PAWSHOP_PUBLIC_CONFIG : {};
+const { html: safeHtml, image: safeImage, token: safeToken } = PawSafe;
+const store = PawStore.createClient({
+  baseUrl: CONFIG.storeApiBase || '/store',
+  publishableKey: CONFIG.publishableKey || '',
+});
+const imgUrl = value => safeImage(value, CONFIG.imageHosts || []);
+const money = amount => PawStore.formatMoney(amount, CONFIG.displayCurrency);
+const LS_CART_ID = PawStore.CART_ID_KEY;
 
-// ===== i18n:界面双语(商品名/描述暂为英文,后台加中文字段是后续迭代) =====
+// ===== i18n:界面双语(商品名/描述来自后台,保持原文) =====
 const I18N = {
   en: {
-    topbar_note: 'Prelaunch preview — payments and orders are not open yet',
-    nav_shop: 'Shop', nav_orders: 'Launch status',
+    topbar_note: 'Catalog and cart are live — payment is not connected yet',
+    nav_shop: 'Shop',
     search_ph: 'Search products...',
     hero_title: 'Happier pets, easier days.',
-    hero_sub: 'Carefully selected supplies for cats and dogs. Product preview only — payments and orders are not open yet.',
-    hero_cta: 'Shop bestsellers',
+    hero_sub: 'Carefully selected supplies for cats and dogs. The catalog and cart are live; checkout opens when payment is connected.',
+    hero_cta: 'Shop products',
     hero_reserve: 'View launch status',
     cat_all: 'All',
-    bestsellers: 'Bestsellers',
-    sort_popular: 'Popular', sort_price_low: 'Price: low to high', sort_price_high: 'Price: high to low',
-    load_more: 'Load more', no_products: 'No products found',
-    variant: 'Variant', quantity: 'Quantity',
-    add_to_cart: 'Add to cart', buy_now: 'Buy now',
-    reserve_line: 'Not ready to pay? Reserve yours free - we will email you at launch',
+    bestsellers: 'Products',
+    sort_popular: 'Featured', sort_price_low: 'Price: low to high', sort_price_high: 'Price: high to low',
+    load_more: 'Load more', no_products: 'No products available for purchase yet',
+    no_products_note: 'The shop is being stocked. Please check back soon.',
+    catalog_unavailable: 'The shop is temporarily unavailable. Please refresh later.',
+    loading: 'Loading products…',
+    product_details: 'Product',
+    in_stock: 'In stock', out_of_stock: 'Out of stock', backorder: 'Available on backorder', availability_unknown: 'Availability pending',
+    from_price: 'From',
+    variant: 'Option', quantity: 'Quantity', sku: 'SKU',
+    add_to_cart: 'Add to cart', adding: 'Adding…',
     footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
-    footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds', footer_service: 'Customer service',
-    footer_myorders: 'Launch status',
-    cart: 'Saved products', subtotal: 'Estimated product total', checkout: 'View launch status', cart_empty: 'Your saved list is empty',
-    checkout_title: 'Checkout', items: 'Items', shipping: 'Shipping', shipping_tbd: 'Calculated when we launch', total: 'Total',
-    full_name: 'Full name', phone: 'Phone', email: 'Email', country: 'Country', address: 'Address',
-    continue_payment: 'Continue to payment',
-    payment_card: 'Payments unavailable', payment_card_sub: 'Checkout will open after launch',
-    payment_paypal: 'Payments unavailable', payment_paypal_sub: 'Checkout will open after launch',
-    back: 'Back', place_order: 'Place order',
-
-    toast_addr: 'Please complete the address form', toast_email: 'Please enter a valid email',
-    toast_added: 'Saved', toast_list: 'No information was submitted',
-    success_title: 'Store preview', success_number: 'Orders are not open yet.',
-    success_body: 'No payment or customer order was created.',
-    success_view: 'View my orders', success_continue: 'Continue shopping',
+    footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds',
+    cart: 'Cart', subtotal: 'Subtotal', shipping: 'Shipping', shipping_at_checkout: 'Calculated at checkout',
+    checkout: 'Checkout', checkout_note: 'Checkout is not open yet — payment is not connected.',
+    cart_empty: 'Your cart is empty', cart_unavailable: 'The cart is temporarily unavailable. Please refresh.',
+    line_total: 'Line total',
+    toast_added: 'Added to cart',
+    cart_failed: 'Could not update the cart. Please try again.',
+    add_failed: 'Could not add this item. Please try again.',
+    shop_unreachable: 'The shop could not be reached. Please check your connection and refresh.',
     waitlist_title: 'Launch status',
-    waitlist_body: 'Sales and the contact channel are still being prepared. No information is submitted yet.',
-    waitlist_ph: 'Email collection is not active', waitlist_cta: 'Check launch status', waitlist_no: 'Close',
-    nav_continue: 'Continue shopping',
+    waitlist_body: 'The catalog and cart are live. Checkout opens once payment is connected.',
+    waitlist_cta: 'Check launch status', waitlist_no: 'No thanks',
+    waitlist_closed: 'Checkout opens once payment is connected. No order was created.',
   },
   zh: {
-    topbar_note: '预发布展示——暂未开放付款和订单',
-    nav_shop: '商品', nav_orders: '上线状态',
+    topbar_note: '商品与购物车已启用——支付通道尚未接通',
+    nav_shop: '商品',
     search_ph: '搜索商品...',
     hero_title: '让毛孩子更幸福，让生活更轻松',
-    hero_sub: '为猫狗精选的好物，舒适耐用。目前仅供商品预览，暂未开放付款和订单。',
-    hero_cta: '浏览热卖',
+    hero_sub: '为猫狗精选的好物。商品与购物车已启用，支付接通后即可结算。',
+    hero_cta: '浏览商品',
     hero_reserve: '查看上线状态',
     cat_all: '全部',
-    bestsellers: '热卖榜单',
-    sort_popular: '人气', sort_price_low: '价格从低到高', sort_price_high: '价格从高到低',
-    load_more: '加载更多', no_products: '没有找到商品',
-    variant: '款式', quantity: '数量',
-    add_to_cart: '加入购物车', buy_now: '立即购买',
-    reserve_line: '暂不付款？免费预留，上线时邮件通知你',
+    bestsellers: '商品',
+    sort_popular: '推荐', sort_price_low: '价格从低到高', sort_price_high: '价格从高到低',
+    load_more: '加载更多', no_products: '暂无可购买商品',
+    no_products_note: '商品正在上架中，请稍后再来。',
+    catalog_unavailable: '商品暂时无法加载，请稍后刷新。',
+    loading: '正在加载商品…',
+    product_details: '商品',
+    in_stock: '有货', out_of_stock: '缺货', backorder: '可预订', availability_unknown: '库存待确认',
+    from_price: '起价',
+    variant: '款式', quantity: '数量', sku: 'SKU',
+    add_to_cart: '加入购物车', adding: '正在加入…',
     footer_tag: '精选犬猫好物。',
-    footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款', footer_service: '联系客服',
-    footer_myorders: '上线状态',
-    cart: '已保存商品', subtotal: '商品估算合计', checkout: '上线信息', cart_empty: '保存列表为空',
-    checkout_title: '结算', items: '商品', shipping: '运费', shipping_tbd: '上线时按实际计算', total: '合计',
-    full_name: '姓名', phone: '电话', email: '邮箱', country: '国家', address: '地址',
-    continue_payment: '继续去支付',
-    payment_card: '暂未开放付款', payment_card_sub: '正式上线后启用',
-    payment_paypal: '暂未开放付款', payment_paypal_sub: '正式上线后启用',
-    back: '上一步', place_order: '提交订单',
-
-    toast_addr: '请填写完整收货信息', toast_email: '请输入有效的邮箱',
-    toast_added: '已保存', toast_list: '未提交任何信息',
-    success_title: '店铺预览', success_number: '暂未开放订单',
-    success_body: '没有创建付款或顾客订单。',
-    success_view: '查看我的订单', success_continue: '继续购物',
+    footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款',
+    cart: '购物车', subtotal: '商品小计', shipping: '运费', shipping_at_checkout: '结算时计算',
+    checkout: '去结算', checkout_note: '结算尚未开放——支付通道还未接通。',
+    cart_empty: '购物车是空的', cart_unavailable: '购物车暂时不可用，请刷新页面。',
+    line_total: '小计',
+    toast_added: '已加入购物车',
+    cart_failed: '购物车更新失败，请重试。',
+    add_failed: '加入失败，请重试。',
+    shop_unreachable: '暂时无法连接商店，请检查网络后刷新。',
     waitlist_title: '上线状态',
-    waitlist_body: '销售和联系通道仍在准备，目前不会提交任何信息。',
-    waitlist_ph: '暂未启用邮箱收集', waitlist_cta: '查看上线状态', waitlist_no: '关闭',
-    nav_continue: '继续购物',
+    waitlist_body: '商品与购物车已启用，支付接通后即可结算。',
+    waitlist_cta: '查看上线状态', waitlist_no: '关闭',
+    waitlist_closed: '支付接通后即可结算。没有创建任何订单。',
   },
 };
 
@@ -281,124 +308,179 @@ function setLang(l) {
   applyI18n();
   renderCategoryBar();
   renderProducts();
-  updateCart();
+  renderProductModal();
+  renderCart();
 }
 
 // ===== State =====
-let cart = [];
+let products = [];
+let catalogState = 'loading';   // loading | ready | unavailable
+let regionId = '';
+let cart = null;
+let cartState = 'idle';         // idle | loading | ready | error
 let currentCategory = 'all';
 let currentSort = 'popular';
 let searchQuery = '';
 let displayedProducts = 8;
+let openProductId = null;
+let pendingVariantId = '';
+const cardVariant = {};
 
-const fmt = u => '$' + u.toFixed(2);
-
-// ===== Product Data (内置默认;后台 admin.html 保存的数据优先) =====
-const DEFAULT_PRODUCTS = []; // Fail closed until catalog.json is loaded.
-
-function loadProducts() { return DEFAULT_PRODUCTS; }
-
-let products = loadProducts();
-let catalogReady = false;
-
-// ===== Cart persistence:只存 id+qty,恢复时回填最新商品数据 =====
-function saveCart() {
-  try { localStorage.setItem(LS_CART, JSON.stringify(cart.map(i => ({ id: i.id, qty: i.qty })))); } catch (e) {}
-}
-
-function loadCart() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(LS_CART) || '[]');
-    cart = saved
-      .map(i => {
-        const p = products.find(x => x.id === i.id);
-        return p && p.active !== false ? { ...p, qty: PawSafe.quantity(i.qty) } : null;
-      })
-      .filter(Boolean);
-  } catch (e) { cart = []; }
-}
-
-// ===== Render =====
-const CATEGORY_LABELS = {
-  beds: { en: 'Beds', zh: '宠物床' },
-  scratchers: { en: 'Scratchers', zh: '猫抓板' },
-  dogs: { en: 'Dogs', zh: '狗狗用品' },
+// ===== Availability / price helpers =====
+const AVAILABILITY_KEYS = {
+  in_stock: 'in_stock', out_of_stock: 'out_of_stock', backorder: 'backorder', unknown: 'availability_unknown',
 };
+// store-api.js already reduced the raw variant to one of these states; the page
+// only translates it and decides whether the button may be used.
+const availabilityOf = variant => (variant && typeof variant.availability === 'string') ? variant.availability : 'unknown';
+const availabilityKey = variant => AVAILABILITY_KEYS[availabilityOf(variant)] || 'availability_unknown';
+const availabilityText = variant => t(availabilityKey(variant));
+// Only a *known* sold-out variant is blocked here. When the shop did not tell us
+// the stock level we let the attempt through and let the server be the
+// authority, instead of inventing an answer.
+const isAddable = variant => !!variant && ['in_stock', 'backorder', 'unknown'].includes(availabilityOf(variant));
 
+function selectedVariantFor(product) {
+  if (!product || !product.variants.length) return null;
+  const chosen = cardVariant[product.id];
+  return product.variants.find(v => v.id === chosen) || product.variants[0];
+}
+
+// ===== Render: catalog =====
 function renderCategoryBar() {
-  const cats = [...new Set(products.filter(p => p.active !== false).map(p => safeToken(p.category)).filter(Boolean))];
-  const label = c => {
-    const l = CATEGORY_LABELS[c];
-    if (!l) return safeHtml(c);
-    return typeof l === 'string' ? l : (l[lang] || l.en);
-  };
+  const section = document.getElementById('categorySection');
+  const groups = [...new Set(products.map(p => safeToken(p.group)).filter(Boolean))];
+  if (!groups.length) { section.classList.add('hidden'); document.getElementById('categoryBar').innerHTML = ''; return; }
+  section.classList.remove('hidden');
   document.getElementById('categoryBar').innerHTML =
-    `<button onclick="filterProducts('all', event)" class="category-btn active px-4 py-1.5 bg-slate-900 text-white rounded-full text-sm whitespace-nowrap">${t('cat_all')}</button>` +
-    cats.map(c =>
-      `<button onclick="filterProducts('${c}', event)" class="category-btn px-4 py-1.5 text-slate-600 rounded-full text-sm whitespace-nowrap hover:bg-slate-100">${safeHtml(label(c))}</button>`
+    `<button onclick="filterProducts('all', event)" class="category-btn px-4 py-1.5 bg-slate-900 text-white rounded-full text-sm whitespace-nowrap">${t('cat_all')}</button>` +
+    groups.map(g =>
+      `<button onclick="filterProducts('${g}', event)" class="category-btn px-4 py-1.5 text-slate-600 rounded-full text-sm whitespace-nowrap hover:bg-slate-100">${safeHtml(g)}</button>`
     ).join('');
 }
 
-function productImages(p) {
-  if (Array.isArray(p.images) && p.images.length) return p.images.map(safeUrl).filter(Boolean);
-  if (p.imageUrl) return [safeUrl(p.imageUrl)].filter(Boolean);
-  return [];
+function productVisual(product, iconClass, imgClass) {
+  const first = imgUrl(product.thumbnail || (product.images && product.images[0]) || '');
+  return first
+    ? `<img src="${first}" alt="${safeHtml(product.title)}" class="${imgClass}" loading="lazy">`
+    : `<i class="fas fa-box ${iconClass}"></i>`;
 }
 
-function productVisual(p, iconClass, imgClass) {
-  const imgs = productImages(p);
-  return imgs.length
-    ? `<img src="${imgs[0]}" alt="${safeHtml(p.name)}" class="${imgClass}" loading="lazy">`
-    : `<i class="fas ${safeIcon(p.icon)} ${iconClass}"></i>`;
+function variantPicker(product, onchange) {
+  if (product.variants.length < 2) return '';
+  const selected = selectedVariantFor(product);
+  return `<select onclick="event.stopPropagation()" onchange="${onchange}" class="w-full mb-2 px-2 py-1.5 border border-slate-200 rounded text-xs">
+    ${product.variants.map(v => `<option value="${safeToken(v.id)}"${selected && selected.id === v.id ? ' selected' : ''}>${safeHtml(v.title || v.sku || '')}${v.availability === 'out_of_stock' ? ' — ' + t('out_of_stock') : ''}</option>`).join('')}
+  </select>`;
 }
+
+function priceHtml(product) {
+  if (product.price === null) return `<span class="text-sm text-slate-400">—</span>`;
+  const prefix = product.priceVaries ? `<span class="text-xs text-slate-500 mr-1">${t('from_price')}</span>` : '';
+  return `${prefix}<span class="font-bold">${money(product.price)}</span>`;
+}
+
 function renderProducts() {
   const grid = document.getElementById('productGrid');
-  const live = products.filter(p => p.active !== false);
-  let filtered = currentCategory === 'all' ? [...live] : live.filter(p => p.category === currentCategory);
+  const loadMore = document.getElementById('loadMoreContainer');
 
-  if (searchQuery) {
-    filtered = filtered.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  if (catalogState === 'loading') {
+    grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-400">${t('loading')}</div>`;
+    loadMore.classList.add('hidden');
+    return;
   }
-
-  switch (currentSort) {
-    case 'price-low': filtered.sort((a, b) => a.price - b.price); break;
-    case 'price-high': filtered.sort((a, b) => b.price - a.price); break;
-  }
-
-  const displayed = filtered.slice(0, displayedProducts);
-
-  if (displayed.length === 0) {
-    grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-400">${t('no_products')}</div>`;
-    document.getElementById('loadMoreContainer').style.display = 'none';
+  if (catalogState === 'unavailable') {
+    grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-500">${t('catalog_unavailable')}</div>`;
+    loadMore.classList.add('hidden');
     return;
   }
 
-  grid.innerHTML = displayed.map(p => `
-    <div class="bg-white border border-slate-100 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow fade-in" onclick="location.href='product.html?id=${safeId(p.id)}'">
+  let filtered = currentCategory === 'all' ? [...products] : products.filter(p => p.group === currentCategory);
+  if (searchQuery) {
+    const needle = searchQuery.toLowerCase();
+    filtered = filtered.filter(p => p.title.toLowerCase().includes(needle));
+  }
+  switch (currentSort) {
+    case 'price-low': filtered.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity)); break;
+    case 'price-high': filtered.sort((a, b) => (b.price ?? -Infinity) - (a.price ?? -Infinity)); break;
+  }
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `<div class="col-span-full text-center py-12">
+      <i class="fas fa-box-open text-4xl text-slate-200 mb-4"></i>
+      <p class="text-slate-500 mb-1">${products.length === 0 ? t('no_products') : t('no_products_note')}</p>
+      ${products.length === 0 ? `<p class="text-xs text-slate-400">${t('no_products_note')}</p>` : ''}
+    </div>`;
+    loadMore.classList.add('hidden');
+    return;
+  }
+
+  const displayed = filtered.slice(0, displayedProducts);
+  grid.innerHTML = displayed.map(p => {
+    const variant = selectedVariantFor(p);
+    const addable = variant ? isAddable(variant) : false;
+    return `
+    <div class="bg-white border border-slate-100 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow fade-in" onclick="openProduct('${safeToken(p.id)}')">
       <div class="relative aspect-square bg-slate-50 flex items-center justify-center overflow-hidden">
         ${productVisual(p, 'text-5xl text-slate-300', 'absolute inset-0 w-full h-full object-cover')}
-        ${p.originalPrice > p.price ? `<span class="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">-${Math.round((1 - p.price / p.originalPrice) * 100)}%</span>` : ''}
       </div>
       <div class="p-3">
-        <h3 class="text-sm font-medium mb-2 line-clamp-2">${safeHtml(p.name)}</h3>
+        <h3 class="text-sm font-medium mb-1 line-clamp-2">${safeHtml(p.title)}</h3>
+        <p class="text-xs text-slate-400 mb-2">${variant ? safeHtml(availabilityText(variant)) : ''}</p>
+        ${variantPicker(p, `pickCardVariant('${safeToken(p.id)}', this.value)`)}
         <div class="flex items-center justify-between">
-          <div>
-            <span class="font-bold">${fmt(p.price)}</span>
-            ${p.originalPrice > p.price ? `<span class="text-xs text-slate-400 line-through ml-1">${fmt(p.originalPrice)}</span>` : ''}
-          </div>
-          <button onclick="event.stopPropagation(); addToCart(${safeId(p.id)})" class="w-7 h-7 bg-slate-900 text-white rounded flex items-center justify-center hover:bg-slate-700" aria-label="Add to cart">
+          <div>${priceHtml(p)}</div>
+          <button onclick="event.stopPropagation(); addToCart('${safeToken(p.id)}')" ${addable ? '' : 'disabled'} class="w-7 h-7 ${addable ? 'bg-slate-900 hover:bg-slate-700' : 'bg-slate-300 cursor-not-allowed'} text-white rounded flex items-center justify-center" aria-label="${t('add_to_cart')}">
             <i class="fas fa-plus text-xs"></i>
           </button>
         </div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
-  document.getElementById('loadMoreContainer').style.display =
-    filtered.length > displayedProducts ? 'block' : 'none';
+  if (filtered.length > displayedProducts) loadMore.classList.remove('hidden');
+  else loadMore.classList.add('hidden');
 }
 
-// ===== Search / Filter / Sort =====
+// ===== Render: product detail =====
+function openProduct(id) {
+  const product = products.find(p => p.id === id);
+  if (!product) return;
+  openProductId = product.id;
+  renderProductModal();
+  document.getElementById('productModal').classList.add('open');
+}
+function closeProduct() { openProductId = null; document.getElementById('productModal').classList.remove('open'); }
+
+function renderProductModal() {
+  if (!openProductId) return;
+  const product = products.find(p => p.id === openProductId);
+  if (!product) return;
+  const variant = selectedVariantFor(product);
+  const images = product.images.map(imgUrl).filter(Boolean);
+  const body = document.getElementById('productModalBody');
+  body.innerHTML = `
+    <div class="grid sm:grid-cols-2 gap-6">
+      <div>
+        ${images.length
+          ? `<div class="aspect-square bg-slate-50 rounded-lg overflow-hidden mb-3"><img src="${images[0]}" alt="${safeHtml(product.title)}" class="w-full h-full object-cover"></div>
+             ${images.length > 1 ? `<div class="flex gap-2 overflow-x-auto">${images.slice(1, 6).map(u => `<img src="${u}" class="w-14 h-14 object-cover rounded border border-slate-100">`).join('')}</div>` : ''}`
+          : `<div class="aspect-square bg-slate-50 rounded-lg flex items-center justify-center"><i class="fas fa-box text-5xl text-slate-300"></i></div>`}
+      </div>
+      <div>
+        <h2 class="text-xl font-bold mb-2">${safeHtml(product.title)}</h2>
+        ${product.subtitle ? `<p class="text-sm text-slate-500 mb-2">${safeHtml(product.subtitle)}</p>` : ''}
+        <div class="flex items-center gap-3 mb-2">${priceHtml(product)}</div>
+        <p class="text-xs text-slate-500 mb-4">${variant ? safeHtml(availabilityText(variant)) : ''}</p>
+        ${variantPicker(product, `pickModalVariant('${safeToken(product.id)}', this.value)`)}
+        ${variant && variant.sku ? `<p class="text-xs text-slate-400 mb-4">${t('sku')}: ${safeHtml(variant.sku)}</p>` : ''}
+        <button onclick="addToCart('${safeToken(product.id)}', true)" ${variant && isAddable(variant) ? '' : 'disabled'} class="w-full py-3 ${variant && isAddable(variant) ? 'bg-slate-900 hover:bg-slate-700' : 'bg-slate-300 cursor-not-allowed'} text-white text-sm font-medium rounded-lg mb-4">${t('add_to_cart')}</button>
+        ${product.description ? `<p class="text-sm text-slate-600 whitespace-pre-line">${safeHtml(product.description)}</p>` : ''}
+      </div>
+    </div>`;
+}
+
+// ===== Search / filter / sort =====
 let searchTimer;
 function handleSearch() {
   clearTimeout(searchTimer);
@@ -408,118 +490,172 @@ function handleSearch() {
     renderProducts();
   }, 300);
 }
-
 function loadMore() { displayedProducts += 8; renderProducts(); }
 
-function filterProducts(category, ev) {
-  currentCategory = category;
+function filterProducts(group, ev) {
+  currentCategory = group;
   displayedProducts = 8;
   document.querySelectorAll('.category-btn').forEach(b => {
     b.classList.remove('bg-slate-900', 'text-white');
     b.classList.add('text-slate-600');
   });
-  ev.target.classList.add('bg-slate-900', 'text-white');
-  ev.target.classList.remove('text-slate-600');
+  if (ev && ev.target) {
+    ev.target.classList.add('bg-slate-900', 'text-white');
+    ev.target.classList.remove('text-slate-600');
+  }
   renderProducts();
 }
-
 function sortProducts() {
   currentSort = document.getElementById('sortSelect').value;
   renderProducts();
 }
+function pickCardVariant(productId, variantId) { cardVariant[productId] = variantId; renderProducts(); }
+function pickModalVariant(productId, variantId) { cardVariant[productId] = variantId; renderProducts(); renderProductModal(); }
 
-
-// ===== Product Modal =====
-
-
-
-
-
-// ===== Cart =====
-function addToCart(id) {
-  const p = products.find(x => x.id === id);
-  if (!p) return;
-  const existing = cart.find(item => item.id === id);
-  if (existing) existing.qty++;
-  else cart.push({ ...p, qty: 1 });
-  updateCart();
-  showToast(t('toast_added'));
+// ===== Cart (real Medusa cart, guest checkout) =====
+function persistCartId(id) {
+  try {
+    if (id) localStorage.setItem(LS_CART_ID, id);
+    else localStorage.removeItem(LS_CART_ID);
+  } catch (_) {}
 }
 
-
-
-function removeFromCart(id) {
-  cart = cart.filter(item => item.id !== id);
-  updateCart();
+async function ensureRegion() {
+  if (regionId) return regionId;
+  const regions = await store.regions();
+  regionId = regions.length ? regions[0].id : '';
+  return regionId;
 }
 
-function updateCartQty(id, delta) {
-  const item = cart.find(i => i.id === id);
-  if (item) {
-    item.qty += delta;
-    if (item.qty < 1) removeFromCart(id);
-    else updateCart();
+async function ensureCart() {
+  if (cart && cart.id) return cart;
+  await ensureRegion();
+  const created = await store.createCart(regionId);
+  if (!created) throw new Error('cart_not_created');
+  cart = created;
+  persistCartId(cart.id);
+  return cart;
+}
+
+async function restoreCart() {
+  let stored = null;
+  try { stored = localStorage.getItem(LS_CART_ID); } catch (_) { stored = null; }
+  if (!stored) return;
+  cartState = 'loading';
+  renderCart();
+  const found = await store.getCart(stored);
+  if (found) { cart = found; cartState = 'ready'; }
+  else { cart = null; cartState = 'idle'; persistCartId(null); }
+}
+
+async function addToCart(productId, fromModal) {
+  const product = products.find(p => p.id === productId);
+  if (!product) return;
+  const variant = selectedVariantFor(product);
+  if (!variant) { showToast(t('add_failed')); return; }
+  pendingVariantId = variant.id;
+  renderProducts();
+  try {
+    await ensureCart();
+    cart = await store.addLineItem(cart.id, variant.id, 1);
+    cartState = 'ready';
+    persistCartId(cart.id);
+    renderCart();
+    showToast(t('toast_added'));
+    if (fromModal) closeProduct();
+  } catch (error) {
+    cartState = cart ? 'ready' : 'error';
+    renderCart();
+    showToast(error && error.kind === 'network' ? t('shop_unreachable') : t('add_failed'));
+  } finally {
+    pendingVariantId = '';
+    renderProducts();
   }
 }
 
-function updateCart() {
-  const count = cart.reduce((s, i) => s + i.qty, 0);
-  const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
+async function changeQty(lineId, delta) {
+  if (!cart) return;
+  const item = cart.items.find(i => i.id === lineId);
+  if (!item) return;
+  const next = item.quantity + delta;
+  try {
+    cart = next < 1 ? await store.removeLineItem(cart.id, lineId) : await store.updateLineItem(cart.id, lineId, next);
+    cartState = 'ready';
+    renderCart();
+  } catch (error) {
+    showToast(t('cart_failed'));
+  }
+}
 
+async function removeLine(lineId) {
+  if (!cart) return;
+  try {
+    cart = await store.removeLineItem(cart.id, lineId);
+    cartState = 'ready';
+    renderCart();
+  } catch (error) {
+    showToast(t('cart_failed'));
+  }
+}
+
+function renderCart() {
+  const items = cart ? cart.items : [];
+  const count = items.reduce((sum, item) => sum + item.quantity, 0);
   document.getElementById('cartCount').textContent = count;
   document.getElementById('cartItemCount').textContent = `(${count})`;
-  document.getElementById('cartSubtotal').textContent = fmt(total);
+  document.getElementById('cartSubtotal').textContent = money(cart && cart.subtotal !== null ? cart.subtotal : 0);
 
   const container = document.getElementById('cartItems');
-  if (cart.length === 0) {
+  if (cartState === 'loading') {
+    container.innerHTML = `<div class="text-center py-12 text-slate-400">${t('loading')}</div>`;
+    return;
+  }
+  if (cartState === 'error') {
+    container.innerHTML = `<div class="text-center py-12 text-slate-500">${t('cart_unavailable')}</div>`;
+    return;
+  }
+  if (!items.length) {
     container.innerHTML = `<div class="text-center py-12 text-slate-400">${t('cart_empty')}</div>`;
-  } else {
-    container.innerHTML = cart.map(item => `
-      <div class="flex gap-3 py-3 border-b border-slate-100 fade-in">
-        <div class="w-16 h-16 bg-slate-50 rounded flex-shrink-0 flex items-center justify-center overflow-hidden">
-          ${productVisual(item, 'text-2xl text-slate-300', 'w-full h-full object-cover')}
-        </div>
-        <div class="flex-1">
-          <h4 class="text-sm font-medium mb-1">${safeHtml(item.name)}</h4>
-          <div class="font-bold text-sm mb-2">${fmt(item.price)}</div>
-          <div class="flex items-center justify-between">
-            <div class="flex items-center border border-slate-200 rounded">
-              <button onclick="updateCartQty(${item.id}, -1)" class="w-6 h-6 flex items-center justify-center">-</button>
-              <span class="w-8 text-center text-sm">${item.qty}</span>
-              <button onclick="updateCartQty(${item.id}, 1)" class="w-6 h-6 flex items-center justify-center">+</button>
-            </div>
-            <button onclick="removeFromCart(${item.id})" class="text-slate-400 hover:text-red-500" aria-label="Remove">
-              <i class="fas fa-trash text-xs"></i>
-            </button>
+    return;
+  }
+  container.innerHTML = items.map(item => {
+    const thumb = imgUrl(item.thumbnail);
+    return `
+    <div class="flex gap-3 py-3 border-b border-slate-100 fade-in">
+      <div class="w-16 h-16 bg-slate-50 rounded flex-shrink-0 flex items-center justify-center overflow-hidden">
+        ${thumb ? `<img src="${thumb}" alt="${safeHtml(item.title)}" class="w-full h-full object-cover" loading="lazy">` : `<i class="fas fa-box text-2xl text-slate-300"></i>`}
+      </div>
+      <div class="flex-1 min-w-0">
+        <h4 class="text-sm font-medium mb-0.5 truncate">${safeHtml(item.title)}</h4>
+        ${item.variantTitle ? `<p class="text-xs text-slate-500 mb-0.5">${t('variant')}: ${safeHtml(item.variantTitle)}</p>` : ''}
+        ${item.sku ? `<p class="text-xs text-slate-400 mb-0.5">${t('sku')}: ${safeHtml(item.sku)}</p>` : ''}
+        <div class="text-sm mb-2">${money(item.unitPrice)} <span class="text-xs text-slate-400">× ${item.quantity}</span>${item.lineTotal === null ? '' : ` <span class="text-xs text-slate-500">= ${money(item.lineTotal)}</span>`}</div>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center border border-slate-200 rounded">
+            <button onclick="changeQty('${safeToken(item.id)}', -1)" class="w-6 h-6 flex items-center justify-center" aria-label="Decrease">-</button>
+            <span class="w-8 text-center text-sm">${item.quantity}</span>
+            <button onclick="changeQty('${safeToken(item.id)}', 1)" class="w-6 h-6 flex items-center justify-center" aria-label="Increase">+</button>
           </div>
+          <button onclick="removeLine('${safeToken(item.id)}')" class="text-slate-400 hover:text-red-500" aria-label="Remove">
+            <i class="fas fa-trash text-xs"></i>
+          </button>
         </div>
       </div>
-    `).join('');
-  }
-  if (catalogReady) saveCart();
+    </div>`;
+  }).join('');
 }
 
 function openCart() { document.getElementById('cartDrawer').classList.add('open'); }
 function closeCart() { document.getElementById('cartDrawer').classList.remove('open'); }
 
-// ===== Prelaunch sales gate =====
-function checkout() {
-  if (cart.length === 0) { showToast(t('cart_empty')); return; }
-  closeCart();
-  openWaitlist();
-}
+// ===== Checkout is closed: never create an order or a payment session =====
+function checkout() { showToast(t('waitlist_closed')); }
 
-// ===== Waitlist(免费预留,零资金验证需求) =====
-let waitlistProductId = null;
-
-function openWaitlist(productId) {
-  waitlistProductId = productId || null;
-  document.getElementById('waitlistModal').classList.add('open');
-}
-
+// ===== Launch status =====
+function openWaitlist() { document.getElementById('waitlistModal').classList.add('open'); }
 function submitWaitlist() {
   document.getElementById('waitlistModal').classList.remove('open');
-  showToast(lang === 'zh' ? '联系通道正在准备，未提交任何信息' : 'Contact channel coming soon — no information was submitted');
+  showToast(t('waitlist_closed'));
 }
 
 // ===== Utility =====
@@ -527,13 +663,16 @@ function showToast(message) {
   const toast = document.getElementById('toast');
   document.getElementById('toastText').textContent = message;
   toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2000);
+  setTimeout(() => toast.classList.remove('show'), 2500);
 }
-
 function toggleMobileMenu() { document.getElementById('mobileMenu').classList.toggle('hidden'); }
 
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') { closeCart(); document.getElementById('waitlistModal').classList.remove('open'); }
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    closeCart();
+    closeProduct();
+    document.getElementById('waitlistModal').classList.remove('open');
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault();
     document.getElementById('searchInput')?.focus();
@@ -541,37 +680,36 @@ document.addEventListener('keydown', function(e) {
 });
 
 document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-  anchor.addEventListener('click', function(e) {
+  anchor.addEventListener('click', function (e) {
     const href = this.getAttribute('href');
     const target = href === '#' ? null : document.querySelector(href);
     if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth' }); }
   });
 });
 
-// ===== 共享商品目录:全设备一致的真相源(catalog.json) =====
-fetch('catalog.json?v=' + Date.now()).then(r => r.ok ? r.json() : null).then(j => {
-  if (!Array.isArray(j)) throw new Error('Catalog unavailable');
-  {
-    products = PawSafe.catalog(j);
-    catalogReady = true;
-    currentCategory = 'all';
-    displayedProducts = 8;
-    loadCart();
-    renderCategoryBar();
-    renderProducts();
-    updateCart();
+// ===== Bootstrap: region -> products -> cart =====
+async function bootstrap() {
+  try { await ensureRegion(); } catch (_) { regionId = ''; }
+  try {
+    const result = await store.products(regionId, 50);
+    products = result.products;
+    catalogState = 'ready';
+  } catch (_) {
+    products = [];
+    catalogState = 'unavailable';
   }
-}).catch(() => {
-  document.getElementById('productGrid').innerHTML = `<p class="col-span-full text-center py-12 text-slate-500">${lang === 'zh' ? '商品目录暂时无法加载，请稍后刷新。' : 'The catalog is temporarily unavailable. Please refresh later.'}</p>`;
-});
+  renderCategoryBar();
+  renderProducts();
+  renderCart();
+  try { await restoreCart(); } catch (_) { cart = null; cartState = 'error'; }
+  renderCart();
+}
 
-// ===== Init =====
 document.getElementById('langSelect').value = lang;
 applyI18n();
-renderCategoryBar();
 renderProducts();
-loadCart();
-updateCart();
+renderCart();
+bootstrap();
 </script>
 
 </body>

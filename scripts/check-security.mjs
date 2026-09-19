@@ -19,7 +19,7 @@ const deployedPages = [
 const legacyPages = ['account.html', 'admin.html', 'dashboard.html'];
 
 const allPages = [...deployedPages, ...legacyPages];
-const publicFiles = [...allPages, 'config.js', 'support.js'];
+const publicFiles = [...allPages, 'config.js', 'support.js', 'safe.js', 'store-api.js'];
 
 const forbidden = [
   ['published demo password', /pawshop2026/i],
@@ -27,7 +27,12 @@ const forbidden = [
   ['browser AI secret', /pawshop_glm_key/i],
   ['browser image-host secret', /pawshop_imgbb_key/i],
   ['fake order success', /Order placed!|订单已提交|ORDER SAVED/i],
-  ['client-side payment choice', /name=["']payment["']|PayPal balance or card|Visa \/ Mastercard \/ Amex/i]
+  ['client-side payment choice', /name=["']payment["']|PayPal balance or card|Visa \/ Mastercard \/ Amex/i],
+  // Checkout is not connected yet. A storefront must not be able to complete a
+  // cart, open a payment session, or pick a payment provider on its own.
+  ['storefront completes a cart', /\/complete\b|completeCart|placeOrder/i],
+  ['storefront touches payment sessions', /payment[-_]?sessions?|payment[-_]?collection/i],
+  ['storefront sends customer credentials', /emailpass|customer\/register|\/auth\/customer/i]
 ];
 
 const failures = [];

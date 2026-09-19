@@ -46,7 +46,10 @@ function boot(file, saved = []) {
   };
 }
 
-for (const page of ['PawShop.html', 'product.html']) {
+// PawShop.html is no longer covered here: it now renders the live Medusa
+// catalog and cart, and its contracts live in tests/storefront.test.mjs. This
+// file keeps the pages that are still driven by catalog.json.
+for (const page of ['product.html']) {
   test(`${page}: no demo catalog on initial load or fetch failure`, async () => {
     const app = boot(page, [{ id: 1, qty: 2 }]);
     assert.equal(app.run('loadProducts().length'), 0);
@@ -62,7 +65,7 @@ for (const page of ['PawShop.html', 'product.html']) {
     assert.equal(app.run('cart.length'), 1);
     assert.equal(app.run('cart[0].qty'), 1);
     assert.equal(app.run('PawSafe.catalog([{id: 2, name: "Hidden", price: 1, availability: "prelaunch", active: false}]).length'), 0);
-    const markup = app.nodes.get(page === 'PawShop.html' ? 'productGrid' : 'pdp').innerHTML;
+    const markup = app.nodes.get('pdp').innerHTML;
     assert.ok(markup.includes('&lt;img'));
     assert.ok(!markup.includes('src="https://i.ibb.co/x" onerror='));
     assert.ok(!app.nodes.get('cartItems').innerHTML.includes('<img src=x onerror='));
@@ -76,19 +79,18 @@ for (const page of ['PawShop.html', 'product.html']) {
   test(`${page}: hidden products and empty catalogs do not reappear`, async () => {
     const app = boot(page);
     await app.load([{ ...product, active: false }]);
-    assert.equal(app.run(page === 'PawShop.html' ? 'products.length' : 'loadProducts().length'), 0);
-    if (page === 'product.html') assert.equal(app.run('currentProduct'), null);
+    assert.equal(app.run('loadProducts().length'), 0);
+    assert.equal(app.run('currentProduct'), null);
     const empty = boot(page);
     await empty.load([]);
-    assert.equal(empty.run(page === 'PawShop.html' ? 'products.length' : 'loadProducts().length'), 0);
+    assert.equal(empty.run('loadProducts().length'), 0);
   });
 
   test(`${page}: malformed catalog responses preserve the saved list`, async () => {
     const app = boot(page, [{ id: 1, qty: 2 }]);
     await app.load({ error: 'unavailable' });
     assert.equal(app.storage.get('pawshop_cart'), '[{"id":1,"qty":2}]');
-    const id = page === 'PawShop.html' ? 'productGrid' : 'pdp';
-    assert.ok(app.nodes.get(id).innerHTML.includes('temporarily unavailable'));
+    assert.ok(app.nodes.get('pdp').innerHTML.includes('temporarily unavailable'));
   });
 }
 
@@ -113,7 +115,7 @@ test('product.html keeps unknown product URLs out of the index', async () => {
 });
 
 test('safe helpers reject malformed catalog fields and dangerous URL schemes', () => {
-  const { context } = boot('PawShop.html');
+  const { context } = boot('product.html');
   const safe = context.PawSafe;
   for (const input of ['', null, undefined, 'javascript:alert(1)', 'data:text/html,hi']) assert.equal(safe.url(input), '');
   assert.equal(safe.url('https://images.example/photo.png'), '');
