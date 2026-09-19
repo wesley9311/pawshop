@@ -58,9 +58,9 @@
 
 ### 任务 B：后台暴露 (b)（**✅ 2026-09-19 02:35 上线并全链路验收**）
 
-nginx 已开三段反代：`/admin/`（Basic + Medusa 会话双层）、`/auth/user/`（Basic，登录入口）、`location = /auth/session`（**有意不叠 Basic**——一个请求只有一个 `Authorization` 头，这端点靠 Medusa 验 Bearer JWT 自鉴权，而 JWT 只能从被 Basic 闸住的登录拿到）。实测的完整链路：登录 200 → 换 `connect.sid` cookie → 调 `/admin/users/me` 200（认出店主账号）→ 去 Basic 401 → 登出后旧 cookie 401。回归全对（`/`·`/sitemap.xml` 200，`/app`·`/store/*` 404），监控 12/12。设计、验收、轮换、回滚见 `RUNBOOK.md` §14。**Basic 口令在主机 `/root/pawshop-admin-basic-auth.json`**（用户名 `owner`）。注意：文档早前写的 `/admin-api/` 是泛称，这个 Medusa 版本的真实前缀是 `/admin/`。**前置已满足，任务 C 可以开工。**
+nginx 已开三段反代：`/admin/`（Basic + Medusa 会话双层）、`/auth/user/`（Basic，登录入口）、`location = /auth/session`（**有意不叠 Basic**——一个请求只有一个 `Authorization` 头，这端点靠 Medusa 验 Bearer JWT 自鉴权，而 JWT 只能从被 Basic 闸住的登录拿到）。实测的完整链路：登录 200 → 换 `connect.sid` cookie → 调 `/admin/users/me` 200（认出店主账号）→ 去 Basic 401 → 登出后旧 cookie 401。回归全对（`/`·`/sitemap.xml` 200，`/app`·`/store/*` 404——其中 **`/app` 的公网 404 只到 2026-09-19 白天为止**，当晚起经 `/console/` 对公网开放，见 `RUNBOOK.md` §14.4/§14.5），监控 12/12。设计、验收、轮换、回滚见 `RUNBOOK.md` §14。**Basic 口令在主机 `/root/pawshop-admin-basic-auth.json`**（用户名 `owner`）。注意：文档早前写的 `/admin-api/` 是泛称，这个 Medusa 版本的真实前缀是 `/admin/`。**前置已满足，任务 C 可以开工。**
 
-### 任务 C：中文运营台（**店主 2026-09-19 已点头开工**）
+### 任务 C：中文运营台（**店主 2026-09-19 已点头，但同日起随"首笔真实订单"目标暂停，未开工**）
 
 分三步，风险递增：**只读看板**（订单/库存/销售）→ **商品上架**（草稿默认不公开）→ **发货与退款**。前置任务 B 已通（浏览器现在能调到 Admin API）。见 C 节。
 

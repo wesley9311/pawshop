@@ -733,6 +733,23 @@ PAWSHOP_RELEASE_ID=<RELEASE_SHA> PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1 \
 
 ---
 
+**第三次生产实跑：2026-09-19，成功**（`19c2131`，改的是 Admin 前端基址这一行配置，根因见 **§14.5**）：
+
+| 项 | 值 |
+| --- | --- |
+| `RELEASE_ID` | `19c21310b9c9080d206eaff34aecd9f4b191186c` |
+| `RELEASE_CONTENT_SHA256` | `7752a362cf6bff26e6bdc92d7858acbda744656c4020f5c21e6b907bc54ca16d` |
+| `predecessor_release_id` | `cddfab59c53a8b3217b232db506b39fe6e9fa054` |
+| 迁移前 → 迁移后 | **147 关系 → 147 关系**（一行未少、一个关系未消失） |
+| 唯一执行的迁移脚本 | `@medusajs/medusa` 的 `create-super-admin-role.js` |
+| 1.5 / 1.6 就位核对 | 4 个 libexec + 10 个单元**全部 cmp 通过**，无需手工安装（本次没改它们） |
+| 前端构建 | 124.42s（后端 16.04s） |
+| 激活后验收 | `NRestarts=0`；监控 **12/12**；`/console/`→`302`、无凭据 `/app/`→`401`、带凭据→`200`；新 bundle 里 `127.0.0.1:9000` 计数 **0**；`/health`·`/pawshop-runtime`·`/admin.html`→`404`；Store API `400`、落地页 `200` 不变；边界验收逐字 `Production storefront boundary passed: … customer commerce is open.` |
+| 端到端（带浏览器同源 `Origin` 头） | `POST /auth/user/emailpass`→`200`（token 504 字符）→`POST /auth/session`→`200`（`connect.sid` 1 条）→6 个 `/admin/*` 全 `200`；**只有 Basic 无会话时 `/admin/products` 仍 `401`** |
+| 档位 | 全程保持 `production-storefront` 不动（§15.2 的规矩：发版不改档位，回滚才安全） |
+
+**本轮确认的两件事**：① §11.2 的 1.5/1.6 两步**只在"本次 release 改了 libexec 或单元文件"时才动手**——本轮两者都没改，cmp 自然收敛，照跑核对即可；② 本轮 4 段长活（准备 / 升级迁移 / 备份演练 / 激活）依然 `setsid` 脱离会话跑，但**只有准备那段是我自己套的 `PREPARE_EXIT=` 包装**，脚本本身不打退出标记，看日志末行 `…prepared without activation:` 与 `UPGRADE_EXIT=` / `DRILL_EXIT=` / `DEPLOY_EXIT=` 判成败。
+
 ## 12. 「忘记密码」发信通道（生产主机，root）
 
 Medusa 只发 `auth.password_reset` 事件，框架自带订阅者只处理 `order.created`，默认通知 provider 只写日志——所以后台点"忘记密码"回 201 却一封都不发。投递由 `_commerce/src/subscribers/password-reset.ts` + `src/lib/email-channel.cjs` + `src/lib/smtp-client.cjs`（零依赖、RFC 5321 子集）完成。
@@ -1036,7 +1053,7 @@ nginx 在 `pawlivora.com` 下新开三段反代（都在 `/etc/nginx/sites-avail
 
 - `/console/…` → `302` → `/app/…`（入口留给店主，深链接同样跳转）
 - `/app/…` → 反代到 `127.0.0.1:9000`，叠**与 `/admin/` 同一份** Basic（同 realm，浏览器只问一次）
-- UI 的 API 基址是**同源**（bundle 里 `e===""||e==="/" ? window.location.origin : e`），所以从公网打开时它自己会去调 `https://pawlivora.com/admin/*`——正好落在既有那段反代上。**不需要改前端、不需要重新构建。**
+- UI 的 API 基址**必须是同源**（bundle 里 `e===""||e==="/" ? window.location.origin : e`）：同源时它自己去调 `https://pawlivora.com/admin/*`，正好落在既有那段反代上。**但"同源"不是当时那份 bundle 的现状**——那次的 bundle 里烤的是 `http://127.0.0.1:9000`，所以"过完 Basic 却出不来登录框"。修法与不变量见 **§14.5**。
 - `302` 而不是 `301`：以后若重建到别的路径，浏览器里那条永久缓存会把你挡住。
 
 **密码重置邮件仍指向回环**（`ADMIN_ORIGIN=http://127.0.0.1:9000`，`password-reset.js` 用它拼链接）：点邮件里的链接仍然要先开隧道，**或手工把 `127.0.0.1:9000` 换成 `pawlivora.com`**。改 `ADMIN_ORIGIN` 会牵到 `http.adminCors` 且需要重启 commerce，**本轮没改**（超出"只做 nginx"的范围）。
@@ -1047,7 +1064,7 @@ nginx 在 `pawlivora.com` 下新开三段反代（都在 `/etc/nginx/sites-avail
 | --- | --- |
 | 无凭据 `/console`、`/console/`、`/console/products` | `302` → `https://pawlivora.com/app/`、`/app/products` |
 | 无凭据 `/app/`、`/app/products`、`/app/assets/index-*.js` | `401` + `WWW-Authenticate: Basic realm="PawShop Admin"` |
-| 带凭据 `/app/` | `200`，外壳引用 `/app/assets/index-BkAUcf-y.js` |
+| 带凭据 `/app/` | `200`，外壳引用的主 bundle 随 release 变名（本表原记 `index-BkAUcf-y.js`；`19c2131` 起是 `index-C70wRclE.js`） |
 | 带凭据 `/app/assets/*.js`、`*.css` | `200`，`application/javascript` / `text/css` |
 | 带凭据 `/app/products`、`/app/products/create`、`/app/orders`、`/app/inventory` | `200`（SPA 兜底） |
 | 全链路：Basic → `POST /auth/user/emailpass` → `POST /auth/session` | token 504 字符；`connect.sid` 94 字符 |
@@ -1062,6 +1079,48 @@ nginx 在 `pawlivora.com` 下新开三段反代（都在 `/etc/nginx/sites-avail
 > 图片上传走 `admin/uploads`（bundle 里是相对路径 `admin/uploads` 与 `/admin/uploads/…`）→ 落在既有 `/admin/` 段，**已带 Basic 与 20 MB 体积上限**，无需新开 location。
 
 **回滚**：删掉 `location = /console`、`location ^~ /console/`、`location = /app`、`location ^~ /app/` 四段（或 `cp /root/pawshop-nginx-pawshop.bak-<TS> /etc/nginx/sites-available/pawshop`），再 `nginx -t && systemctl reload nginx`。删掉后 `/app` 立刻回到"公网 404、只能走隧道"。
+
+### 14.5 ⚠️ Admin 的 API 基址必须同源：一个被隧道掩盖了很久的构建期 bug（2026-09-19，release `19c2131`）
+
+**症状**：店主过完 Basic，第二道门不是登录表单，而是一句 **"请在你的 Medusa 配置中注册一个认证提供者，以便能够进行登录。"**
+
+**先排除掉的错误方向**：这不是认证配置问题。同一时刻从公网实测 `GET /auth/user/providers` → `200`，返回 `emailpass` / `flow=credentials`，与回环直连一字不差；`user` actor 的 emailpass provider 从来没缺过，也不需要加 `authMethodsPerActor`。
+
+**真正断点**：**浏览器里一条 `/auth/*` 请求都没发出去**。店主那次访问的 nginx 日志里只有 `/app/`、CSS、主 bundle、login 分块、字体，`/auth/*` **零条**——所以问题在"页面根本没去问服务器"，不在服务器答了什么。
+
+**根因：把服务端用的回环地址喂给了前端构建**（`medusa-config.ts` 与框架默认值的关系）：
+
+```
+adminCors = explicitOrigin(ADMIN_ORIGIN)   # http://127.0.0.1:9000；拓扑校验强制回环
+      ↓ medusa-config.ts: admin: { backendUrl: projectConfig.http.adminCors }
+admin-bundler: define __BACKEND_URL__ = JSON.stringify(options.backendUrl ?? "")   # 官方默认 = 空串
+      ↓ dashboard: const backendUrl = __BACKEND_URL__ ?? "/"
+js-sdk getBaseUrl: passedBaseUrl === "" || passedBaseUrl === "/" ? window.location.origin : passedBaseUrl
+```
+
+于是 bundle 里被烤成 `hGe="http://127.0.0.1:9000"` / `$ft="http://127.0.0.1:9000"`（两个客户端实例）。**UI 去调"访问者自己电脑上"的 9000 端口**：
+
+- 隧道时代为什么看着正常：他笔记本的 `127.0.0.1:9000` 正好是那条 `-L` 隧道，SDK 歪打正着打中了服务器；
+- 公网时代为什么必死：隧道没开 → 连接被拒 → provider 列表为空 → 界面渲染上面那句话；
+- 为什么服务器日志一片干净：那个请求**根本没离开他的浏览器**。
+
+**最小修法（一行）**：`admin: { backendUrl: '' }`。空串就是 Medusa 自己的默认值，语义是"跟随页面来源"，**隧道（`http://127.0.0.1:9000`）与公网（`https://pawlivora.com`）两条路同时正确**——绝对地址只能满足其中一条。
+
+**为什么不需要动 CORS**：框架的 CORS 中间件是**非拒绝式**的（实测带 `Origin: https://pawlivora.com` 的预检返回 `204`，但不给 `Access-Control-Allow-Origin`），而**同源请求完全不受 CORS 约束**。所以 `adminCors` / `authCors` 保持回环不变——它俩还是 `password-reset.ts` 拼链接的 origin（§14.4 那条"密码重置仍指向回环"的由来）。
+
+> **先例**：这行配置在 `cddfab5` 及更早的所有 release 里都是错的。**改完不能只看"构建成功"或"服务端 curl 全绿"**——curl 从不执行 bundle，永远复现不了这个 bug。
+
+**不变量（下次改 admin 相关配置时照此判）**：
+
+1. `admin.backendUrl` **必须是空串**（或干脆不写）。**不要把它指向任何绝对 origin**，也不要复用 `http.adminCors`。
+2. `http.adminCors` / `authCors` = **服务端 CORS 白名单 + 密码重置链接 origin**，与前端基址**无关**。
+3. **发版后必须验证"烤进去的值"**（拿不准就对照上一个 release）：
+
+```bash
+D=/srv/pawshop-commerce/current/_commerce/.medusa/server/public/admin/assets
+grep -ohE "hGe=[^,;]{0,30}|[$]ft=[^,;]{0,30}" $D/index-*.js    # 期望 hGe="" / $ft=""
+grep -o "127.0.0.1:9000" $D/index-*.js | wc -l                 # 期望 0
+```
 
 ## 15. 开店与关店（storefront profile，2026-09-19 上线）
 
