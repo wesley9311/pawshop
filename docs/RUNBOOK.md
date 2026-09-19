@@ -1006,7 +1006,7 @@ nginx 在 `pawlivora.com` 下新开三段反代（都在 `/etc/nginx/sites-avail
 
 **为什么 `/auth/session` 不叠 Basic**：HTTP 一个请求只有一个 `Authorization` 头。运营台登录流程是「Basic+密码 → JWT → **Bearer JWT 调 `/auth/session` 换 `connect.sid` cookie** → 之后所有 `/admin/` 请求 = Basic（浏览器自动带）+ cookie」。若 `/auth/session` 也要 Basic，第二步就无处放 Bearer（实测死锁 401）。该端点自身的鉴权就是 Medusa 验 Bearer JWT——而 JWT 只可能从被 Basic 闸住的登录拿到，所以不降安全。
 
-**限速**（`/etc/nginx/conf.d/pawshop-admin-ratelimit.conf`）：`pawshop_admin_api` 120r/m burst=40（管理 API 正常用量）；`pawshop_admin_login` 10r/m burst=5（登录与会话创建）。
+**限速**（`/etc/nginx/conf.d/pawshop-admin-ratelimit.conf`）：`pawshop_admin_api` 120r/m burst=40（管理 API 正常用量）；`pawshop_admin_login` 10r/m burst=5（登录与会话创建）；`pawshop_console_ui` 600r/m burst=120（后台 UI 外壳与它的分块，见 §14.4）。
 
 **文件**：`/etc/nginx/pawshop-admin.htpasswd`（apr1 加盐哈希，`root:www-data 0640`）；**明文口令只存主机 `/root/pawshop-admin-basic-auth.json`（0600）**，用户名 `owner`。给店主的方式：他 SSH 上去 `cat` 这个文件。
 
@@ -1027,6 +1027,41 @@ nginx 在 `pawlivora.com` 下新开三段反代（都在 `/etc/nginx/sites-avail
 ```
 
 注意：`deploy-static.sh` / `deploy-commerce.sh` 都**不碰** `sites-available/pawshop`，此配置独立于两套发版。
+
+### 14.4 后台 UI 的公网入口：`https://pawlivora.com/console/`（2026-09-19）
+
+**它解决什么**：`/admin/` 只是 API，UI 一直在回环上，店主每次运营都得先开一条 `-L` 隧道；隧道会断、macOS 会睡、换网络会断，表现就是"本地 `127.0.0.1` 拒绝连接"。现在 UI 本身也经 nginx 出来，店主只需要一个网址。
+
+**为什么是"跳转"而不是把 UI 搬到 `/console/` 下**：Admin 前端把路由前缀**编译死**在 `/app`（bundle 里 `basename:"/app"`，分块加载器是 `"/app/"+name`，`index.html` 的 `src`/`href` 也是 `/app/assets/…`）。浏览器地址不在 `/app` 下时 React Router 的 `stripBasename` 返回 `null`，界面会直接渲染"页面不存在"。所以：
+
+- `/console/…` → `302` → `/app/…`（入口留给店主，深链接同样跳转）
+- `/app/…` → 反代到 `127.0.0.1:9000`，叠**与 `/admin/` 同一份** Basic（同 realm，浏览器只问一次）
+- UI 的 API 基址是**同源**（bundle 里 `e===""||e==="/" ? window.location.origin : e`），所以从公网打开时它自己会去调 `https://pawlivora.com/admin/*`——正好落在既有那段反代上。**不需要改前端、不需要重新构建。**
+- `302` 而不是 `301`：以后若重建到别的路径，浏览器里那条永久缓存会把你挡住。
+
+**密码重置邮件仍指向回环**（`ADMIN_ORIGIN=http://127.0.0.1:9000`，`password-reset.js` 用它拼链接）：点邮件里的链接仍然要先开隧道，**或手工把 `127.0.0.1:9000` 换成 `pawlivora.com`**。改 `ADMIN_ORIGIN` 会牵到 `http.adminCors` 且需要重启 commerce，**本轮没改**（超出"只做 nginx"的范围）。
+
+**验收（2026-09-19 实测，全部走真实公网 vhost）**：
+
+| 检查 | 结果 |
+| --- | --- |
+| 无凭据 `/console`、`/console/`、`/console/products` | `302` → `https://pawlivora.com/app/`、`/app/products` |
+| 无凭据 `/app/`、`/app/products`、`/app/assets/index-*.js` | `401` + `WWW-Authenticate: Basic realm="PawShop Admin"` |
+| 带凭据 `/app/` | `200`，外壳引用 `/app/assets/index-BkAUcf-y.js` |
+| 带凭据 `/app/assets/*.js`、`*.css` | `200`，`application/javascript` / `text/css` |
+| 带凭据 `/app/products`、`/app/products/create`、`/app/orders`、`/app/inventory` | `200`（SPA 兜底） |
+| 全链路：Basic → `POST /auth/user/emailpass` → `POST /auth/session` | token 504 字符；`connect.sid` 94 字符 |
+| Basic + cookie：`/admin/users/me`、`/admin/products`、`/admin/orders`、`/admin/inventory-items`、`/admin/stores`、`/admin/regions`、`/admin/product-categories`、`/admin/sales-channels` | 全部 `200` |
+| 只有 Basic、不带 cookie → `/admin/products` | `401`（鉴权没被绕开） |
+| 首屏突发 60 个请求 | 全部 `200`，**0 个 429** |
+| 路径穿越 `/app/../health`、`/console/../health` | `404`（被 nginx 归一化，没溜到 `/health`） |
+| `/health`、`/pawshop-runtime`、`/admin.html` | 仍 `404` |
+| `/store/*`、`/`、`/PawShop.html` | 不变（`400` / `200` / `200`） |
+| 监控 | `12/12`（`admin_requires_auth` 探的是回环，与本次改动无关） |
+
+> 图片上传走 `admin/uploads`（bundle 里是相对路径 `admin/uploads` 与 `/admin/uploads/…`）→ 落在既有 `/admin/` 段，**已带 Basic 与 20 MB 体积上限**，无需新开 location。
+
+**回滚**：删掉 `location = /console`、`location ^~ /console/`、`location = /app`、`location ^~ /app/` 四段（或 `cp /root/pawshop-nginx-pawshop.bak-<TS> /etc/nginx/sites-available/pawshop`），再 `nginx -t && systemctl reload nginx`。删掉后 `/app` 立刻回到"公网 404、只能走隧道"。
 
 ## 15. 开店与关店（storefront profile，2026-09-19 上线）
 
