@@ -10,6 +10,14 @@
 
 ## 0. 当前没有阻塞项；关键路径交回店主
 
+**2026-09-19 第三轮结项（本轮）：落地页接上了真实 Store API（P0-5 完成）**，静态站发版 `0422cb5`。新增 `store-api.js`（列商品 / 读购物车 / 建购物车），`PawShop.html` 改为按真实商品与真实游客购物车渲染（刷新能找回同一台 cart），`config.js` 带上 publishable key 与图床白名单，`safe.js` 新增只放行自有域名与白名单图床的 `image()`。**产品目录是空的（`products=0`），所以前台如实显示"暂无可购买的商品"——没有任何演示商品、没有回退目录**；`check:security` 新增三条禁令（`/complete`、支付会话、顾客账号）把"越长越大"挡在门外。
+
+**实测（不是推测）**：本地门禁全绿（`npm run check` **26/26**，含 10 项新前台契约测试，`check:security` 与 `check:html` 通过）；真实浏览器（无头 Chrome）打开 `https://pawlivora.com/PawShop.html`，网络日志里确有一次 `GET /store/products?...&region_id=reg_01M2W4PYEVVYAGCY4RHAP7Q0HH` → **200 / 0 商品**，DOM 渲染 `no_products`（"店空着"）而**非** `catalog_unavailable`（"店坏了"）；`POST /store/carts` 建出真购物车、`GET /store/carts/{id}` 回读一致、不存在的 cart 解析为 `null`、假 variant 被 **400** 拒；无 key 仍 **400**；发版后监控 **12/12**。
+
+**这一轮的边界（明确不做）**：支付、订单、顾客账号、Stripe、`/hooks/payment/` 反代、运营台，一律没碰。**下一步的真实阻塞仍在店主**：① 进后台建首件商品（P0-3，只有他能做）→ 前台会自动显示，不需要我再发版；② 收款主体的决定（P0-6 的前置）。
+
+**P0-5 的已知留白（只记录，不顺手做）**：`catalog.json` 现在是"发版探针的凭证"而非前台数据源，属无害死重；`product.html` 仍走静态目录，两台前台并存。
+
 **2026-09-19 第二轮结项（本轮）**：**顾客侧 API 已对公网开放**，随 `cddfab5` 走**升级路径**（不清库）上线：准备 release → 升级迁移（**147 关系 / 601 行一行未少**）→ 迁移后加密备份 + 异地精确版本回读 + 隔离恢复演练 → 合闸 → 激活 → 开门三件（nginx `/store/` 反代 + `PAWSHOP_MODE=production-storefront` + 监控 `store_api_open` 换真 key）→ 监控 12/12。对外实测：带真 key `/store/products` **200**、无 key **400**、`POST /store/carts` **200 并真的建出购物车**（USD / 美国 region）；`/admin/*` 仍 **401**。升级窗口期间**一条告警都没发**（停机窗口正好落在两次巡检之间）。
 
 **本轮顺带修掉一个真故障（它由"开门"这一步暴露）**：单元的启动就绪门 `verify-production-admin.mjs` 把档位写死成 admin-only，开门后**每次启动都失败 → 无限重启**（实测 `NRestarts` 涨到 3）。同一处写死还在 4 个店主账号脚本里（开门后建账号/找回密码/两项验收会全部拒跑）。两处都已改并加了契约测试，见 `RUNBOOK.md` §15.5。

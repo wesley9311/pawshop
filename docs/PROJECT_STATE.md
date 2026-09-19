@@ -13,7 +13,7 @@
 | 层 | 实际技术 | 状态 |
 | --- | --- | --- |
 | 公开前端 | 静态 HTML（PawShop.html / product.html 等 8 页）+ 原生 JS + Tailwind CSS 3.4（构建产物） | DONE（本地）；线上展示站 DONE |
-| 前端渲染方式 | 无框架 SPA/SSR，纯静态 + 客户端 catalog.json 渲染 | DONE |
+| 前端渲染方式 | 无框架 SPA/SSR，纯静态；**`PawShop.html` 自 2026-09-19 起改由 Medusa Store API 驱动**（新增 `store-api.js`，同源调 `/store/*`），其余页面仍走静态 `catalog.json` | DONE |
 | 后端 | `_commerce/` Medusa.js **2.21.0**（2026-09-16 由 2.19.0 升级，Node 22，TypeScript） | DONE（本地）；生产未激活 |
 | 包管理 | npm（根目录与 `_commerce/` 各自独立 package.json + lockfile） | DONE |
 | 数据库 | PostgreSQL 17（本地 127.0.0.1:54329；生产 127.0.0.1:5432 已安装未迁移） | DONE（本地）；生产 UNVERIFIED |
@@ -32,11 +32,11 @@
 ```
 访客
  ↓ https://pawlivora.com（HTTPS 强制重定向，verify:production 已验证）
-主页 PawShop.html（商品展示，catalog.json 驱动，1 个活跃商品）
+主页 PawShop.html（商品来自**真实 Medusa Store API**；当前 `products=0`，因此如实显示"暂无可购买的商品"）
  ↓
 商品详情 product.html（9 张自托管图片，USD 29.90，prelaunch 状态）
  ↓
-注册/登录/购物车/下单/支付 —— 全部刻意关闭（README + check:security 门禁）
+注册/登录/下单/支付 —— 仍刻意关闭（README + check:security 门禁）；**游客购物车已接真实 Medusa cart**，结账停在"支付未接线"
  ↓
 （无公开用户功能；account/admin/dashboard 页面线上 404）
  ↓

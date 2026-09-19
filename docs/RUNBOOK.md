@@ -1141,3 +1141,27 @@ curl -s -H "x-publishable-api-key: $K" https://pawlivora.com/store/regions   # 2
 > `@medusajs/payment/dist/providers/system.js` 里 `getStatus()` 恒返回 `authorized`、`authorizePayment()` 恒返回 `AUTHORIZED`、`capturePayment()` 是**空操作**——也就是说它**不收任何钱就把订单走完**。它只适合本地环境、或**关店窗口**里做一次性流程演练，**演练完必须立刻从 region 移除**。店开着时把它挂上去 = 白送商品。
 > （`payment_provider` 表里有 `pp_system_default` 且 `is_enabled=t` 是模块注册的默认行，**不代表它已对顾客可用**；可用性只看 region 的链接表。）
 
+### 15.8 落地页已接 Store API（2026-09-19 发版 `0422cb5`）
+
+`PawShop.html` 现在按真实商品与真实游客购物车渲染；`product.html` 等页**仍**走静态 `catalog.json`，两者并存。
+
+- **发版必查**：`store-api.js` 必须留在 `ops/deploy-static.sh` 的 `public_paths` 里。**漏了它 = 前台静默失去全部商品与购物车**（页面还在，接口 404）。契约测试 `tests/storefront.test.mjs` 与 `check:security` 会挡住"页面里长出结账/支付/顾客账号"这类回归。
+- **`catalog.json` 现在是发布探针的凭证，不是前台的数据源**。`deploy-static.sh` 第 146–169 行仍要求它 200 且含 ≥1 个活跃预热商品（且图片在 `assets/products/`）；**改它不会影响前台显示**，但删它会让发版拒跑。
+- **发版后照抄这段判据**（`/store/*` 的边界与 §15.3 一致）：
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://pawlivora.com/PawShop.html   # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://pawlivora.com/store-api.js    # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://pawlivora.com/store/products  # 400（无 key 被 Medusa 拒，这是边界不是故障）
+```
+
+- **真实浏览器判据（关键）**：无头 Chrome 打开首页，DOM 里必须出现 **"No products available for purchase yet"**（i18n 键 `no_products`，= 接口通了但目录为空），**不能**是 "The shop is temporarily unavailable"（`catalog_unavailable` = 接口挂了）。**这两句的区别就是"店空着"和"店坏了"**：
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --no-sandbox \
+  --user-data-dir=/tmp/chrome-pawshop --virtual-time-budget=10000 --dump-dom \
+  https://pawlivora.com/PawShop.html | grep -c 'No products available for purchase yet'
+```
+
+- **结账仍是关的**：`checkoutEnabled=false` **只决定文案**；订单要能成立，缺的是 §15.7 的 `region.payment_providers`。**任何"用这个开关把订单走通"的做法都是错的。**
+
