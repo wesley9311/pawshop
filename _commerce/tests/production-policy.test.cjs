@@ -138,3 +138,33 @@ test('production port is a bounded positional value', () => {
   assert.equal(productionPort('1024'), '1024');
   for (const value of ['0', '80', '65536', '-p', '9000.5', '']) assert.throws(() => productionPort(value), /PORT/);
 });
+
+test('authMethodsPerActor mirrors the Google credential presence exactly', () => {
+  const fullGoogle = {
+    GOOGLE_CLIENT_ID: '1234-abc.apps.googleusercontent.com',
+    GOOGLE_CLIENT_SECRET: 'a'.repeat(24),
+    GOOGLE_CALLBACK_URL: 'https://pawlivora.com/app/login',
+  };
+  // No credentials -> google is neither registered nor allowed.
+  const none = validateProductionEnvironment(valid());
+  assert.deepEqual(none.http.authMethodsPerActor.user, ['emailpass']);
+  assert.equal(none.googleAuth, null);
+
+  // Full triple -> both providers are allowed.
+  const full = validateProductionEnvironment({ ...valid(), ...fullGoogle });
+  assert.deepEqual(full.http.authMethodsPerActor.user, ['emailpass', 'google']);
+  assert.equal(full.googleAuth.clientId, fullGoogle.GOOGLE_CLIENT_ID);
+
+  // Any partial set is a configuration error, not a half-wired toggle.
+  const keys = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_CALLBACK_URL'];
+  for (const key of keys) {
+    const partial = { ...fullGoogle };
+    delete partial[key];
+    assert.throws(() => validateProductionEnvironment({ ...valid(), ...partial }), /must be provided together/);
+  }
+
+  // A malformed client id / short secret / wrong callback are each refused.
+  assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullGoogle, GOOGLE_CLIENT_ID: 'not-a-google-id' }), /client id/);
+  assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullGoogle, GOOGLE_CLIENT_SECRET: 'short' }), /client secret/);
+  assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullGoogle, GOOGLE_CALLBACK_URL: 'https://pawlivora.com/wrong' }), /exactly https:\/\/pawlivora\.com\/app\/login/);
+});

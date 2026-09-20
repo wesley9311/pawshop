@@ -156,6 +156,14 @@ function validateProductionEnvironment(env) {
     googleAuth = googleEnv;
   }
 
+  // The allowed-methods allowlist must mirror the provider registration exactly:
+  // without credentials the auth module registers emailpass alone, so "google"
+  // must not appear here either. This keeps both layers (registered providers and
+  // allowed methods) identical to the current production shape when Google is absent.
+  const authMethodsPerActor = googleAuth
+    ? { user: ['emailpass', 'google'] }
+    : { user: ['emailpass'] };
+
   return {
     databaseUrl,
     redisUrl,
@@ -165,7 +173,7 @@ function validateProductionEnvironment(env) {
     googleAuth,
     mode: env.PAWSHOP_MODE,
     commerceOpen: commerceIsOpen(env.PAWSHOP_MODE),
-    http: { storeCors, adminCors, authCors: adminCors, jwtSecret: env.JWT_SECRET, cookieSecret: env.COOKIE_SECRET, authMethodsPerActor: { user: ['emailpass', 'google'] } },
+    http: { storeCors, adminCors, authCors: adminCors, jwtSecret: env.JWT_SECRET, cookieSecret: env.COOKIE_SECRET, authMethodsPerActor },
   };
 }
 
