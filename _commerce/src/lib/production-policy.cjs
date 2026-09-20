@@ -126,15 +126,46 @@ function validateProductionEnvironment(env) {
   if (topology === 'single-host-private' && workerMode !== 'shared' && !cliWorkerOverride) {
     throw new Error('Single-host production requires MEDUSA_WORKER_MODE=shared.');
   }
+
+  // Google OAuth for the admin plane. Read from the validated environment, never
+  // an env-file fallback. It is OPTIONAL at this layer: while the owner is still
+  // provisioning the OAuth client, all three values are absent and the auth module
+  // simply registers emailpass alone (the current, unchanged behaviour). A partial
+  // set is a configuration error, not a feature toggle: it must fail startup rather
+  // than register a half-wired Google provider.
+  const googleEnv = {
+    clientId: env.GOOGLE_CLIENT_ID || '',
+    clientSecret: env.GOOGLE_CLIENT_SECRET || '',
+    callbackUrl: env.GOOGLE_CALLBACK_URL || '',
+  };
+  const googlePresent = [googleEnv.clientId, googleEnv.clientSecret, googleEnv.callbackUrl].filter(Boolean).length;
+  let googleAuth = null;
+  if (googlePresent > 0) {
+    if (googlePresent !== 3) {
+      throw new Error('GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_CALLBACK_URL must be provided together.');
+    }
+    if (!/^[0-9]+-[a-z0-9_]+\.apps\.googleusercontent\.com$/.test(googleEnv.clientId)) {
+      throw new Error('GOOGLE_CLIENT_ID must be a Google OAuth client id (…apps.googleusercontent.com).');
+    }
+    if (googleEnv.clientSecret.length < 16) {
+      throw new Error('GOOGLE_CLIENT_SECRET must be the Google OAuth client secret (at least 16 characters).');
+    }
+    if (googleEnv.callbackUrl !== 'https://pawlivora.com/app/login') {
+      throw new Error('GOOGLE_CALLBACK_URL must be exactly https://pawlivora.com/app/login.');
+    }
+    googleAuth = googleEnv;
+  }
+
   return {
     databaseUrl,
     redisUrl,
     workerMode,
     topology,
     fileStorage,
+    googleAuth,
     mode: env.PAWSHOP_MODE,
     commerceOpen: commerceIsOpen(env.PAWSHOP_MODE),
-    http: { storeCors, adminCors, authCors: adminCors, jwtSecret: env.JWT_SECRET, cookieSecret: env.COOKIE_SECRET },
+    http: { storeCors, adminCors, authCors: adminCors, jwtSecret: env.JWT_SECRET, cookieSecret: env.COOKIE_SECRET, authMethodsPerActor: { user: ['emailpass', 'google'] } },
   };
 }
 

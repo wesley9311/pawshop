@@ -20,6 +20,7 @@
     "admin:create": "node scripts/create-local-admin.mjs",
     "catalog:import": "node scripts/run-local.mjs exec ./src/scripts/import-catalog.ts",
     "catalog:verify": "node scripts/run-local.mjs exec ./src/scripts/verify-catalog.ts",
+    "auth:bind-google": "node scripts/run-local.mjs exec ./src/scripts/bind-google-identity.ts",
     "foundation:verify": "node scripts/verify-foundation.mjs",
     "backup:real": "node scripts/backup-real.mjs",
     "backup:production": "node scripts/backup-production.mjs",
@@ -31,6 +32,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1121.0",
     "@medusajs/admin-sdk": "2.21.0",
+    "@medusajs/auth-emailpass": "2.21.0",
+    "@medusajs/auth-google": "2.21.0",
     "@medusajs/caching-redis": "2.21.0",
     "@medusajs/cli": "2.21.0",
     "@medusajs/event-bus-redis": "2.21.0",

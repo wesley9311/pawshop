@@ -35,7 +35,7 @@ module.exports = defineConfig({
         // origin password-reset.js builds its links from.
         admin: { backendUrl: '' },
         featureFlags: { caching: true },
-        modules: productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage }),
+        modules: productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage, googleAuth: projectConfig.googleAuth }),
       }
     : {}),
 })
