@@ -1,0 +1,123 @@
+server {
+  server_name pawlivora.com www.pawlivora.com _;
+  root /srv/pawshop/current;
+  index index.html;
+  charset utf-8;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-Frame-Options "DENY" always;
+  add_header Strict-Transport-Security "max-age=15552000" always;
+  if ($host = www.pawlivora.com) {
+    return 301 https://pawlivora.com$request_uri;
+  }
+  location = /admin.html { return 404; }
+  location = /dashboard.html { return 404; }
+  location = /account.html { return 404; }
+  # Commerce admin API reverse proxy (Task B, 2026-09-19)
+  location /admin/ {
+    auth_basic "PawShop Admin";
+    auth_basic_user_file /etc/nginx/pawshop-admin.htpasswd;
+    limit_req zone=pawshop_admin_api burst=40 nodelay;
+    limit_req_status 429;
+    client_max_body_size 20m;
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 120s;
+  }
+  location = /auth/session {
+    # no Basic here on purpose: Medusa validates the Bearer JWT itself,
+    # and that token is only obtainable through the provider login flow.
+    limit_req zone=pawshop_admin_login burst=5 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+  location /auth/user/ {
+    # Legacy Basic Auth removed (2026-09-22). The login flow (provider list,
+    # emailpass, google, google/callback) must be reachable without the old
+    # owner/password gate so "Continue with Google" leads straight into the
+    # admin. Medusa's own JWT + session + actor permission checks protect the
+    # admin API; the login endpoints are further bounded by pawshop_admin_login.
+    limit_req zone=pawshop_admin_login burst=5 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+
+  # Public Store API reverse proxy (P0-4, 2026-09-19). no Basic Auth on purpose:
+  # this is the namespace a shopper's own browser calls, and its only credential
+  # is the store's publishable key, which is public by design.
+  location /store/ {
+    limit_req zone=pawshop_store_api burst=60 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 60s;
+  }
+  # Owner-facing admin console (2026-09-19). The UI is the stock Medusa admin
+  # build served at /app; its router basename and its asset URLs are compiled in
+  # as /app (basename:"/app", and the chunk loader builds "/app/"+name), so the
+  # browser address has to live under /app for client-side routing to work.
+  # /console/ is the stable entry the owner bookmarks; it hands over with a
+  # redirect instead of pretending the same bundle can serve a second prefix.
+  location = /console { return 302 /app/$is_args$args; }
+  location ^~ /console/ {
+    rewrite ^/console/(.*)$ /app/$1 redirect;
+  }
+  location = /app { return 302 /app/$is_args$args; }
+  location ^~ /app/ {
+    # Legacy Basic Auth removed (2026-09-22): the admin shell and its assets must
+    # load without the old owner/password gate. Authentication now happens inside
+    # the Medusa admin login (Google OAuth, emailpass fallback), not at nginx.
+    limit_req zone=pawshop_console_ui burst=120 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 120s;
+  }
+
+  location / { try_files $uri $uri/ =404; }
+
+    listen [::]:443 ssl ipv6only=on; # managed by Certbot
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/pawlivora.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/pawlivora.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+
+}
+server {
+    if ($host = www.pawlivora.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = pawlivora.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+  listen 80 default_server;
+  listen [::]:80 default_server;
+  server_name pawlivora.com www.pawlivora.com _;
+    return 404; # managed by Certbot
+
+
+
+
+}
