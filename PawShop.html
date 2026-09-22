@@ -161,11 +161,11 @@
     </div>
     <div class="flex justify-between mb-1 text-sm">
       <span class="text-slate-500" data-i18n="shipping">Shipping</span>
-      <span id="cartShipping" class="text-slate-600">$9.90</span>
+      <span id="cartShipping" class="text-slate-600">—</span>
     </div>
     <div class="flex justify-between mb-4 text-sm">
       <span class="text-slate-500" data-i18n="taxes">Taxes</span>
-      <span class="text-slate-500 text-xs" data-i18n="taxes_at_checkout">Calculated at checkout</span>
+      <span id="cartTax" class="text-slate-600">—</span>
     </div>
     <button onclick="checkout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700" data-i18n="checkout">Checkout</button>
     <p class="mt-2 text-xs text-slate-400 text-center" data-i18n="checkout_note">Checkout is not open yet — payment is not connected.</p>
@@ -182,6 +182,21 @@
       </button>
     </div>
     <div id="productModalBody" class="p-4 sm:p-8 flex-1 overflow-y-auto"></div>
+  </div>
+</div>
+
+<!-- ===== Checkout Modal ===== -->
+<div id="checkoutModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-4" onclick="closeCheckout()">
+  <div class="bg-white rounded-xl w-full max-w-lg max-h-[94vh] overflow-y-auto" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+      <h3 class="font-bold" data-i18n="checkout">Checkout</h3>
+      <button onclick="closeCheckout()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="p-5 space-y-5">
+      <div id="checkoutBody"></div>
+    </div>
   </div>
 </div>
 
@@ -259,6 +274,21 @@ const I18N = {
     cart: 'Cart', subtotal: 'Subtotal', shipping: 'Shipping', shipping_at_checkout: 'Calculated at checkout',
     taxes: 'Taxes', taxes_at_checkout: 'Calculated at checkout',
     checkout: 'Checkout', checkout_note: 'Checkout is not open yet — payment is not connected.',
+    co_email: 'Email', co_email_ph: 'you@example.com',
+    co_shipping: 'Shipping address',
+    co_first: 'First name', co_last: 'Last name',
+    co_address1: 'Address', co_address2: 'Apt, suite, unit (optional)',
+    co_city: 'City', co_province: 'State', co_postal: 'ZIP code', co_country: 'Country',
+    co_billing_same: 'Billing address is the same as shipping',
+    co_shipping_option: 'Shipping method', co_select_shipping: 'Select a shipping method',
+    co_order_summary: 'Order summary', co_place_order: 'Place order',
+    co_placing: 'Placing order…',
+    total: 'Total',
+    co_email_required: 'Please enter a valid email address.',
+    co_address_required: 'Please fill in the shipping address.',
+    co_shipping_required: 'Please select a shipping method.',
+    co_payment_boundary: 'Payment is not connected yet, so no order was created. Your cart is saved.',
+    co_error: 'Checkout could not be completed. Please try again.',
     cart_empty: 'Your cart is empty', cart_unavailable: 'The cart is temporarily unavailable. Please refresh.',
     cart_continue: 'Continue shopping',
     line_total: 'Line total',
@@ -302,6 +332,21 @@ const I18N = {
     cart: '购物车', subtotal: '商品小计', shipping: '运费', shipping_at_checkout: '结算时计算',
     taxes: '税费', taxes_at_checkout: '结算时计算',
     checkout: '去结算', checkout_note: '结算尚未开放——支付通道还未接通。',
+    co_email: '邮箱', co_email_ph: 'you@example.com',
+    co_shipping: '收货地址',
+    co_first: '名', co_last: '姓',
+    co_address1: '地址', co_address2: '公寓/单元（选填）',
+    co_city: '城市', co_province: '州', co_postal: '邮编', co_country: '国家',
+    co_billing_same: '账单地址与收货地址相同',
+    co_shipping_option: '配送方式', co_select_shipping: '请选择配送方式',
+    co_order_summary: '订单摘要', co_place_order: '提交订单',
+    co_placing: '正在提交…',
+    total: '合计',
+    co_email_required: '请输入有效的邮箱地址。',
+    co_address_required: '请填写收货地址。',
+    co_shipping_required: '请选择配送方式。',
+    co_payment_boundary: '支付通道尚未接通，未创建订单。你的购物车已保存。',
+    co_error: '结算未能完成，请重试。',
     cart_empty: '购物车是空的', cart_unavailable: '购物车暂时不可用，请刷新页面。',
     cart_continue: '继续购物',
     line_total: '小计',
@@ -691,10 +736,20 @@ function renderCart() {
   const count = items.reduce((sum, item) => sum + item.quantity, 0);
   document.getElementById('cartCount').textContent = count;
   document.getElementById('cartItemCount').textContent = `(${count})`;
+  // Every figure below comes from the Medusa cart, never recomputed locally.
   document.getElementById('cartSubtotal').textContent = money(cart && cart.subtotal !== null ? cart.subtotal : 0);
-  const flatShipping = (typeof CONFIG.flatShipping === 'number' && CONFIG.flatShipping > 0) ? CONFIG.flatShipping : null;
   const shipEl = document.getElementById('cartShipping');
-  if (shipEl) shipEl.textContent = count > 0 && flatShipping !== null ? money(flatShipping) : (flatShipping !== null ? money(flatShipping) : '—');
+  if (shipEl) {
+    shipEl.textContent = cart && cart.shippingTotal !== null && count > 0
+      ? money(cart.shippingTotal)
+      : (count > 0 ? t('shipping_at_checkout') : money(0));
+  }
+  const taxEl = document.getElementById('cartTax');
+  if (taxEl) {
+    taxEl.textContent = cart && cart.taxTotal !== null && count > 0
+      ? money(cart.taxTotal)
+      : (count > 0 ? t('taxes_at_checkout') : money(0));
+  }
 
   const container = document.getElementById('cartItems');
   if (cartState === 'loading') {
@@ -743,8 +798,156 @@ function renderCart() {
 function openCart() { document.getElementById('cartDrawer').classList.add('open'); }
 function closeCart() { document.getElementById('cartDrawer').classList.remove('open'); }
 
-// ===== Checkout is closed: never create an order or a payment session =====
-function checkout() { showToast(t('waitlist_closed')); }
+// ===== Checkout: real cart -> email -> address -> shipping option -> totals -> payment boundary =====
+// Everything the visitor enters is written back to the Medusa cart, and every
+// total shown is the value Medusa computed. There is no payment provider wired
+// to the US region yet, so "Place order" stops at that boundary -- it never
+// creates an order and never pretends payment.
+let checkoutShippingOptions = [];
+let checkoutSelectedOption = '';
+
+async function checkout() {
+  if (!cart || !cart.items.length) { showToast(t('cart_empty')); return; }
+  checkoutSelectedOption = '';
+  checkoutShippingOptions = [];
+  renderCheckout();
+  document.getElementById('checkoutModal').classList.add('open');
+  // Load the shipping options Medusa actually offers for this cart's address.
+  try {
+    checkoutShippingOptions = await store.listShippingOptions(cart.id);
+    if (checkoutShippingOptions.length && cart.shippingMethods.length) {
+      const current = cart.shippingMethods[0] && cart.shippingMethods[0].optionId;
+      if (current && checkoutShippingOptions.some(o => o.id === current)) checkoutSelectedOption = current;
+    }
+  } catch (_) {
+    checkoutShippingOptions = [];
+  }
+  renderCheckout();
+}
+
+function closeCheckout() { document.getElementById('checkoutModal').classList.remove('open'); }
+
+function renderCheckout() {
+  const body = document.getElementById('checkoutBody');
+  if (!body) return;
+  const items = cart ? cart.items : [];
+  const addr = cart && cart.shippingAddress ? cart.shippingAddress : {};
+  const email = cart && cart.email ? cart.email : '';
+  const shippingAmount = cart && cart.shippingTotal !== null ? cart.shippingTotal : 0;
+  const taxAmount = cart && cart.taxTotal !== null ? cart.taxTotal : 0;
+  const total = cart && cart.total !== null ? cart.total : (cart ? cart.subtotal : 0);
+
+  const optionsHtml = checkoutShippingOptions.length
+    ? checkoutShippingOptions.map(o => `
+      <label class="flex items-center justify-between gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:border-slate-400 ${checkoutSelectedOption === o.id ? 'border-slate-900 ring-1 ring-slate-900' : ''}">
+        <span class="flex items-center gap-3">
+          <input type="radio" name="shippingOption" value="${safeToken(o.id)}" ${checkoutSelectedOption === o.id ? 'checked' : ''} onchange="pickShippingOption('${safeToken(o.id)}')" class="accent-slate-900">
+          <span class="text-sm">${safeHtml(o.name)}</span>
+        </span>
+        <span class="text-sm font-semibold">${money(o.amount)}</span>
+      </label>`).join('')
+    : `<p class="text-sm text-slate-400">${t('co_select_shipping')}</p>`;
+
+  body.innerHTML = `
+    <div>
+      <label class="block text-sm font-medium mb-1" for="coEmail">${t('co_email')}</label>
+      <input type="email" id="coEmail" value="${safeHtml(email)}" placeholder="${t('co_email_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+    </div>
+
+    <div>
+      <h4 class="font-semibold mb-3">${t('co_shipping')}</h4>
+      <div class="grid grid-cols-2 gap-3">
+        <input id="coFirst" placeholder="${t('co_first')}" value="${safeHtml(addr.firstName || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input id="coLast" placeholder="${t('co_last')}" value="${safeHtml(addr.lastName || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      </div>
+      <input id="coAddress1" placeholder="${t('co_address1')}" value="${safeHtml(addr.address1 || '')}" class="w-full mt-3 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <input id="coAddress2" placeholder="${t('co_address2')}" value="${safeHtml(addr.address2 || '')}" class="w-full mt-3 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <div class="grid grid-cols-2 gap-3 mt-3">
+        <input id="coCity" placeholder="${t('co_city')}" value="${safeHtml(addr.city || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input id="coProvince" placeholder="${t('co_province')}" value="${safeHtml(addr.province || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      </div>
+      <div class="grid grid-cols-2 gap-3 mt-3">
+        <input id="coPostal" placeholder="${t('co_postal')}" value="${safeHtml(addr.postalCode || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input id="coCountry" placeholder="${t('co_country')}" value="${safeHtml(addr.countryCode ? addr.countryCode.toUpperCase() : 'US')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      </div>
+    </div>
+
+    <div>
+      <h4 class="font-semibold mb-3">${t('co_shipping_option')}</h4>
+      <div class="space-y-2">${optionsHtml}</div>
+    </div>
+
+    <div class="border-t border-slate-100 pt-4">
+      <h4 class="font-semibold mb-3">${t('co_order_summary')}</h4>
+      <div class="space-y-1 text-sm">
+        <div class="flex justify-between"><span class="text-slate-500">${t('subtotal')}</span><span>${money(cart ? cart.subtotal : 0)}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">${t('shipping')}</span><span>${money(shippingAmount)}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">${t('taxes')}</span><span>${money(taxAmount)}</span></div>
+        <div class="flex justify-between font-semibold text-base pt-2 border-t border-slate-100"><span>${t('total')}</span><span>${money(total)}</span></div>
+      </div>
+    </div>
+
+    <button onclick="placeOrder()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('co_place_order')}</button>
+  `;
+}
+
+async function pickShippingOption(optionId) {
+  if (!cart) return;
+  checkoutSelectedOption = optionId;
+  try {
+    cart = await store.selectShippingMethod(cart.id, optionId);
+    cartState = 'ready';
+    renderCart();
+    renderCheckout();
+  } catch (_) {
+    showToast(t('co_error'));
+  }
+}
+
+async function placeOrder() {
+  if (!cart) return;
+  const email = document.getElementById('coEmail').value.trim();
+  const first = document.getElementById('coFirst').value.trim();
+  const last = document.getElementById('coLast').value.trim();
+  const address1 = document.getElementById('coAddress1').value.trim();
+  const address2 = document.getElementById('coAddress2').value.trim();
+  const city = document.getElementById('coCity').value.trim();
+  const province = document.getElementById('coProvince').value.trim();
+  const postal = document.getElementById('coPostal').value.trim();
+  const country = document.getElementById('coCountry').value.trim().toLowerCase();
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast(t('co_email_required')); return; }
+  if (!first || !last || !address1 || !city || !postal || !country) { showToast(t('co_address_required')); return; }
+  if (!checkoutSelectedOption) { showToast(t('co_shipping_required')); return; }
+
+  const address = {
+    firstName: first, lastName: last, address1, address2,
+    city, province, postalCode: postal, countryCode: country,
+  };
+  const btn = document.querySelector('#checkoutBody button');
+  const original = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = t('co_placing'); }
+  try {
+    // Write every field back to the real cart before reaching the boundary.
+    cart = await store.setEmail(cart.id, email);
+    cart = await store.setShippingAddress(cart.id, address);
+    if (checkoutSelectedOption) {
+      cart = await store.selectShippingMethod(cart.id, checkoutSelectedOption);
+    }
+    cartState = 'ready';
+    renderCart();
+    renderCheckout();
+    // This is the payment boundary: the US region has no payment provider yet,
+    // so there is no order and no payment session to create. We stop here and
+    // say so honestly instead of pretending a payment happened.
+    showToast(t('co_payment_boundary'));
+    closeCheckout();
+  } catch (e) {
+    showToast(e && e.kind === 'network' ? t('shop_unreachable') : t('co_error'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = original; }
+  }
+}
 
 // ===== Launch status =====
 function openWaitlist() { document.getElementById('waitlistModal').classList.add('open'); }
@@ -766,6 +969,7 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') {
     closeCart();
     closeProduct();
+    closeCheckout();
     document.getElementById('waitlistModal').classList.remove('open');
   }
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {

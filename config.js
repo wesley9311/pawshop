@@ -6,14 +6,10 @@ const PAWSHOP_PUBLIC_CONFIG = Object.freeze({
   displayCurrency: 'USD',
   shipsFrom: 'China',
   inquiryEnabled: false,
-  // Checkout stays closed until a real payment provider is connected to the US
-  // region. Flipping this flag must never be how an order gets created.
-  checkoutEnabled: false,
 
-  // Flat-rate shipping already configured on the US region (Standard Shipping).
-  // Shown in the cart as a trust signal; it is a display value, not a charge.
-  flatShipping: 9.90,
-  flatShippingCurrency: 'USD',
+  // Shipping costs, taxes and totals are always read from the Medusa cart.
+  // There is no hardcoded shipping amount in the storefront: the US region's
+  // "Standard Shipping" option (and any future options) come from the cart.
 
   // The storefront calls the Medusa Store API on its own origin: production
   // nginx forwards /store/ to the commerce process. Same-origin means the

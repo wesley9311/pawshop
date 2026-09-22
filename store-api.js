@@ -151,6 +151,48 @@
     };
   }
 
+  // Medusa's `subtotal` is item + shipping before tax, not the item subtotal
+  // alone. We surface the decomposed figures the checkout needs to show an
+  // honest breakdown instead of re-deriving any number in the browser.
+  function normalizeShippingMethod(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+      id: isNonEmptyString(raw.id) ? raw.id : '',
+      optionId: isNonEmptyString(raw.shipping_option_id) ? raw.shipping_option_id : '',
+      name: isNonEmptyString(raw.name) ? raw.name : '',
+      amount: toAmount(raw.amount),
+    };
+  }
+
+  function normalizeShippingOption(raw) {
+    if (!raw || typeof raw !== 'object' || !isNonEmptyString(raw.id)) return null;
+    var amount = toAmount(raw.amount);
+    if (amount === null && raw.calculated_price && typeof raw.calculated_price === 'object') {
+      amount = toAmount(raw.calculated_price.calculated_amount);
+    }
+    return {
+      id: raw.id,
+      name: isNonEmptyString(raw.name) ? raw.name : '',
+      amount: amount,
+    };
+  }
+
+  function normalizeAddress(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+      id: isNonEmptyString(raw.id) ? raw.id : '',
+      firstName: isNonEmptyString(raw.first_name) ? raw.first_name : '',
+      lastName: isNonEmptyString(raw.last_name) ? raw.last_name : '',
+      address1: isNonEmptyString(raw.address_1) ? raw.address_1 : '',
+      address2: isNonEmptyString(raw.address_2) ? raw.address_2 : '',
+      city: isNonEmptyString(raw.city) ? raw.city : '',
+      province: isNonEmptyString(raw.province) ? raw.province : '',
+      postalCode: isNonEmptyString(raw.postal_code) ? raw.postal_code : '',
+      countryCode: isNonEmptyString(raw.country_code) ? raw.country_code : '',
+      phone: isNonEmptyString(raw.phone) ? raw.phone : '',
+    };
+  }
+
   function normalizeCart(raw) {
     if (!raw || typeof raw !== 'object' || !isNonEmptyString(raw.id)) return null;
     var items = [];
@@ -159,16 +201,30 @@
       var item = normalizeCartItem(list[i]);
       if (item) items.push(item);
     }
+    var methods = [];
+    var methodList = Array.isArray(raw.shipping_methods) ? raw.shipping_methods : [];
+    for (var m = 0; m < methodList.length; m++) {
+      var method = normalizeShippingMethod(methodList[m]);
+      if (method) methods.push(method);
+    }
     var count = 0;
     for (var j = 0; j < items.length; j++) count += items[j].quantity;
     return {
       id: raw.id,
       currencyCode: isNonEmptyString(raw.currency_code) ? raw.currency_code : '',
       regionId: isNonEmptyString(raw.region_id) ? raw.region_id : '',
+      email: isNonEmptyString(raw.email) ? raw.email : '',
       items: items,
       itemCount: count,
+      // item subtotal = goods only; subtotal = goods + shipping (pre-tax).
+      itemSubtotal: toAmount(raw.item_subtotal !== undefined ? raw.item_subtotal : raw.item_total),
       subtotal: toAmount(raw.subtotal),
       shippingTotal: toAmount(raw.shipping_total),
+      taxTotal: toAmount(raw.tax_total),
+      total: toAmount(raw.total),
+      shippingMethods: methods,
+      shippingAddress: normalizeAddress(raw.shipping_address),
+      billingAddress: normalizeAddress(raw.billing_address),
     };
   }
 
@@ -270,7 +326,74 @@
         );
         return normalizeCart(payload && payload.cart);
       },
+
+      // Checkout data all writes back through the cart, so every number the
+      // visitor sees has a Medusa-side source of truth.
+
+      async setEmail(cartId, email) {
+        var payload = await request('/carts/' + encodeURIComponent(cartId), {
+          method: 'POST',
+          body: { email: email },
+        });
+        return normalizeCart(payload && payload.cart);
+      },
+
+      // `address` is a camelCase object ({ firstName, lastName, address1, ... });
+      // Medusa expects snake_case keys, so we translate here.
+      async setShippingAddress(cartId, address) {
+        var payload = await request('/carts/' + encodeURIComponent(cartId), {
+          method: 'POST',
+          body: { shipping_address: toSnakeAddress(address) },
+        });
+        return normalizeCart(payload && payload.cart);
+      },
+
+      async setBillingAddress(cartId, address) {
+        var payload = await request('/carts/' + encodeURIComponent(cartId), {
+          method: 'POST',
+          body: { billing_address: toSnakeAddress(address) },
+        });
+        return normalizeCart(payload && payload.cart);
+      },
+
+      // Shipping options are region- and address-scoped: Medusa returns only
+      // what the cart actually qualifies for, priced for its currency.
+      async listShippingOptions(cartId) {
+        var payload = await request(
+          '/shipping-options?cart_id=' + encodeURIComponent(cartId),
+        );
+        var raw = (payload && Array.isArray(payload.shipping_options)) ? payload.shipping_options : [];
+        var out = [];
+        for (var i = 0; i < raw.length; i++) {
+          var option = normalizeShippingOption(raw[i]);
+          if (option) out.push(option);
+        }
+        return out;
+      },
+
+      async selectShippingMethod(cartId, optionId) {
+        var payload = await request(
+          '/carts/' + encodeURIComponent(cartId) + '/shipping-methods',
+          { method: 'POST', body: { option_id: optionId } },
+        );
+        return normalizeCart(payload && payload.cart);
+      },
     };
+  }
+
+  function toSnakeAddress(address) {
+    if (!address || typeof address !== 'object') return {};
+    var out = {};
+    if (isNonEmptyString(address.firstName)) out.first_name = address.firstName;
+    if (isNonEmptyString(address.lastName)) out.last_name = address.lastName;
+    if (isNonEmptyString(address.address1)) out.address_1 = address.address1;
+    if (isNonEmptyString(address.address2)) out.address_2 = address.address2;
+    if (isNonEmptyString(address.city)) out.city = address.city;
+    if (isNonEmptyString(address.province)) out.province = address.province;
+    if (isNonEmptyString(address.postalCode)) out.postal_code = address.postalCode;
+    if (isNonEmptyString(address.countryCode)) out.country_code = address.countryCode;
+    if (isNonEmptyString(address.phone)) out.phone = address.phone;
+    return out;
   }
 
   window.PawStore = Object.freeze({
@@ -281,6 +404,9 @@
     normalizeVariant: normalizeVariant,
     normalizeCart: normalizeCart,
     normalizeCartItem: normalizeCartItem,
+    normalizeShippingMethod: normalizeShippingMethod,
+    normalizeShippingOption: normalizeShippingOption,
+    normalizeAddress: normalizeAddress,
     variantAvailability: variantAvailability,
     variantPrice: variantPrice,
     formatMoney: formatMoney,

@@ -324,27 +324,75 @@ test('a cart that no longer exists is forgotten, not faked', async () => {
   assert.ok(app.nodes.get('cartItems').innerHTML.includes('Your cart is empty'));
 });
 
-test('checkout cannot start an order or a payment', async () => {
+test('checkout writes cart data but can never start an order or a payment', async () => {
   const app = bootPawShop({
     routes: {
       'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
       'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
       'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [] } }),
+      'POST /store/carts/cart_1': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
     },
   });
   await app.settle();
   await app.run("addToCart('prod_1')");
-  const before = app.calls.length;
 
-  app.run('checkout(); submitWaitlist();');
-  assert.equal(app.calls.length, before, 'checkout must not call the shop');
-  assert.equal(app.nodes.get('toastText').textContent, 'Checkout opens once payment is connected. No order was created.');
-  assert.equal(app.run('PAWSHOP_PUBLIC_CONFIG.checkoutEnabled'), false);
+  // Opening checkout is allowed to read the cart's shipping options.
+  await app.run('checkout()');
+  await app.settle();
+  assert.ok(app.calls.some(call => call.path === '/store/shipping-options'), 'checkout reads shipping options');
 
   const surface = read('store-api.js') + read('PawShop.html');
+  // The hard boundaries are unchanged: no order completion, no payment session,
+  // no customer account.
   assert.ok(!/\/complete\b/.test(surface), 'no cart completion endpoint');
   assert.ok(!/payment[-_]?sessions?/i.test(surface), 'no payment session handling');
   assert.ok(!/emailpass|customer\/register/i.test(surface), 'no customer authentication');
+});
+
+test('place order stops at the payment boundary without creating anything', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [{ id: 'so_1', name: 'Standard Shipping', amount: 9.9 }] } }),
+      'POST /store/carts/cart_1/shipping-methods': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 39.8, shipping_total: 9.9 }) }),
+      'POST /store/carts/cart_1': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 39.8, shipping_total: 9.9 }) }),
+    },
+  });
+  await app.settle();
+  await app.run("addToCart('prod_1')");
+  await app.run('checkout()');
+  await app.settle();
+  await app.run("pickShippingOption('so_1')");
+  await app.settle();
+
+  // Fill the checkout form: renderCheckout() writes innerHTML, and the mock
+  // document lazily creates a node on first getElementById, so touch each field
+  // through the page's own accessor before setting its value.
+  app.run(`
+    document.getElementById('coEmail').value = 'buyer@example.com';
+    document.getElementById('coFirst').value = 'Ada';
+    document.getElementById('coLast').value = 'Lovelace';
+    document.getElementById('coAddress1').value = '1 Main St';
+    document.getElementById('coCity').value = 'San Francisco';
+    document.getElementById('coProvince').value = 'CA';
+    document.getElementById('coPostal').value = '94107';
+    document.getElementById('coCountry').value = 'US';
+  `);
+
+  const before = app.calls.length;
+  await app.run('placeOrder()');
+  await app.settle();
+
+  // The boundary must never create an order or a payment session.
+  assert.ok(!app.calls.some(call => /\/complete\b/.test(call.path)), 'no completion request');
+  assert.ok(!app.calls.some(call => /payment[-_]?session/i.test(call.path)), 'no payment session request');
+  // Email and address are written back to the real cart.
+  const update = app.calls.find(call => call.method === 'POST' && call.path === '/store/carts/cart_1');
+  assert.ok(update, 'email/address write back to the cart');
+  assert.equal(app.nodes.get('toastText').textContent, 'Payment is not connected yet, so no order was created. Your cart is saved.');
 });
 
 test('the Chinese copy states the real state of the shop', async () => {
