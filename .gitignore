@@ -12,3 +12,8 @@ _commerce/uploads/
 _commerce/static/
 _commerce/*.log
 .workbuddy/
+# nginx secret material must never enter the repo (only the config paths are canonical)
+ops/nginx/*.htpasswd
+ops/nginx/**/*.htpasswd
+ops/nginx/**/*.pem
+ops/nginx/**/*.key
