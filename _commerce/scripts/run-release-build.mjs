@@ -14,6 +14,12 @@ if (process.platform !== 'linux' || process.getuid() === 0) {
 // database, Redis, cookie, JWT, or object-storage credentials to npm lifecycle code.
 const buildEnv = {
   NODE_ENV: 'production', PAWSHOP_MODE: 'production-admin-only',
+  // The admin Vite bundle resolves its auth type at build time. Medusa's admin
+  // bundler falls back to "session" when ADMIN_AUTH_TYPE is unset, which makes the
+  // dashboard drop the Bearer header and issue DELETE /auth/session on logout — the
+  // wrong mode for the Google OAuth (JWT) login flow. Pin it to jwt so the SDK
+  // carries the Bearer token and clears it on logout instead.
+  ADMIN_AUTH_TYPE: 'jwt',
   PAWSHOP_INFRA_TOPOLOGY: 'single-host-private', PAWSHOP_MIGRATIONS_CONFIRMED: '0',
   DATABASE_URL: 'postgresql://build_fixture:not-a-credential@127.0.0.1:5432/pawshop?sslmode=disable',
   REDIS_URL: 'redis://build_fixture:not-a-credential@127.0.0.1:6379/0',
