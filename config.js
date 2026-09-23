@@ -23,5 +23,5 @@ const PAWSHOP_PUBLIC_CONFIG = Object.freeze({
 
   // Hostnames allowed to serve product images: the object-storage bucket the
   // admin uploads to. safe.js drops every other host.
-  imageHosts: ['pawlivora-products-us-west-1.oss-us-west-1.aliyuncs.com'],
+  imageHosts: ['pawlivora-products-us-west-1.oss-us-west-1.aliyuncs.com', 'media.pawlivora.com'],
 });
