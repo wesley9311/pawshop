@@ -11,9 +11,17 @@ const productionMode = isProductionMode(process.env.PAWSHOP_MODE)
 const projectConfig = productionMode
   ? validateProductionEnvironment(process.env)
   : validateLocalEnvironment(process.env)
+const { pawshopNativeImageCompressionPlugin } = require('./scripts/admin-native-image-compression-plugin.cjs')
 
 module.exports = defineConfig({
   projectConfig,
+  admin: {
+    ...(productionMode ? { backendUrl: '' } : {}),
+    vite: () => ({
+      plugins: [pawshopNativeImageCompressionPlugin()],
+      optimizeDeps: { exclude: ['@medusajs/dashboard'] },
+    }),
+  },
   ...(productionMode
     ? {
         // The admin UI and the API it calls are always served from the same
@@ -33,7 +41,6 @@ module.exports = defineConfig({
         // adminCors/authCors deliberately keep their loopback value: they are the
         // server-side CORS allowlist (no effect on same-origin requests) and the
         // origin password-reset.js builds its links from.
-        admin: { backendUrl: '' },
         featureFlags: { caching: true },
         modules: productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage, googleAuth: projectConfig.googleAuth }),
       }

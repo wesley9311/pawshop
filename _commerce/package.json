@@ -41,6 +41,7 @@
     "@medusajs/framework": "2.21.0",
     "@medusajs/locking-redis": "2.21.0",
     "@medusajs/medusa": "2.21.0",
+    "@medusajs/ui": "4.2.4",
     "@medusajs/workflow-engine-redis": "2.21.0",
     "@smithy/node-http-handler": "4.11.3"
   },
