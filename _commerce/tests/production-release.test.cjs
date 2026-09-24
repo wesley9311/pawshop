@@ -18,6 +18,8 @@ const installer = readFileSync(resolve(root, 'ops/commerce/install-commerce-runt
 const build = readFileSync(resolve(root, '_commerce/scripts/run-release-build.mjs'), 'utf8');
 const seederPath = resolve(root, '_commerce/scripts/seed-module-migration-directories.mjs');
 const evidenceVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-release-evidence.mjs'), 'utf8');
+const codeOnlyPrepare = readFileSync(resolve(root, 'ops/commerce/prepare-code-only-release.sh'), 'utf8');
+const codeOnlyWriter = readFileSync(resolve(root, '_commerce/scripts/write-code-only-release-evidence.mjs'), 'utf8');
 const releaseManifest = readFileSync(resolve(root, '_commerce/scripts/release-manifest.cjs'), 'utf8');
 const trackedVerifier = readFileSync(resolve(root, '_commerce/scripts/verify-tracked-release.mjs'), 'utf8');
 const firstMigration = readFileSync(resolve(root, 'ops/commerce/run-first-production-migration.sh'), 'utf8');
@@ -115,6 +117,8 @@ test('commerce activation consumes an immutable prepared release and verified ev
   assert.match(deploy, /write-production-migration-gate\.mjs/);
   assert.match(deploy, /rollback-disable/);
   assert.match(deploy, /gate_promoted/);
+  assert.match(deploy, /CODE_ONLY_RELEASE_CONFIRMED/);
+  assert.match(deploy, /127\.0\.0\.1:9000\/health/);
   assert.doesNotMatch(deploy, /db:migrate|npm (ci|prune)|git_readonly archive|commerce\.env.*source|source .*commerce\.env/);
   assert.match(evidenceVerifier, /migration\.json/);
   assert.match(evidenceVerifier, /backup-restore\.json/);
@@ -138,6 +142,20 @@ test('commerce activation consumes an immutable prepared release and verified ev
   assert.match(build, /npmGlobalConfigStat\.size !== 0/);
   assert.match(build, /npm_config_userconfig: '\/dev\/null'/);
   assert.match(build, /npm_config_globalconfig: npmGlobalConfig/);
+});
+
+test('code-only preparation is exact-release and cannot run migration or restore work', () => {
+  assert.match(codeOnlyPrepare, /CODE_ONLY_RELEASE/);
+  assert.match(codeOnlyPrepare, /verify-release-manifest\.mjs/);
+  assert.match(codeOnlyPrepare, /verify-tracked-release\.mjs/);
+  assert.match(codeOnlyPrepare, /write-code-only-release-evidence\.mjs/);
+  assert.doesNotMatch(codeOnlyPrepare, /db:migrate|restore-verify|pawshop-backup\.service/);
+  assert.match(codeOnlyWriter, /migrationSet/);
+  assert.match(codeOnlyWriter, /candidateMigrations\.sha256 !== predecessorMigrations\.sha256/);
+  assert.match(codeOnlyWriter, /diff.*--binary/);
+  assert.match(codeOnlyWriter, /already exists and cannot be replaced/);
+  assert.match(evidenceVerifier, /assertCodeOnlyEvidence/);
+  assert.match(evidenceVerifier, /Code-only evidence cannot be mixed/);
 });
 
 test('first activation changes the migration gate atomically and can fail closed', () => {

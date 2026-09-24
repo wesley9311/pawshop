@@ -7,14 +7,25 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
 fi
 : "${PAWSHOP_RELEASE_ID:?Set PAWSHOP_RELEASE_ID to the full Git commit SHA.}"
 if [[ ${PAWSHOP_RELEASE_ACTIVATION_CONFIRMED:-0} != 1 ]]; then
-  echo 'Release activation requires PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1 after backup and migration review.' >&2
+  echo 'Release activation requires PAWSHOP_RELEASE_ACTIVATION_CONFIRMED=1 after release evidence review.' >&2
+  exit 1
+fi
+release_mode=standard
+if [[ ${CODE_ONLY_RELEASE:-0} == 1 ]]; then
+  release_mode=code-only
+  if [[ ${CODE_ONLY_RELEASE_CONFIRMED:-0} != 1 ]]; then
+    echo 'Code-only activation requires CODE_ONLY_RELEASE_CONFIRMED=1 after reviewing the exact diff evidence.' >&2
+    exit 1
+  fi
+elif [[ ${CODE_ONLY_RELEASE:-0} != 0 ]]; then
+  echo 'CODE_ONLY_RELEASE must be exactly 0 or 1.' >&2
   exit 1
 fi
 if [[ ! $PAWSHOP_RELEASE_ID =~ ^[0-9a-f]{40}$ ]]; then
   echo 'PAWSHOP_RELEASE_ID must be a full lowercase Git commit SHA.' >&2
   exit 1
 fi
-for required_command in git runuser node systemctl flock find grep cmp mv ln readlink stat rm; do
+for required_command in git runuser node systemctl flock find grep cmp mv ln readlink stat rm curl sleep; do
   command -v "$required_command" >/dev/null || {
     echo "Required production command is unavailable: $required_command" >&2
     exit 1
@@ -118,8 +129,6 @@ release_content_sha256=$(/usr/bin/node "$source_dir/_commerce/scripts/verify-rel
   "$release_dir" "$PAWSHOP_RELEASE_ID")
 /usr/bin/node "$source_dir/_commerce/scripts/verify-tracked-release.mjs" \
   "$source_dir" "$release_dir" "$PAWSHOP_RELEASE_ID" >/dev/null
-/usr/bin/node "$source_dir/_commerce/scripts/verify-release-evidence.mjs" \
-  "$PAWSHOP_RELEASE_ID" "$release_content_sha256"
 for installed in pawshop-commerce.service pawshop-backup.service pawshop-backup.timer \
   pawshop-backup-monthly.service pawshop-backup-monthly.timer \
   pawshop-backup-yearly.service pawshop-backup-yearly.timer pawshop-restore-verify.service; do
@@ -144,6 +153,22 @@ elif [[ -e $current_link ]]; then
   echo 'The commerce current path must be absent or a validated symbolic link.' >&2
   exit 1
 fi
+if [[ $release_mode == code-only ]]; then
+  if [[ -z $previous_target ]]; then
+    echo 'Code-only activation requires an existing active production release.' >&2
+    exit 1
+  fi
+  previous_release_id=${previous_target##*/}
+  previous_content_sha256=$(/usr/bin/node "$source_dir/_commerce/scripts/verify-release-manifest.mjs" \
+    "$previous_target" "$previous_release_id")
+  /usr/bin/node "$source_dir/_commerce/scripts/verify-release-evidence.mjs" \
+    "$PAWSHOP_RELEASE_ID" "$release_content_sha256" code-only \
+    "$previous_release_id" "$previous_content_sha256" \
+    "$source_dir" "$release_dir" "$previous_target"
+else
+  /usr/bin/node "$source_dir/_commerce/scripts/verify-release-evidence.mjs" \
+    "$PAWSHOP_RELEASE_ID" "$release_content_sha256" standard
+fi
 if [[ ! -L $current_link ]]; then
   /usr/bin/node "$release_dir/_commerce/scripts/write-production-migration-gate.mjs" \
     "$release_dir" "$PAWSHOP_RELEASE_ID" "$release_content_sha256" enable
@@ -158,6 +183,19 @@ cleanup
 activated=1
 atomic_link "$release_dir"
 systemctl restart pawshop-commerce.service
+systemctl is-active --quiet pawshop-commerce.service
+healthy=0
+for _ in {1..30}; do
+  if /usr/bin/curl --fail --silent --show-error --max-time 2 http://127.0.0.1:9000/health >/dev/null; then
+    healthy=1
+    break
+  fi
+  sleep 2
+done
+if [[ $healthy != 1 ]]; then
+  echo 'The activated commerce release failed its local health check.' >&2
+  false
+fi
 
 trap - ERR INT TERM
 cleanup
