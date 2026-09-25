@@ -169,3 +169,43 @@ test('final product media contains only non-empty HTTP(S) URLs and never preview
   assert.throws(() => uploadPolicy.buildProductMedia([{ url: 'blob:preview' }], new Map()), /has not finished uploading/);
   assert.throws(() => uploadPolicy.buildProductMedia([{ url: '', file: {} }], new Map()), /has not finished uploading/);
 });
+
+test('an empty URL from the upload API never falls back to a preview or stale URL', () => {
+  // Regression: `uploaded?.url || entry.url` used to treat an empty-string
+  // upload URL as falsy and silently fall back to the entry's blob preview URL
+  // (or a stale existing URL). An empty upload URL must now be rejected.
+  const media = [{ id: 'new', url: 'blob:local-preview', file: { name: 'new.jpg' } }];
+  const uploadedByIndex = new Map([[0, { id: 'uploaded', url: '' }]]);
+  assert.throws(
+    () => uploadPolicy.buildProductMedia(media, uploadedByIndex),
+    /has not finished uploading/
+  );
+
+  // A stale existing URL must not mask a missing upload URL either.
+  const staleMedia = [{ id: 'new', url: 'https://cdn.example/stale.jpg', file: { name: 'new.jpg' } }];
+  assert.throws(
+    () => uploadPolicy.buildProductMedia(staleMedia, new Map([[0, { id: 'u', url: '' }]])),
+    /has not finished uploading/
+  );
+});
+
+test('buildProductMedia asserts every image URL is a non-empty HTTP(S) URL', () => {
+  // Every invalid URL — undefined, non-http, blob — is rejected before it can
+  // reach the final payload. The per-entry check throws first.
+  assert.throws(
+    () => uploadPolicy.buildProductMedia([{ url: undefined, file: null }], new Map()),
+    /has not finished uploading/
+  );
+  assert.throws(
+    () => uploadPolicy.buildProductMedia([{ url: 'data:image/png;base64,xxxx', file: null }], new Map()),
+    /has not finished uploading/
+  );
+  assert.throws(
+    () => uploadPolicy.buildProductMedia([{ url: 'blob:local', file: null }], new Map()),
+    /has not finished uploading/
+  );
+  // A valid pre-existing image still passes both the per-entry check and the
+  // final payload assertion.
+  const ok = uploadPolicy.buildProductMedia([{ url: 'https://cdn.example/a.jpg', file: null }], new Map());
+  assert.equal(ok[0].url, 'https://cdn.example/a.jpg');
+});

@@ -33,14 +33,33 @@ async function uploadSequentially(items, uploadOne) {
 }
 
 function buildProductMedia(media, uploadedByIndex) {
-  return media.map((entry, index) => {
+  const result = media.map((entry, index) => {
+    // A brand-new image (has a File) MUST use the URL returned by the upload
+    // API. Use the entry's URL only for pre-existing images (file == null).
+    // Never fall back with `uploaded?.url || entry.url`: an empty string from
+    // the upload response is falsy and would silently fall back to a blob
+    // preview URL (or a stale existing URL), which must never reach the payload.
     const uploaded = entry.file ? uploadedByIndex.get(index) : undefined;
-    const url = uploaded?.url || entry.url;
+    const url = uploaded ? uploaded.url : entry.url;
     if (!isHttpUploadUrl(url)) {
       throw new Error(`Image ${index + 1} has not finished uploading.`);
     }
     return { ...entry, ...(uploaded || {}), url };
   });
+
+  // Final assertion before the product payload is built: every image URL must
+  // be a non-empty HTTP(S) URL. Preview/object URLs and undefined are rejected
+  // here, so `images[i].url` can never be emitted as undefined or a blob.
+  for (let index = 0; index < result.length; index += 1) {
+    const url = result[index]?.url;
+    if (!isHttpUploadUrl(url)) {
+      throw new Error(
+        `Image ${index + 1} url is not a valid HTTP(S) URL (got ${JSON.stringify(url)}).`
+      );
+    }
+  }
+
+  return result;
 }
 
 module.exports = {
