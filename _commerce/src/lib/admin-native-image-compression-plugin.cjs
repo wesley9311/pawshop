@@ -92,7 +92,7 @@ const pawshopNativeImageCompressionPlugin = () => {
   if (dashboardVersion !== SUPPORTED_DASHBOARD_VERSION) {
     throw new Error(`PawShop Admin compression patch supports @medusajs/dashboard ${SUPPORTED_DASHBOARD_VERSION}, found ${dashboardVersion}. Review the upstream upload code before upgrading.`);
   }
-  const modulePath = resolve(__dirname, '../src/admin/lib/native-image-compression.ts');
+  const modulePath = resolve(__dirname, '../admin/lib/native-image-compression.ts');
 
   return {
     name: 'pawshop-native-image-compression',

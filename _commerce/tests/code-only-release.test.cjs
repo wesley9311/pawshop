@@ -24,8 +24,8 @@ const diffDigest = 'd'.repeat(64);
 const changedPaths = [
   '_commerce/medusa-config.ts',
   '_commerce/package-lock.json',
-  '_commerce/scripts/admin-native-image-compression-plugin.cjs',
   '_commerce/src/admin/lib/native-image-compression.ts',
+  '_commerce/src/lib/admin-native-image-compression-plugin.cjs',
   '_commerce/tests/native-image-compression.test.cjs',
 ];
 

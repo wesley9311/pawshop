@@ -11,7 +11,7 @@ const {
   patchProductCreateUpload,
   patchProductCreateSubmittingState,
   SUPPORTED_DASHBOARD_VERSION,
-} = require('../scripts/admin-native-image-compression-plugin.cjs');
+} = require('../src/lib/admin-native-image-compression-plugin.cjs');
 const compressionPolicy = require('../src/admin/lib/native-image-compression-policy.cjs');
 const uploadPolicy = require('../src/admin/lib/native-image-upload-policy.cjs');
 

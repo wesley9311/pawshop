@@ -3,6 +3,7 @@ import { validateLocalEnvironment } from './src/lib/local-policy.cjs'
 import { validateProductionEnvironment } from './src/lib/production-policy.cjs'
 import { productionModules } from './src/lib/production-modules.cjs'
 import { isProductionMode } from './src/lib/production-modes.cjs'
+import { pawshopNativeImageCompressionPlugin } from './src/lib/admin-native-image-compression-plugin.cjs'
 
 // Production receives secrets from the host's secret manager; no env-file fallback.
 // Both production profiles share this branch; only the middleware and the runtime
@@ -11,7 +12,6 @@ const productionMode = isProductionMode(process.env.PAWSHOP_MODE)
 const projectConfig = productionMode
   ? validateProductionEnvironment(process.env)
   : validateLocalEnvironment(process.env)
-const { pawshopNativeImageCompressionPlugin } = require('./scripts/admin-native-image-compression-plugin.cjs')
 
 module.exports = defineConfig({
   projectConfig,
