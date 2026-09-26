@@ -392,7 +392,12 @@ test('place order stops at the payment boundary without creating anything', asyn
   // Email and address are written back to the real cart.
   const update = app.calls.find(call => call.method === 'POST' && call.path === '/store/carts/cart_1');
   assert.ok(update, 'email/address write back to the cart');
-  assert.equal(app.nodes.get('toastText').textContent, 'Payment is not connected yet, so no order was created. Your cart is saved.');
+  // The boundary is now rendered as an explicit panel in the checkout body (not
+  // a transient toast), and it states the truth: no order, no charge.
+  const body = app.nodes.get('checkoutBody').innerHTML;
+  assert.ok(body.includes('Payment is not connected yet'), 'boundary panel explains no order was created');
+  assert.ok(body.includes('Your cart, address and shipping choice are saved'), 'boundary panel confirms the cart is kept');
+  assert.ok(body.includes('no order was created'), 'boundary panel is explicit that nothing happened');
 });
 
 test('the Chinese copy states the real state of the shop', async () => {

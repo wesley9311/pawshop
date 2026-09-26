@@ -134,6 +134,7 @@
         <ul class="space-y-2 text-sm text-slate-400">
           <li><a href="shipping.html" class="hover:text-white" data-i18n="footer_shipping">Shipping policy</a></li>
           <li><a href="returns.html" class="hover:text-white" data-i18n="footer_returns">Returns &amp; refunds</a></li>
+          <li><a href="faq.html" class="hover:text-white" data-i18n="footer_faq">FAQ</a></li>
           <li><a href="privacy.html" class="hover:text-white">Privacy</a></li>
           <li><a href="terms.html" class="hover:text-white">Terms</a></li>
         </ul>
@@ -270,7 +271,7 @@ const I18N = {
     shipping_details: 'Flat-rate shipping applies to every order in the US pilot market. Taxes are calculated at checkout.',
     returns_details: 'Our returns and refunds policy is published before checkout opens.',
     footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
-    footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds',
+    footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds', footer_faq: 'FAQ',
     cart: 'Cart', subtotal: 'Subtotal', shipping: 'Shipping', shipping_at_checkout: 'Calculated at checkout',
     taxes: 'Taxes', taxes_at_checkout: 'Calculated at checkout',
     checkout: 'Checkout', checkout_note: 'Checkout is not open yet — payment is not connected.',
@@ -288,6 +289,11 @@ const I18N = {
     co_address_required: 'Please fill in the shipping address.',
     co_shipping_required: 'Please select a shipping method.',
     co_payment_boundary: 'Payment is not connected yet, so no order was created. Your cart is saved.',
+    co_payment_boundary_title: 'Checkout is almost ready',
+    co_boundary_saved_cart: 'Your cart, address and shipping choice are saved.',
+    co_boundary_no_charge: 'You were not charged and no order was created.',
+    co_boundary_when: 'Checkout opens once a payment provider is connected.',
+    co_boundary_continue: 'Back to shop',
     co_error: 'Checkout could not be completed. Please try again.',
     cart_empty: 'Your cart is empty', cart_unavailable: 'The cart is temporarily unavailable. Please refresh.',
     cart_continue: 'Continue shopping',
@@ -328,7 +334,7 @@ const I18N = {
     shipping_details: '美国试运营市场所有订单适用统一运费，税费在结算时计算。',
     returns_details: '退换与退款政策将在结算开放前公布。',
     footer_tag: '精选犬猫好物。',
-    footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款',
+    footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款', footer_faq: '常见问题',
     cart: '购物车', subtotal: '商品小计', shipping: '运费', shipping_at_checkout: '结算时计算',
     taxes: '税费', taxes_at_checkout: '结算时计算',
     checkout: '去结算', checkout_note: '结算尚未开放——支付通道还未接通。',
@@ -346,6 +352,11 @@ const I18N = {
     co_address_required: '请填写收货地址。',
     co_shipping_required: '请选择配送方式。',
     co_payment_boundary: '支付通道尚未接通，未创建订单。你的购物车已保存。',
+    co_payment_boundary_title: '结算即将就绪',
+    co_boundary_saved_cart: '你的购物车、地址和配送方式已保存。',
+    co_boundary_no_charge: '未扣款，也未创建订单。',
+    co_boundary_when: '支付通道接通后即可完成结算。',
+    co_boundary_continue: '返回商店',
     co_error: '结算未能完成，请重试。',
     cart_empty: '购物车是空的', cart_unavailable: '购物车暂时不可用，请刷新页面。',
     cart_continue: '继续购物',
@@ -939,14 +950,38 @@ async function placeOrder() {
     renderCheckout();
     // This is the payment boundary: the US region has no payment provider yet,
     // so there is no order and no payment session to create. We stop here and
-    // say so honestly instead of pretending a payment happened.
-    showToast(t('co_payment_boundary'));
-    closeCheckout();
+    // say so honestly instead of pretending a payment happened. The visitor's
+    // cart (with their address and shipping choice) is preserved, so nothing is
+    // lost when checkout opens later.
+    renderPaymentBoundary();
   } catch (e) {
     showToast(e && e.kind === 'network' ? t('shop_unreachable') : t('co_error'));
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = original; }
   }
+}
+
+// The payment boundary is shown in place of a checkout form once the visitor
+// reaches the point where an order would be created. It is honest: no order is
+// created, no payment is taken, and the cart is kept. This is not a fake
+// success page -- it explains exactly what did and did not happen.
+function renderPaymentBoundary() {
+  const body = document.getElementById('checkoutBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="text-center py-6">
+      <div class="w-14 h-14 mx-auto bg-slate-100 rounded-full flex items-center justify-center mb-4">
+        <i class="fas fa-lock text-slate-500 text-xl"></i>
+      </div>
+      <h4 class="font-bold mb-2">${t('co_payment_boundary_title')}</h4>
+      <p class="text-sm text-slate-500 mb-5">${t('co_payment_boundary')}</p>
+      <div class="space-y-2 text-left text-sm text-slate-600 mb-6">
+        <div class="flex items-start gap-2"><i class="fas fa-check text-emerald-500 mt-0.5"></i><span>${t('co_boundary_saved_cart')}</span></div>
+        <div class="flex items-start gap-2"><i class="fas fa-check text-emerald-500 mt-0.5"></i><span>${t('co_boundary_no_charge')}</span></div>
+        <div class="flex items-start gap-2"><i class="fas fa-clock text-slate-400 mt-0.5"></i><span>${t('co_boundary_when')}</span></div>
+      </div>
+      <button onclick="closeCheckout()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('co_boundary_continue')}</button>
+    </div>`;
 }
 
 // ===== Launch status =====
