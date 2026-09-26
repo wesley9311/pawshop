@@ -56,7 +56,7 @@ probe_catalog=
 probe_headers=
 
 public_paths=(
-  index.html PawShop.html product.html shipping.html returns.html privacy.html
+  index.html PawShop.html product.html shipping.html returns.html privacy.html faq.html
   terms.html catalog.json config.js safe.js store-api.js support.js policy.css favicon.svg
   robots.txt sitemap.xml assets
 )
