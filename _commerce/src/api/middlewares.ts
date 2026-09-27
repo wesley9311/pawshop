@@ -17,13 +17,28 @@ const unavailable = (_req: any, res: any) => {
 // keeps store data unreadable while the admin-only profile is active.
 const commerceOpen = commerceIsOpen(process.env.PAWSHOP_MODE)
 
+// The connector's request signature is an HMAC over the SHA-256 of the body as
+// transmitted, so the raw bytes have to survive parsing. `preserveRawBody` makes
+// Medusa's JSON parser stash the untouched buffer on `req.rawBody`; without it
+// the signature could only be checked against a re-serialised body, which is not
+// the same bytes. The connector is its own namespaced route tree and is never
+// gated by the storefront profile above.
+const connectorBodyParser = {
+  bodyParser: { preserveRawBody: true, sizeLimit: '1mb' },
+  middlewares: [],
+}
+
 export default defineMiddlewares({
-  routes: commerceOpen
-    ? []
-    : [
-        { matcher: '/store', middlewares: [unavailable] },
-        { matcher: '/store/*', middlewares: [unavailable] },
-        { matcher: '/auth/customer', middlewares: [unavailable] },
-        { matcher: '/auth/customer/*', middlewares: [unavailable] },
-      ],
+  routes: [
+    ...(commerceOpen
+      ? []
+      : [
+          { matcher: '/store', middlewares: [unavailable] },
+          { matcher: '/store/*', middlewares: [unavailable] },
+          { matcher: '/auth/customer', middlewares: [unavailable] },
+          { matcher: '/auth/customer/*', middlewares: [unavailable] },
+        ]),
+    { matcher: '/connector/v1', ...connectorBodyParser },
+    { matcher: '/connector/v1/*', ...connectorBodyParser },
+  ],
 })

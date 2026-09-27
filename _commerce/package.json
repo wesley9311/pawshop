@@ -26,6 +26,9 @@
     "backup:production": "node scripts/backup-production.mjs",
     "restore:verify-real": "node scripts/restore-verify-real.mjs",
     "check:types": "tsc --noEmit",
+    "verify:connector-module": "node scripts/verify-connector-module.cjs .medusa/server",
+    "verify:connector-http": "node --experimental-strip-types scripts/verify-connector-http.cjs",
+    "verify:connector-persistence": "node scripts/verify-connector-persistence.mjs",
     "test": "node --test tests/*.test.cjs",
     "test:alert-delivery": "bash tests/alert-delivery/run.sh"
   },

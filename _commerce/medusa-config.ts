@@ -22,6 +22,16 @@ module.exports = defineConfig({
       optimizeDeps: { exclude: ['@medusajs/dashboard'] },
     }),
   },
+  // PawShop Connector persistence is registered in EVERY profile. The connector
+  // is not a production-only feature, and local acceptance has to exercise the
+  // same module graph the host runs, so the production module list is appended
+  // to it rather than substituted for it.
+  modules: [
+    ...(productionMode
+      ? productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage, googleAuth: projectConfig.googleAuth })
+      : []),
+    { resolve: './src/modules/pawshop-connector' },
+  ],
   ...(productionMode
     ? {
         // The admin UI and the API it calls are always served from the same
@@ -42,7 +52,6 @@ module.exports = defineConfig({
         // server-side CORS allowlist (no effect on same-origin requests) and the
         // origin password-reset.js builds its links from.
         featureFlags: { caching: true },
-        modules: productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage, googleAuth: projectConfig.googleAuth }),
       }
     : {}),
 })

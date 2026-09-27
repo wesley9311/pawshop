@@ -68,6 +68,28 @@ server {
     proxy_set_header X-Forwarded-Proto https;
     proxy_read_timeout 60s;
   }
+  # CloudGull Connector API V1.1 (2026-09-27). Server-to-server, so there is no
+  # Basic Auth gate and none is wanted: every request is authenticated by an HMAC
+  # request signature over the raw body, a service token, a scope check and a
+  # replay guard, all enforced inside the connector.
+  #
+  # The trailing slash on proxy_pass is load-bearing. The signature covers the
+  # PUBLIC path (/api/connector/v1/...), and the connector rebuilds that string
+  # from its own mounted path (/connector/v1/...). This rewrite is what ties the
+  # two together; forwarding the public path unchanged would make the canonical
+  # string depend on the internal route layout instead.
+  location /api/connector/v1/ {
+    limit_req zone=pawshop_connector burst=30 nodelay;
+    limit_req_status 429;
+    client_max_body_size 2m;
+    proxy_pass http://127.0.0.1:9000/connector/v1/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 60s;
+  }
+
   # Owner-facing admin console (2026-09-19). The UI is the stock Medusa admin
   # build served at /app; its router basename and its asset URLs are compiled in
   # as /app (basename:"/app", and the chunk loader builds "/app/"+name), so the
