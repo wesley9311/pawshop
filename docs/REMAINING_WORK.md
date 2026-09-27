@@ -10,7 +10,30 @@
 
 ## 0. 当前没有阻塞项；关键路径交回店主
 
-**2026-09-26 前台 Storefront 完整化结项（本轮）**：把前台推进到「每页能进、每页有状态、关键操作走通闭环」，范围=**支付前闭环 + 状态完善**（支付/订单仍被海外主体硬阻塞，保留真实边界，不造假订单）。随展示站发版 `235745e`（`da66764` + `235745e`）上线，**只动展示站静态文件，商务 `e443e7f` 不动**：
+**2026-09-27 CloudGull Connector V1.1（PawShop 侧）轮（本轮）**：按 CloudGull 已冻结的 V1.1 契约，只实现 PawShop 侧的同一份 `/api/connector/v1/products`。**代码 + 本地验收全绿，停在凭据边界，未部署。**
+
+- **两个端点**：`GET /api/connector/v1/health`、`PUT /api/connector/v1/products/{source_product_id}`（其余动词一律 404）。覆盖 HMAC-SHA256 / timestamp / nonce / 防重放 / service token + scope / current+next 密钥轮换 / 幂等 / 商品 create+update / 稳定外部商品 id / 结构化错误映射 / 审计。
+- **新模块 `pawshop-connector`**：4 张自己建的表（商品映射 / 幂等 / 重放 nonce / 审计）。迁移**只新增 Connector 自己的表，不改 commerce 核心表**；Redis/内存**不作**最终审计来源。
+- **验收**：`_commerce` **173/173**（其中 17 项为本连接器，黄金向量由 CloudGull **真实签名器**跑出）、HTTP 端到端 **77 项 0 失败**（签名侧用 CloudGull 自己的代码）、真实 Postgres 引擎（PGlite）持久化 **16/16**、`tsc` **0 错**；根目录 `check-security` / `check-html` / 前台 22 项全绿。
+- **边界（红线）**：**未接任何真实凭据、未建 `/etc/pawshop/connector.env`、未部署、未发版、未改生产 nginx、未重启 commerce**；ops 模板只落仓库（nginx 尾斜杠改写段 + 独立限速文件 + systemd 可选 `EnvironmentFile` + 空白 env 模板）。
+- **Owner Pending Decision（只登记、不执行）**：① 是否现在部署 → **等 CloudGull 真实 handshake 阶段再单独批准**；② CloudGull 正式媒体域名 → **域名确定后再精确加入白名单，不用通配符**；本次**不动**现有生产 nginx 与图片白名单。详见 `docs/PAWSHOP_CONNECTOR_V1.md`、`docs/OWNER_ACTIONS_ZH.md` §10。
+
+---
+
+**2026-09-27 PayPal FINALIZATION 轮（上一轮）**：支付方向从 Stripe 改为 **PayPal**（V1 PSP，大陆个体工商户可开 PayPal，海外主体不再阻塞）。代码全部就绪并通过本地测试，**唯一硬阻塞 = 店主还没给 PayPal Sandbox 凭据**，所以本轮停在「代码+反代就绪，待凭据跑 E2E」。
+
+- **Owner 已放行**：允许仅为 PayPal webhook 加最小 Nginx 反代（`POST /hooks/payment/paypal` → Medusa），不改其他路由，不碰 Media/Auth/CDN/CloudGull。
+- **修复两个 P0**（暴露 webhook 前必须补，详见 `docs/PAYPAL_SANDBOX_E2E.md`）：
+  1. **webhook 无签名验证** → 已补 `verifyWebhookSignature`（调 PayPal `/v1/notifications/verify-webhook-signature`，失败即 `not_supported` 不建单）。
+  2. **authorize 只 GET 不授权** → 已修 `authorizePayment` 主动调 `POST /v2/checkout/orders/{id}/authorize`（PayPal `intent=AUTHORIZE` 订单 approve 后必须商户主动授权，否则无可捕获的 authorization）。
+- **就绪但未部署**：Nginx webhook 反代 canonical（`ops/nginx/sites-available/pawshop` + 限速区 `pawshop_webhook`）；E2E 手册 `docs/PAYPAL_SANDBOX_E2E.md`。
+- **本地验证**：前台 22 + commerce 156 项、tsc、check-security、html 全绿。
+
+**下一步（卡在店主）**：到 developer.paypal.com 建 App，给 Sandbox Client ID/Secret + Webhook ID + 买家测试账号（步骤见 `docs/OWNER_ACTIONS_ZH.md` §4）。给齐后我部署反代 + 发版 + 跑完整 Sandbox E2E。
+
+---
+
+**2026-09-26 前台 Storefront 完整化结项（上一轮）**：把前台推进到「每页能进、每页有状态、关键操作走通闭环」，范围=**支付前闭环 + 状态完善**（支付/订单仍被海外主体硬阻塞，保留真实边界，不造假订单）。随展示站发版 `235745e`（`da66764` + `235745e`）上线，**只动展示站静态文件，商务 `e443e7f` 不动**：
 
 - **旧 `product.html` 停用**：它是死代码（静态 `catalog.json` + `localStorage` 假购物车 + prelaunch 旧文案），与主 SPA 两套系统互相矛盾。已改为 **302 重定向 shim**（meta refresh + canonical → `PawShop.html`），sitemap 移除、tailwind content 移除。
 - **新增 `faq.html`**（诚实文案：商品+购物车已上线、支付未接通、不虚假承诺），挂 footer；`deploy-static.sh` 白名单同步加 faq.html。

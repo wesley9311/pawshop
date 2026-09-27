@@ -68,6 +68,24 @@ server {
     proxy_set_header X-Forwarded-Proto https;
     proxy_read_timeout 60s;
   }
+  # PayPal webhook ingress (2026-09-27). PayPal POSTs payment events here after
+  # the buyer approves/captures/refunds. No Basic Auth on purpose: PayPal's
+  # server-to-server callback has no user and cannot supply credentials. The real
+  # access control is the provider's webhook signature verification — Medusa's
+  # /hooks/payment/:provider route forwards the raw body + headers without
+  # verifying, so the PayPal provider asks PayPal to verify the transmission
+  # before acting on any event. This is the ONLY additional route: nothing else
+  # (Media/Auth/CDN/CloudGull) is touched.
+  location /hooks/payment/ {
+    limit_req zone=pawshop_webhook burst=30 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 60s;
+  }
   # CloudGull Connector API V1.1 (2026-09-27). Server-to-server, so there is no
   # Basic Auth gate and none is wanted: every request is authenticated by an HMAC
   # request signature over the raw body, a service token, a scope check and a

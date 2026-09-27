@@ -24,4 +24,10 @@ const PAWSHOP_PUBLIC_CONFIG = Object.freeze({
   // Hostnames allowed to serve product images: the object-storage bucket the
   // admin uploads to. safe.js drops every other host.
   imageHosts: ['pawlivora-products-us-west-1.oss-us-west-1.aliyuncs.com', 'media.pawlivora.com'],
+
+  // The payment provider the storefront offers at checkout. This is the
+  // provider's registered id in the payment module (pp_<identifier>_<id>), a
+  // public identifier, not a credential. When no payment provider is enabled
+  // for the region, checkout stops at the honest "not connected yet" boundary.
+  paypalProviderId: 'pp_paypal_paypal',
 });

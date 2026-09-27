@@ -57,3 +57,38 @@ test('the auth module adds google only when the full credential triple is presen
   const google = withGoogle.find(p => p.id === 'google');
   assert.deepEqual(google.options, googleAuth);
 });
+
+test('the payment module (and PayPal provider) is registered only when credentials are present', () => {
+  const redisUrl = 'rediss://user:secret@redis.internal:6380/0';
+  const fileStorage = {
+    file_url: 'https://media.example.com', access_key_id: 'fixture-access',
+    secret_access_key: 'fixture-secret-value', region: 'auto', bucket: 'pawshop-media',
+    endpoint: 'https://s3.example.com', prefix: 'products/',
+  };
+  const payment = (paypal) => productionModules({ redisUrl, fileStorage, paypal })
+    .find(m => m.resolve === '@medusajs/medusa/payment');
+
+  // Absent / null -> no payment module: the framework default (system provider
+  // alone) stays in place and nothing money-capable is exposed.
+  assert.equal(payment(undefined), undefined);
+  assert.equal(payment(null), undefined);
+
+  // Full PayPal config -> payment module registered with exactly the PayPal
+  // provider, and the system provider is NOT listed (it must never reach a
+  // customer-facing region).
+  const paypal = {
+    client_id: 'fixture-client-id',
+    client_secret: 'fixture-client-secret',
+    sandbox: true,
+    webhook_id: 'WH-1234567890',
+    return_url: 'https://pawlivora.com/order/complete',
+    cancel_url: 'https://pawlivora.com/checkout',
+  };
+  const withPaypal = payment(paypal);
+  assert.ok(withPaypal, 'payment module registered when PayPal is configured');
+  assert.equal(withPaypal.options.providers.length, 1);
+  const provider = withPaypal.options.providers[0];
+  assert.equal(provider.id, 'paypal');
+  assert.equal(provider.resolve, './src/modules/paypal');
+  assert.deepEqual(provider.options, paypal);
+});

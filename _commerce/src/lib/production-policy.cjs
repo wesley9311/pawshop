@@ -164,6 +164,54 @@ function validateProductionEnvironment(env) {
     ? { user: ['emailpass', 'google'] }
     : { user: ['emailpass'] };
 
+  // PayPal is OPTIONAL at this layer, exactly like Google OAuth: while the owner
+  // has not provisioned PayPal developer credentials, all six values are absent
+  // and the payment module stays at the framework default (system provider only,
+  // which never takes money). A partial set is a configuration error, not a
+  // feature toggle — it must fail startup rather than register a half-wired
+  // provider that would expose `pp_paypal_paypal` without valid credentials.
+  const paypalEnv = {
+    client_id: env.PAYPAL_CLIENT_ID || '',
+    client_secret: env.PAYPAL_CLIENT_SECRET || '',
+    sandbox: env.PAYPAL_SANDBOX,
+    webhook_id: env.PAYPAL_WEBHOOK_ID || '',
+    return_url: env.PAYPAL_RETURN_URL || '',
+    cancel_url: env.PAYPAL_CANCEL_URL || '',
+  };
+  const paypalPresent = [
+    paypalEnv.client_id,
+    paypalEnv.client_secret,
+    paypalEnv.sandbox,
+    paypalEnv.webhook_id,
+    paypalEnv.return_url,
+    paypalEnv.cancel_url,
+  ].filter(Boolean).length;
+  let paypal = null;
+  if (paypalPresent > 0) {
+    if (paypalPresent !== 6) {
+      throw new Error('PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_SANDBOX, PAYPAL_WEBHOOK_ID, PAYPAL_RETURN_URL and PAYPAL_CANCEL_URL must be provided together.');
+    }
+    if (!['true', 'false'].includes(paypalEnv.sandbox)) {
+      throw new Error('PAYPAL_SANDBOX must be "true" or "false".');
+    }
+    if (!/^https:\/\//.test(paypalEnv.return_url) || !/^https:\/\//.test(paypalEnv.cancel_url)) {
+      throw new Error('PAYPAL_RETURN_URL and PAYPAL_CANCEL_URL must be absolute https URLs.');
+    }
+    // The return URL must live on the storefront origin, so a PayPal redirect can
+    // never bounce a buyer to an unrelated host.
+    if (!paypalEnv.return_url.startsWith(storeCors + '/') && paypalEnv.return_url !== storeCors) {
+      throw new Error('PAYPAL_RETURN_URL must live on the storefront origin.');
+    }
+    paypal = {
+      client_id: paypalEnv.client_id,
+      client_secret: paypalEnv.client_secret,
+      sandbox: paypalEnv.sandbox === 'true',
+      webhook_id: paypalEnv.webhook_id,
+      return_url: paypalEnv.return_url,
+      cancel_url: paypalEnv.cancel_url,
+    };
+  }
+
   return {
     databaseUrl,
     redisUrl,
@@ -171,6 +219,7 @@ function validateProductionEnvironment(env) {
     topology,
     fileStorage,
     googleAuth,
+    paypal,
     mode: env.PAWSHOP_MODE,
     commerceOpen: commerceIsOpen(env.PAWSHOP_MODE),
     http: { storeCors, adminCors, authCors: adminCors, jwtSecret: env.JWT_SECRET, cookieSecret: env.COOKIE_SECRET, authMethodsPerActor },

@@ -378,6 +378,64 @@
         );
         return normalizeCart(payload && payload.cart);
       },
+
+      // Payment: create a payment collection for the cart, then a payment
+      // session for a chosen provider. The session carries the provider's
+      // redirect/approval URL back to the storefront so the buyer can approve
+      // the payment off-site (e.g. PayPal). No money moves here — that only
+      // happens on the provider's page and via its webhook.
+
+      async createPaymentCollection(cartId) {
+        var payload = await request('/payment-collections', {
+          method: 'POST',
+          body: { cart_id: cartId },
+        });
+        var collection = payload && payload.payment_collection;
+        return collection && isNonEmptyString(collection.id) ? collection.id : null;
+      },
+
+      async createPaymentSession(paymentCollectionId, providerId) {
+        var payload = await request(
+          '/payment-collections/' + encodeURIComponent(paymentCollectionId) + '/payment-sessions',
+          { method: 'POST', body: { provider_id: providerId } },
+        );
+        var collection = payload && payload.payment_collection;
+        var sessions = collection && Array.isArray(collection.payment_sessions)
+          ? collection.payment_sessions : [];
+        // The session the provider just initialized carries its redirect target
+        // in `data.approval_url` (set by the provider's initiatePayment).
+        for (var i = 0; i < sessions.length; i++) {
+          var session = sessions[i];
+          if (session && session.data && isNonEmptyString(session.data.approval_url)) {
+            return {
+              id: session.id,
+              providerId: session.provider_id || providerId,
+              approvalUrl: session.data.approval_url,
+            };
+          }
+        }
+        return null;
+      },
+
+      // Guest order lookup: order number + email → verified summary. A 404
+      // means "no such order" and is indistinguishable from a wrong email, so
+      // the caller shows a single honest "not found" state. When only a cart
+      // id is known (right after PayPal approval, before the order number is
+      // shown), pass cartId instead of orderNumber to resolve through the
+      // order→cart link.
+      async lookupOrder(orderNumber, email, cartId) {
+        try {
+          var query = isNonEmptyString(orderNumber)
+            ? 'order_number=' + encodeURIComponent(orderNumber)
+            : 'cart_id=' + encodeURIComponent(cartId || '');
+          query += '&email=' + encodeURIComponent(email);
+          var payload = await request('/pawshop-orders/lookup?' + query);
+          return payload && payload.order ? payload.order : null;
+        } catch (error) {
+          if (error && error.kind === 'not_found') return null;
+          throw error;
+        }
+      },
     };
   }
 

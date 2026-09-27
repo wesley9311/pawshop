@@ -28,13 +28,17 @@ const forbidden = [
   ['browser image-host secret', /pawshop_imgbb_key/i],
   ['fake order success', /Order placed!|订单已提交|ORDER SAVED/i],
   ['client-side payment choice', /name=["']payment["']|PayPal balance or card|Visa \/ Mastercard \/ Amex/i],
-  // Checkout is not connected yet. A storefront must not be able to complete a
-  // cart, open a payment session, or pick a payment provider on its own. The
-  // checkout form may write email/address/shipping back to the cart and stop at
-  // the payment boundary, but it must never call the completion endpoint.
+  // Checkout is real now. The storefront may create a payment collection and
+  // a payment session (to hand the buyer off to PayPal) but it must NEVER
+  // complete a cart itself — the order is created only by the provider's
+  // webhook (authorized → complete-cart workflow), which is the guarantee that
+  // the page cannot fabricate an order or mark a payment successful on its own.
   ['storefront completes a cart', /\/complete\b|completeCart/i],
-  ['storefront touches payment sessions', /payment[-_]?sessions?|payment[-_]?collection/i],
-  ['storefront sends customer credentials', /emailpass|customer\/register|\/auth\/customer/i]
+  ['storefront sends customer credentials', /emailpass|customer\/register|\/auth\/customer/i],
+  // The system provider takes money-less "authorized" payments and would let an
+  // order complete without real payment. It must never be referenced on the
+  // storefront (or exposed to a customer-facing region).
+  ['system payment provider leaked', /pp_system|pp_system_default/],
 ];
 
 const failures = [];

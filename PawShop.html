@@ -135,6 +135,7 @@
           <li><a href="shipping.html" class="hover:text-white" data-i18n="footer_shipping">Shipping policy</a></li>
           <li><a href="returns.html" class="hover:text-white" data-i18n="footer_returns">Returns &amp; refunds</a></li>
           <li><a href="faq.html" class="hover:text-white" data-i18n="footer_faq">FAQ</a></li>
+          <li><a href="#" class="hover:text-white" onclick="openOrderLookup(); return false;" data-i18n="order_lookup_link">Track an order</a></li>
           <li><a href="privacy.html" class="hover:text-white">Privacy</a></li>
           <li><a href="terms.html" class="hover:text-white">Terms</a></li>
         </ul>
@@ -197,6 +198,21 @@
     </div>
     <div class="p-5 space-y-5">
       <div id="checkoutBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Order Modal (success / confirmation / lookup) ===== -->
+<div id="orderModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-4" onclick="closeOrder()">
+  <div class="bg-white rounded-xl w-full max-w-lg max-h-[94vh] overflow-y-auto" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+      <h3 class="font-bold" id="orderModalTitle" data-i18n="order_title">Your order</h3>
+      <button onclick="closeOrder()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="p-5 space-y-5">
+      <div id="orderBody"></div>
     </div>
   </div>
 </div>
@@ -306,6 +322,28 @@ const I18N = {
     waitlist_body: 'The catalog and cart are live. Checkout opens once payment is connected.',
     waitlist_cta: 'Check launch status', waitlist_no: 'No thanks',
     waitlist_closed: 'Checkout opens once payment is connected. No order was created.',
+    order_title: 'Your order',
+    order_confirming: 'Confirming your order…',
+    order_confirming_note: 'You approved the payment. Your order is being finalized — this may take a few seconds.',
+    order_success: 'Order placed',
+    order_success_note: 'Thank you! Your order is confirmed. A confirmation will follow by email.',
+    order_number: 'Order number',
+    order_status: 'Status',
+    order_total: 'Total',
+    order_placed_on: 'Placed on',
+    order_items: 'Items',
+    order_shipping_to: 'Shipping to',
+    order_not_found: 'We could not find an order with those details.',
+    order_lookup_title: 'Look up an order',
+    order_lookup_note: 'Enter your order number and the email you used at checkout.',
+    order_lookup_email: 'Email',
+    order_lookup_cta: 'Find my order',
+    order_lookup_link: 'Track an order',
+    order_back: 'Back to shop',
+    order_pending: 'Payment authorized, order being created…',
+    order_retry: 'Check again',
+    co_pay_redirect: 'Redirecting to secure payment…',
+    co_pay_error: 'Payment could not be started. Please try again.',
   },
   zh: {
     topbar_note: '所有订单统一运费',
@@ -369,6 +407,28 @@ const I18N = {
     waitlist_body: '商品与购物车已启用，支付接通后即可结算。',
     waitlist_cta: '查看上线状态', waitlist_no: '关闭',
     waitlist_closed: '支付接通后即可结算。没有创建任何订单。',
+    order_title: '你的订单',
+    order_confirming: '正在确认订单…',
+    order_confirming_note: '你已授权支付。订单正在生成，可能需要几秒钟。',
+    order_success: '下单成功',
+    order_success_note: '谢谢！你的订单已确认，确认邮件稍后送达。',
+    order_number: '订单号',
+    order_status: '状态',
+    order_total: '合计',
+    order_placed_on: '下单时间',
+    order_items: '商品',
+    order_shipping_to: '收货地',
+    order_not_found: '未找到匹配的订单，请核对信息。',
+    order_lookup_title: '查询订单',
+    order_lookup_note: '输入订单号和下单时使用的邮箱。',
+    order_lookup_email: '邮箱',
+    order_lookup_cta: '查询订单',
+    order_lookup_link: '追踪订单',
+    order_back: '返回商店',
+    order_pending: '支付已授权，订单生成中…',
+    order_retry: '再查一次',
+    co_pay_redirect: '正在跳转到安全支付…',
+    co_pay_error: '无法发起支付，请重试。',
   },
 };
 
@@ -939,7 +999,7 @@ async function placeOrder() {
   const original = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = t('co_placing'); }
   try {
-    // Write every field back to the real cart before reaching the boundary.
+    // Write every field back to the real cart before starting payment.
     cart = await store.setEmail(cart.id, email);
     cart = await store.setShippingAddress(cart.id, address);
     if (checkoutSelectedOption) {
@@ -948,15 +1008,44 @@ async function placeOrder() {
     cartState = 'ready';
     renderCart();
     renderCheckout();
-    // This is the payment boundary: the US region has no payment provider yet,
-    // so there is no order and no payment session to create. We stop here and
-    // say so honestly instead of pretending a payment happened. The visitor's
-    // cart (with their address and shipping choice) is preserved, so nothing is
-    // lost when checkout opens later.
-    renderPaymentBoundary();
+
+    // Start the payment: create a payment collection, then a PayPal payment
+    // session. The session returns PayPal's approval URL; we hand the buyer
+    // over to PayPal to authorize. The order itself is created by PayPal's
+    // webhook once the buyer approves — this page never fabricates an order.
+    const providerId = CONFIG.paypalProviderId || '';
+    let approvalUrl = '';
+    if (providerId) {
+      try {
+        const collectionId = await store.createPaymentCollection(cart.id);
+        if (collectionId) {
+          const session = await store.createPaymentSession(collectionId, providerId);
+          if (session && session.approvalUrl) approvalUrl = session.approvalUrl;
+        }
+      } catch (_) {
+        // No payment provider is enabled for this region (or the provider did
+        // not return an approval URL) — fall through to the honest boundary.
+        approvalUrl = '';
+      }
+    }
+
+    if (!approvalUrl) {
+      renderPaymentBoundary();
+      return;
+    }
+
+    // Remember enough to let the buyer look up their order after returning.
+    try {
+      localStorage.setItem('pawshop_order_lookup', JSON.stringify({
+        cartId: cart.id,
+        email: email,
+      }));
+    } catch (_) { /* storage unavailable — the lookup is still reachable manually */ }
+
+    // Hand off to PayPal. Same-tab redirect so the return URL comes back here.
+    window.location.href = approvalUrl;
   } catch (e) {
     showToast(e && e.kind === 'network' ? t('shop_unreachable') : t('co_error'));
-  } finally {
     if (btn) { btn.disabled = false; btn.textContent = original; }
   }
 }
@@ -984,6 +1073,137 @@ function renderPaymentBoundary() {
     </div>`;
 }
 
+// ===== Order status / success / lookup =====
+let orderLookupTimer = null;
+
+function closeOrder() {
+  if (orderLookupTimer) { clearInterval(orderLookupTimer); orderLookupTimer = null; }
+  document.getElementById('orderModal').classList.remove('open');
+}
+
+function openOrderLookup() {
+  document.getElementById('orderModal').classList.add('open');
+  renderOrderLookupForm();
+}
+
+function renderOrderLookupForm(prefillEmail) {
+  const body = document.getElementById('orderBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div>
+      <p class="text-sm text-slate-500 mb-4">${t('order_lookup_note')}</p>
+      <label class="block text-sm font-medium mb-1" for="lookupNumber">${t('order_number')}</label>
+      <input type="text" id="lookupNumber" placeholder="1001" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <label class="block text-sm font-medium mb-1" for="lookupEmail">${t('order_lookup_email')}</label>
+      <input type="email" id="lookupEmail" value="${safeHtml(prefillEmail || '')}" placeholder="you@example.com" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-4 focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <button onclick="submitOrderLookup()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_lookup_cta')}</button>
+    </div>`;
+}
+
+async function submitOrderLookup() {
+  const number = document.getElementById('lookupNumber').value.trim();
+  const email = document.getElementById('lookupEmail').value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast(t('co_email_required')); return; }
+  if (!/^\d+$/.test(number)) { showToast(t('order_not_found')); return; }
+  try {
+    const order = await store.lookupOrder(number, email);
+    renderOrderResult(order);
+  } catch (e) {
+    showToast(e && e.kind === 'network' ? t('shop_unreachable') : t('order_not_found'));
+  }
+}
+
+function renderOrderResult(order) {
+  const body = document.getElementById('orderBody');
+  if (!body) return;
+  if (!order) {
+    body.innerHTML = `
+      <div class="text-center py-6">
+        <div class="w-14 h-14 mx-auto bg-slate-100 rounded-full flex items-center justify-center mb-4">
+          <i class="fas fa-search text-slate-400 text-xl"></i>
+        </div>
+        <p class="text-sm text-slate-500 mb-6">${t('order_not_found')}</p>
+        <button onclick="renderOrderLookupForm()" class="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('order_retry')}</button>
+      </div>`;
+    return;
+  }
+  const items = (order.items || []).map(it => `
+    <div class="flex items-center justify-between py-2 border-b border-slate-100">
+      <span class="text-sm">${safeHtml(it.title)} <span class="text-slate-400">×${it.quantity}</span></span>
+      <span class="text-sm font-medium">${money(it.total)}</span>
+    </div>`).join('');
+  const placedOn = order.created_at ? new Date(order.created_at).toLocaleString() : '';
+  body.innerHTML = `
+    <div>
+      <div class="flex items-center gap-2 mb-4">
+        <div class="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
+          <i class="fas fa-check text-emerald-600"></i>
+        </div>
+        <div>
+          <div class="font-semibold">${t('order_success')}</div>
+          <div class="text-xs text-slate-400">${t('order_number')}: ${order.order_number}</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
+        <div><div class="text-slate-400 text-xs">${t('order_status')}</div><div class="font-medium">${safeHtml(order.status || '')}</div></div>
+        <div><div class="text-slate-400 text-xs">${t('order_total')}</div><div class="font-medium">${money(order.total)}</div></div>
+        ${placedOn ? `<div><div class="text-slate-400 text-xs">${t('order_placed_on')}</div><div class="font-medium">${placedOn}</div></div>` : ''}
+        ${order.shipping_city ? `<div><div class="text-slate-400 text-xs">${t('order_shipping_to')}</div><div class="font-medium">${safeHtml(order.shipping_city)}</div></div>` : ''}
+      </div>
+      <h4 class="font-semibold text-sm mb-2">${t('order_items')}</h4>
+      ${items}
+      <button onclick="closeOrder()" class="w-full mt-5 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_back')}</button>
+    </div>`;
+}
+
+// After PayPal approval the buyer lands back on the storefront with the order
+// still being finalized by PayPal's webhook. We poll the lookup (by cart id,
+// which we saved before redirecting) until the order exists, then show it.
+async function handlePayPalReturn() {
+  let lookup;
+  try { lookup = JSON.parse(localStorage.getItem('pawshop_order_lookup') || 'null'); } catch (_) { lookup = null; }
+  if (!lookup || !lookup.email) return;
+
+  const isReturn = /[?&](token|PayerID|paymentId)=/.test(window.location.search);
+  if (!isReturn) return;
+
+  document.getElementById('orderModal').classList.add('open');
+  const body = document.getElementById('orderBody');
+  body.innerHTML = `
+    <div class="text-center py-6">
+      <div class="w-14 h-14 mx-auto bg-slate-100 rounded-full flex items-center justify-center mb-4">
+        <i class="fas fa-spinner fa-spin text-slate-500 text-xl"></i>
+      </div>
+      <h4 class="font-bold mb-2">${t('order_confirming')}</h4>
+      <p class="text-sm text-slate-500">${t('order_confirming_note')}</p>
+    </div>`;
+
+  let attempts = 0;
+  orderLookupTimer = setInterval(async () => {
+    attempts += 1;
+    try {
+      const order = await store.lookupOrder(null, lookup.email, lookup.cartId);
+      if (order) {
+        clearInterval(orderLookupTimer);
+        orderLookupTimer = null;
+        try { localStorage.removeItem('pawshop_order_lookup'); } catch (_) {}
+        renderOrderResult(order);
+      } else if (attempts >= 20) {
+        clearInterval(orderLookupTimer);
+        orderLookupTimer = null;
+        body.innerHTML = `
+          <div class="text-center py-6">
+            <div class="w-14 h-14 mx-auto bg-slate-100 rounded-full flex items-center justify-center mb-4">
+              <i class="fas fa-clock text-slate-400 text-xl"></i>
+            </div>
+            <p class="text-sm text-slate-500 mb-6">${t('order_pending')}</p>
+            <button onclick="openOrderLookup()" class="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('order_retry')}</button>
+          </div>`;
+      }
+    } catch (_) { /* transient — keep polling */ }
+  }, 2000);
+}
+
 // ===== Launch status =====
 function openWaitlist() { document.getElementById('waitlistModal').classList.add('open'); }
 function submitWaitlist() {
@@ -1005,6 +1225,7 @@ document.addEventListener('keydown', function (e) {
     closeCart();
     closeProduct();
     closeCheckout();
+    closeOrder();
     document.getElementById('waitlistModal').classList.remove('open');
   }
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
@@ -1048,6 +1269,7 @@ applyI18n();
 renderProducts();
 renderCart();
 bootstrap();
+handlePayPalReturn();
 </script>
 
 </body>

@@ -28,7 +28,7 @@ module.exports = defineConfig({
   // to it rather than substituted for it.
   modules: [
     ...(productionMode
-      ? productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage, googleAuth: projectConfig.googleAuth })
+      ? productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage, googleAuth: projectConfig.googleAuth, paypal: projectConfig.paypal })
       : []),
     { resolve: './src/modules/pawshop-connector' },
   ],

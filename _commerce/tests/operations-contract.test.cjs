@@ -8,6 +8,7 @@ const {
   assertProductionBackupManifest, backupKeyFingerprint, backupManifestHmac, constrainedBackupPath, equalHex,
   manifestKeyTest, matchBackupKeyRing,
 } = require('../scripts/backup-integrity.cjs');
+const { requiredFields } = require('../scripts/production-env-file.cjs');
 
 const root = resolve(__dirname, '..');
 const backupIntegrity = readFileSync(resolve(root, 'scripts/backup-integrity.cjs'), 'utf8');
@@ -241,6 +242,27 @@ test('systemd service is unprivileged, hardened, and verifies startup', () => {
   assert.match(backupService, /^EnvironmentFile=\/etc\/pawshop-backup\/backup\.env$/m);
   assert.match(commerceService, /^InaccessiblePaths=-\/var\/backups\/pawshop -\/etc\/pawshop-backup$/m);
   assert.doesNotMatch(commerceService, /0\.0\.0\.0|--host\s+::/);
+});
+
+// The closed commerce.env contract is what the startup preflight parses
+// (ExecStartPre -> preflight-production-host.mjs). Adding a key to it does not
+// degrade gracefully: the parser throws, the unit refuses to start, and the
+// storefront API goes down with it — one process serves both the shop and the
+// admin. So every credential family gets its own EnvironmentFile instead. This
+// pins both halves of the rule, so a future "just add PAYPAL_X to commerce.env"
+// cannot land silently and take the shop down on the next restart.
+test('credential families never enter the closed commerce.env contract', () => {
+  assert.equal(requiredFields.length, 20);
+  for (const field of requiredFields) {
+    assert.doesNotMatch(field, /^(PAYPAL_|GOOGLE_|PAWSHOP_CONNECTOR_)/);
+  }
+  assert.match(commerceService, /^EnvironmentFile=\/etc\/pawshop\/google-oauth\.env$/m);
+  // PayPal and the connector are OPTIONAL (`-`): their absence must degrade to
+  // "feature not configured", and a missing non-optional EnvironmentFile would
+  // make systemd refuse to start the unit outright.
+  assert.match(commerceService, /^EnvironmentFile=-\/etc\/pawshop\/paypal\.env$/m);
+  assert.match(commerceService, /^EnvironmentFile=-\/etc\/pawshop\/connector\.env$/m);
+  assert.doesNotMatch(commerceService, /^EnvironmentFile=\/etc\/pawshop\/(paypal|connector)\.env$/m);
 });
 
 test('Ubuntu bootstrap pins supply chain and keeps data services private', () => {

@@ -23,6 +23,13 @@ EnvironmentFile=/etc/pawshop/google-oauth.env
 # start the unit, and the connector must be unable to take the shop down. With no
 # file present the connector simply answers CONNECTOR_NOT_CONFIGURED.
 EnvironmentFile=-/etc/pawshop/connector.env
+# PayPal credentials (Sandbox today, Live later) live in their own file for the
+# same reason. Putting PAYPAL_* into commerce.env would break the closed 20-key
+# contract: the startup preflight parses that file and rejects any extra field
+# outright, so the unit would refuse to start and take the whole storefront API
+# with it. The leading `-` keeps this file OPTIONAL — with no file present the
+# payment module is simply not registered and no provider is exposed.
+EnvironmentFile=-/etc/pawshop/paypal.env
 Environment=NODE_OPTIONS=--max-old-space-size=768
 ExecStartPre=/usr/bin/node scripts/preflight-production-host.mjs
 ExecStart=/usr/bin/node scripts/run-production.mjs start

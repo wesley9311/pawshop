@@ -168,3 +168,37 @@ test('authMethodsPerActor mirrors the Google credential presence exactly', () =>
   assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullGoogle, GOOGLE_CLIENT_SECRET: 'short' }), /client secret/);
   assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullGoogle, GOOGLE_CALLBACK_URL: 'https://pawlivora.com/wrong' }), /exactly https:\/\/pawlivora\.com\/app\/login/);
 });
+
+test('PayPal is optional but a partial credential set fails closed', () => {
+  const fullPayPal = {
+    PAYPAL_CLIENT_ID: 'fixture-paypal-client',
+    PAYPAL_CLIENT_SECRET: 'fixture-paypal-secret',
+    PAYPAL_SANDBOX: 'true',
+    PAYPAL_WEBHOOK_ID: 'WH-fakewebhookid',
+    PAYPAL_RETURN_URL: 'https://shop.example.com/order/complete',
+    PAYPAL_CANCEL_URL: 'https://shop.example.com/checkout',
+  };
+
+  // Absent -> paypal is null, payment module stays at the framework default.
+  assert.equal(validateProductionEnvironment(valid()).paypal, null);
+
+  // Full set -> resolved config, sandbox coerced to boolean, return URL checked.
+  const full = validateProductionEnvironment({ ...valid(), ...fullPayPal });
+  assert.equal(full.paypal.sandbox, true);
+  assert.equal(full.paypal.client_id, 'fixture-paypal-client');
+  assert.equal(full.paypal.return_url, 'https://shop.example.com/order/complete');
+
+  // Any partial set is a configuration error.
+  const keys = Object.keys(fullPayPal);
+  for (const key of keys) {
+    const partial = { ...fullPayPal };
+    delete partial[key];
+    assert.throws(() => validateProductionEnvironment({ ...valid(), ...partial }), /must be provided together/);
+  }
+
+  // A non-boolean sandbox flag, a non-https return URL, and a return URL that
+  // escapes the storefront origin are each refused.
+  assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_SANDBOX: 'yes' }), /PAYPAL_SANDBOX/);
+  assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_RETURN_URL: 'http://insecure.example.com/x' }), /absolute https/);
+  assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_RETURN_URL: 'https://evil.example.com/order/complete' }), /storefront origin/);
+});

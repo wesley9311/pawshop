@@ -1,0 +1,168 @@
+import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http'
+import { refetchEntities } from '@medusajs/framework/http'
+import { commerceIsOpen } from '../../../../lib/production-modes.cjs'
+
+// Guest order lookup: order number + email → verified order summary.
+//
+// This is a deliberate, minimal substitute for a full customer account. A
+// buyer can look up an order they just placed without registering, by proving
+// they know both the order number (display_id) and the email the order was
+// placed with. That two-factor match is the entire access control: without a
+// customer session there is no other identity to verify against.
+//
+// Anti-enumeration: every failure — a malformed query, an order number that
+// does not exist, or a mismatched email — returns the same 404 body, so a
+// caller cannot distinguish "order exists" from "email is wrong".
+//
+// This route is only served while the storefront profile is open; when the
+// store is closed it 404s like every other customer-facing route.
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+type LookupResponse = {
+  order: {
+    order_number: number
+    status: string
+    payment_status: string | null
+    fulfillment_status: string | null
+    currency_code: string
+    total: number
+    created_at: string
+    email: string
+    items: Array<{
+      title: string
+      quantity: number
+      unit_price: number
+      total: number
+      thumbnail: string | null
+    }>
+    shipping_city: string | null
+    shipping_country: string | null
+  }
+}
+
+export async function GET(req: MedusaRequest, res: MedusaResponse) {
+  // Closed storefront → the whole customer namespace is unreachable.
+  if (!commerceIsOpen(process.env.PAWSHOP_MODE)) {
+    return res.status(404).json({ type: 'not_found' })
+  }
+
+  const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : ''
+  if (!EMAIL_PATTERN.test(email)) {
+    return res.status(404).json({ type: 'not_found' })
+  }
+
+  // Two lookup modes, both gated by the same email:
+  //  1. order_number + email — the buyer already has their order number.
+  //  2. cart_id + email — the buyer just returned from PayPal approval and only
+  //     has their cart id; the order is resolved through the order_cart link.
+  const rawNumber = req.query.order_number
+  const rawCartId = req.query.cart_id
+
+  let orderId: string | null = null
+
+  if (rawNumber !== undefined) {
+    const orderNumber = Number(rawNumber)
+    if (!Number.isInteger(orderNumber) || orderNumber <= 0) {
+      return res.status(404).json({ type: 'not_found' })
+    }
+    const byNumber = await refetchEntities({
+      entity: 'order',
+      idOrFilter: { display_id: orderNumber, email },
+      scope: req.scope,
+      fields: ['id'],
+    })
+    orderId = (byNumber.data?.[0] as { id?: string } | undefined)?.id ?? null
+  } else if (typeof rawCartId === 'string' && rawCartId.trim()) {
+    const link = await refetchEntities({
+      entity: 'order_cart',
+      idOrFilter: { cart_id: rawCartId.trim() },
+      scope: req.scope,
+      fields: ['order_id'],
+    })
+    orderId = (link.data?.[0] as { order_id?: string } | undefined)?.order_id ?? null
+  } else {
+    return res.status(404).json({ type: 'not_found' })
+  }
+
+  if (!orderId) {
+    return res.status(404).json({ type: 'not_found' })
+  }
+
+  // Re-read the order by id with the email still enforced, so a caller who
+  // guesses a cart id cannot read someone else's order without the email.
+  const result = await refetchEntities({
+    entity: 'order',
+    idOrFilter: { id: orderId, email },
+    scope: req.scope,
+    fields: [
+      'id',
+      'display_id',
+      'status',
+      'payment_status',
+      'fulfillment_status',
+      'currency_code',
+      'total',
+      'created_at',
+      'email',
+      'items.title',
+      'items.quantity',
+      'items.unit_price',
+      'items.total',
+      'items.thumbnail',
+      'shipping_address.city',
+      'shipping_address.country_code',
+    ],
+  })
+
+  const order = result.data?.[0] as unknown as
+    | {
+        id: string
+        display_id: number
+        status: string
+        payment_status?: string | null
+        fulfillment_status?: string | null
+        currency_code: string
+        total: number
+        created_at: string
+        email: string
+        items?: Array<{
+          title: string
+          quantity: number
+          unit_price: number
+          total: number
+          thumbnail?: string | null
+        }>
+        shipping_address?: { city: string | null; country_code: string | null } | null
+      }
+    | undefined
+
+  // No match (or email mismatch) → the identical 404 as any other failure.
+  if (!order) {
+    return res.status(404).json({ type: 'not_found' })
+  }
+
+  const payload: LookupResponse = {
+    order: {
+      order_number: order.display_id,
+      status: order.status,
+      payment_status: order.payment_status ?? null,
+      fulfillment_status: order.fulfillment_status ?? null,
+      currency_code: order.currency_code,
+      total: Number(order.total),
+      created_at: order.created_at,
+      email: order.email,
+      items: (order.items || []).map((item) => ({
+        title: item.title,
+        quantity: item.quantity,
+        unit_price: Number(item.unit_price),
+        total: Number(item.total),
+        thumbnail: item.thumbnail ?? null,
+      })),
+      shipping_city: order.shipping_address?.city ?? null,
+      shipping_country: order.shipping_address?.country_code ?? null,
+    },
+  }
+
+  return res.status(200).json(payload)
+}

@@ -1,6 +1,6 @@
 'use strict';
 
-function productionModules({ redisUrl, fileStorage, googleAuth }) {
+function productionModules({ redisUrl, fileStorage, googleAuth, paypal }) {
   if (typeof redisUrl !== 'string' || !redisUrl) {
     throw new Error('A validated Redis URL is required for production modules.');
   }
@@ -82,6 +82,24 @@ function productionModules({ redisUrl, fileStorage, googleAuth }) {
         providers: authProviders,
       },
     },
+    // The payment module is declared only when PayPal credentials are present, so
+    // an un-provisioned deployment keeps the framework's default (the `system`
+    // provider alone, which never takes money). When PayPal is wired, the module is
+    // registered with the PayPal provider and `pp_paypal_paypal` becomes available
+    // to attach to a region. The system provider is NOT listed, so it is never
+    // exposed to a customer-facing region.
+    ...(paypal
+      ? [{
+          resolve: '@medusajs/medusa/payment',
+          options: {
+            providers: [{
+              resolve: './src/modules/paypal',
+              id: 'paypal',
+              options: paypal,
+            }],
+          },
+        }]
+      : []),
   ];
 }
 
