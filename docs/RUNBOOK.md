@@ -1181,9 +1181,15 @@ curl -s -X POST -H "content-type: application/json" -H "x-publishable-api-key: $
 # 监控：systemctl start pawshop-monitor.service → journal 里 store_api_open ok (store route answered 200 with N product(s))
 ```
 
-### 15.4 仍未开的那扇门：`/hooks/payment/`
+### 15.4 `/hooks/payment/` 这扇门（PayPal 已开，Stripe 仍未开）
 
-Stripe 的 webhook 走 `POST /hooks/payment/stripe_stripe`，它**既不能叠 Basic（Stripe 不会带）也不能要 publishable key**，所以它是第三个必须单独开的 location。**本次没开**（支付还没接）。接线时按 §14 的同一套做法加 `location /hooks/payment/`，并且**必须补一条自己的限速**——它是唯一一个"未鉴权、被公网直接投递"的写入口。
+**PayPal 已开（2026-09-27）**：`location /hooks/payment/` + 精确别名 `location = /hooks/payment/paypal`，走自己的限速 zone `pawshop_webhook`。它是全站唯一一个"未鉴权、被公网直接投递"的写入口，安全边界**不在鉴权而在 provider 验签**（Medusa 的 `[provider]` 路由只转发原始 body+headers，不验签），所以 PayPal provider 在 `getWebhookActionAndData` 里先调 PayPal `/v1/notifications/verify-webhook-signature`。
+
+**Stripe 仍没开**：Stripe 走 `POST /hooks/payment/stripe_stripe`，它**既不能叠 Basic（Stripe 不会带）也不能要 publishable key**，接线时按 §14 的同一套做法加 location，并且**必须补一条自己的限速**。
+
+两条通用注意：
+- **URL 最后一段必须是 `<identifier>_<id>`**（本项目 = `paypal_paypal`）。Medusa 用它拼 `pp_${段名}` 反查 provider，写错只会得到一个 `AwilixResolutionError` 并被静默丢弃——路由仍回 200，最难查。
+- **原始字节必须可用**：Medusa 内置 `api/hooks/middlewares.js` 已对 `/hooks/payment/:provider` 设 `preserveRawBody: true`；不要在自己的 `src/api/middlewares.ts` 里给同一 matcher 再叠规则。
 
 ### 15.5 档位写死在代码里的地方（本次已修）
 

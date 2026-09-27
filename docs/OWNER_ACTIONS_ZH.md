@@ -471,7 +471,10 @@ RAM 管理面 ListUsers          -> HTTP 403 NoPermission
 3. 建好后进入该 App，复制两样：
    - **Sandbox** 的 **Client ID**（一串 `A...` 开头的字符）
    - **Secret**（点 Show 显示，一串 `E...` 开头的字符）
-4. 同页/左侧 **Webhooks** → **Add Webhook**，URL 填 `https://pawlivora.com/hooks/payment/paypal`，勾选这三个事件类型：**CHECKOUT.ORDER.APPROVED**、**PAYMENT.CAPTURE.COMPLETED**、**PAYMENT.CAPTURE.DENIED**（退款走 Medusa 主动发起，`PAYMENT.CAPTURE.REFUNDED` 可选）。保存后复制 **Webhook ID**（`WH-...`）。
+4. 同页/左侧 **Webhooks** → **Add Webhook**，URL 填 `https://pawlivora.com/hooks/payment/paypal`，勾选这四个事件类型：**CHECKOUT.ORDER.APPROVED**、**PAYMENT.CAPTURE.PENDING**、**PAYMENT.CAPTURE.COMPLETED**、**PAYMENT.CAPTURE.DENIED**（退款走 Medusa 主动发起，`PAYMENT.CAPTURE.REFUNDED` 可选）。保存后复制 **Webhook ID**——**按实际显示的原样复制即可**，Sandbox 下它常是一串数字、**不一定以 `WH-` 开头**。
+
+> 关于那个 URL：`/hooks/payment/paypal` 是给 Dashboard 用的**短地址**，由生产 nginx 的精确别名桥接到 Medusa 真正认的 `/hooks/payment/paypal_paypal`。两个地址都能通，**照抄上面的短地址即可**，不要自己改成别的段名——Medusa 是按 URL 最后一段拼 `pp_<段名>` 去找 provider 的，写错会静默丢事件（`Could not resolve 'pp_paypal'`，不报 404、不建单）。
+> 另外：**`CHECKOUT.PAYMENT-APPROVAL.REVERSED` 若 Dashboard 暂时没有这个选项，就别管它**，不阻塞主链。
 5. 左侧 **Sandbox → Accounts**，确认有一个 **Personal** 类型买家测试账号（默认自带 `sb-...@personal.example.com`，余额充足）。没有就建一个。
 
 **凭据怎么给我（不落聊天、不进 Git）**：三选一，同告警 webhook 的交接规矩（§1.5/§1D）——

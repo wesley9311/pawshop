@@ -76,10 +76,36 @@ server {
   # verifying, so the PayPal provider asks PayPal to verify the transmission
   # before acting on any event. This is the ONLY additional route: nothing else
   # (Media/Auth/CDN/CloudGull) is touched.
+  #
+  # The URL segment is NOT free-form. Medusa resolves the provider from the last
+  # path segment by building `pp_${segment}`
+  # (@medusajs/medusa .../payment/[provider]/route.js -> payment module
+  # `providerId = pp_<segment>`), and the payment module registers each provider
+  # under `pp_<identifier>_<id>`
+  # (@medusajs/payment .../loaders/providers.js). With identifier `paypal` and
+  # id `paypal` the only working segment is `paypal_paypal`. Posting to
+  # /hooks/payment/paypal fails inside Medusa with
+  # `Could not resolve 'pp_paypal'` and the event is dropped.
   location /hooks/payment/ {
     limit_req zone=pawshop_webhook burst=30 nodelay;
     limit_req_status 429;
     proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 60s;
+  }
+  # Short-path alias for the PayPal webhook. The PayPal developer dashboard's
+  # webhook editor accepts this URL and we registered it as
+  # https://pawlivora.com/hooks/payment/paypal, so the alias keeps the dashboard
+  # configuration working as-is while Medusa receives the provider key it needs.
+  # Exact match (`=`) on purpose: it must not shadow the prefix location above,
+  # which still serves the canonical /hooks/payment/paypal_paypal path unchanged.
+  location = /hooks/payment/paypal {
+    limit_req zone=pawshop_webhook burst=30 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:9000/hooks/payment/paypal_paypal;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

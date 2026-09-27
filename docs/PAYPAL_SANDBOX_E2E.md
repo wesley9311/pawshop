@@ -11,6 +11,16 @@
 1. **Webhook 无签名验证**：Medusa 内置 `POST /hooks/payment/:provider` 只转发原始 body+headers、不验签，任何人能伪造 `CHECKOUT.ORDER.APPROVED` 触发订单创建。已补：`getWebhookActionAndData` 先调 PayPal `/v1/notifications/verify-webhook-signature` 验签，失败即 `not_supported`（框架忽略、不建单）。**这是暴露 webhook 反代的前提。**
 2. **authorize 只 GET 不授权**：PayPal `intent=AUTHORIZE` 的订单，买家 approve 后停在 `APPROVED`、`payments.authorizations` 为空，**商户必须主动调 `POST /v2/checkout/orders/{id}/authorize`** 才产生 authorization。已补：`authorizePayment` 在 `APPROVED` 时主动调 `/authorize` 并读回 authorization_id。否则 Medusa 侧标记 authorized 建单、PayPal 侧却无可捕获的授权，capture 必失败。
 
+### 本轮补充的第三条硬事实：webhook 的 URL 段不是自由文本
+
+Medusa 从 URL 最后一段反查 provider：路由把 `provider` 交给 payment module，module 拼 `pp_${provider}`，于是**只有 `paypal_paypal` 能解析成功**。
+
+- 注册键：`@medusajs/payment .../loaders/providers.js` → `` `pp_${identifier}${id ? `_${id}` : ''}` ``；本项目 `identifier='paypal'`、`id='paypal'` ⇒ `pp_paypal_paypal`。
+- 解析键：`@medusajs/medusa .../api/hooks/payment/[provider]/route.js` → payment module `` `pp_${provider}` ``。
+- 失败态：POST `/hooks/payment/paypal` → `AwilixResolutionError: Could not resolve 'pp_paypal'`，事件被丢弃、**没有任何订单产生**（静默失败，最难查）。
+
+因此：**PayPal Dashboard 里填的 `https://pawlivora.com/hooks/payment/paypal` 靠 nginx 精确别名桥接到 `/hooks/payment/paypal_paypal`**（见 §2）。两个地址都能投递成功，但只有后者是 Medusa 的原生键。
+
 ---
 
 ## 0. 前置条件（全部满足才能开始）
@@ -18,9 +28,9 @@
 | # | 条件 | 来源 | 未满足时 |
 | --- | --- | --- | --- |
 | 0.1 | PayPal **Sandbox** App 的 Client ID / Secret | Owner 在 developer.paypal.com 创建 App | 停止，等凭据 |
-| 0.2 | Sandbox Webhook ID（`WH-...`） | 同一 App 的 Webhooks 页 | 停止，等凭据 |
+| 0.2 | Sandbox Webhook ID（Dashboard 显示的是一串数字 ID，**不一定以 `WH-` 开头**——按拿到什么就填什么，别按格式猜） | 同一 App 的 Webhooks 页 | 停止，等凭据 |
 | 0.3 | 六个 `PAYPAL_*` 环境变量写入生产 **`/etc/pawshop/paypal.env`**（**不是 `commerce.env`**，原因见 §1 的红线） | 见 §1 | 停止，等写入 |
-| 0.4 | Nginx `/hooks/payment/` 反代已部署并 reload | 见 §2 | 停止，先部署反代 |
+| 0.4 | Nginx `/hooks/payment/` 反代已部署并 reload，**且含 `location = /hooks/payment/paypal` 别名**（Dashboard 用的是短地址） | 见 §2 | 停止，先部署反代 |
 | 0.5 | 新 commerce release 已构建、升级迁移、合闸、激活，**且单元已含 `EnvironmentFile=-/etc/pawshop/paypal.env`**（改过单元 ⇒ 必须手工装单元 + `cmp` 收敛 + `daemon-reload`，见 §1.1） | 走标准升级路径（RUNBOOK §11.2） | 停止，先发版 |
 | 0.6 | PayPal Sandbox 买家测试账号（personal，有余额） | 同一开发者账号下创建 | 停止，等账号 |
 
@@ -114,11 +124,27 @@ scp -i ~/.ssh/pawshop_aliyun_ed25519 ops/nginx/conf.d/pawshop-store-ratelimit.co
 nginx -t && systemctl reload nginx
 
 # 4) 验证反代生效（公网，不带签名，应得到 Medusa 的 400「Webhook Error」或 200，而非 nginx 404）
+#    短地址（= PayPal Dashboard 里配的那个，经别名桥接）
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://pawlivora.com/hooks/payment/paypal -H 'content-type: application/json' -d '{}'
-#   期望：不是 404。可能是 400（无签名/无 provider 处理异常）或 200（空事件被忽略）。404 说明反代没生效。
+#    长地址（= Medusa 原生 provider 键，不依赖别名）
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://pawlivora.com/hooks/payment/paypal_paypal -H 'content-type: application/json' -d '{}'
+#   期望：两者都不是 404。可能是 400（无签名/无 provider 处理异常）或 200（空事件被忽略）。404 说明反代没生效。
+#   注意：200 只代表「路由层收下了」，不代表 provider 解析成功 —— 见下面的日志判据。
 ```
 
-> 只加 `location /hooks/payment/` 这一处反代；**不改其他任何 route，不碰 Media/Auth/CDN/CloudGull。**
+**路由可达 ≠ provider 可解析**。200 之后事件走事件总线（`PaymentWebhookEvents.WebhookReceived`，delay 5000ms、attempts 3），由 `payment-webhook` subscriber 反查 provider。必须看日志才能确认哪一步失败：
+
+```bash
+journalctl -u pawshop-commerce --since '2 min ago' | grep -iE 'paypal|webhook'
+```
+- 出现 `Could not resolve 'pp_paypal'` / `Unable to retrieve the payment provider with id: pp_paypal` ⇒ **路径段写错了**，事件被丢弃、不会建单。
+- 出现 `PayPal webhook rejected: signature verification failed.` ⇒ provider 已解析、走到了我们的验签代码（伪造请求的正常结局）。
+- 出现 `PayPal webhook signature verification failed: PayPal POST /v1/notifications/verify-webhook-signature failed (...)` ⇒ 验签调用本身出错（PayPal 侧非 2xx）。
+- 什么 PayPal 行都没有 ⇒ 事件被总线延迟/重试中，或 subscriber 未注册（换 `--since` 再查一次）。
+
+> **签名验证能工作的前提**：`/hooks/payment/:provider` 必须拿到**原始字节**。Medusa 内置中间件 `@medusajs/medusa/dist/api/hooks/middlewares.js` 已为该 matcher 设了 `bodyParser: { preserveRawBody: true }`（POST），所以 `req.rawBody` 有值；subscriber 还会把事件总线 JSON 化后的 `{type:'Buffer',data:[…]}` 还原成 Buffer。**不要**在 `_commerce/src/api/middlewares.ts` 里再给同一 matcher 加规则去覆盖它。
+
+> 只加 `location /hooks/payment/` + `location = /hooks/payment/paypal` 这两处反代；**不改其他任何 route，不碰 Media/Auth/CDN/CloudGull。**
 
 ---
 
@@ -200,13 +226,32 @@ psql ... -c "SELECT id, payment_status FROM \"order\" WHERE display_id = <N>;"
 2. **伪造拒绝（关键安全验证）**：
 ```bash
 # 不带签名头直接 POST 一个伪造的 CHECKOUT.ORDER.APPROVED，期望被签名验证拒绝、不建单
-curl -s -X POST https://pawlivora.com/hooks/payment/paypal \
+curl -s -X POST https://pawlivora.com/hooks/payment/paypal_paypal \
   -H 'content-type: application/json' \
   -d '{"event_type":"CHECKOUT.ORDER.APPROVED","resource":{"purchase_units":[{"custom_id":"payses_fake"}]}}'
 # 期望：200（路由层照收）但 provider 侧 `verifyWebhookSignature` 失败 → 返回 not_supported → 无订单创建。
 # 验证：查库，确认没有新的、状态异常的订单。
 ```
 3. **期望**：伪造事件被拒，库中无新订单。
+
+### 7.1 已实测的判据（2026-09-27，可复现）
+
+伪造请求会走 `verifyWebhookSignature` 的**三条 return false 分支之一**，必须能区分，否则「拒绝了」可能只是因为原始字节没拿到（那真实事件也会一起被拒）：
+
+| 分支 | 触发条件 | 日志特征 |
+| --- | --- | --- |
+| A 缺头 | 五个 `paypal-*` 头缺任一 | 只有 `PayPal webhook rejected: signature verification failed.`，**且无任何外连** |
+| B 无原始体 | `payload.rawData` 空 ⇒ `eventBody` 为空 | 同上，**且无任何外连** |
+| C 真验签失败 | 调了 PayPal，回 `verification_status != SUCCESS` | 同上；**但能看到一条到 PayPal 的出连** |
+
+**关键：PayPal 的验签接口对伪造签名返回 HTTP 200 + `{"verification_status":"FAILURE"}`**（不是 4xx），所以分支 C 不会触发 catch，日志与 A/B 长得一样 —— 只看日志无法区分，必须看外连。
+
+验证 C 的方法（主机，只读）：
+```bash
+getent hosts api-m.sandbox.paypal.com      # -> 151.101.43.1 (paypal-dynamic-cdn.map.fastly.net)
+# 一边发伪造请求，一边采样到该 IP:443 的出连；出现即证明「拿到了原始字节并真的问了 PayPal」
+```
+实测结论：**出现 node → 151.101.43.1:443 的出连** ⇒ 分支 C ⇒ 原始字节链路（built-in `preserveRawBody` + 事件总线 Buffer 还原）成立。这同时证明了真实事件不会被误拒。
 
 ---
 
