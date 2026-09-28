@@ -1,5 +1,6 @@
 import {
   AbstractPaymentProvider,
+  BigNumber,
   MedusaError,
 } from '@medusajs/framework/utils'
 import {
@@ -203,7 +204,7 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
           description: 'PawShop order',
           amount: {
             currency_code,
-            value: Number(amount).toFixed(2),
+            value: new BigNumber(amount).numeric.toFixed(2),
           },
         },
       ],
@@ -321,7 +322,12 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
         'PayPal refund requires a capture id.',
       )
     }
-    const amount = Number(input.amount).toFixed(2)
+    // Medusa passes the refund amount as `refund.raw_amount`, i.e. a
+    // `{ value, precision }` object (a BigNumberInput), NOT a plain number.
+    // `Number({ value, precision })` is NaN, which PayPal rejects with
+    // INVALID_REQUEST. Coerce through BigNumber so any BigNumberInput shape
+    // (raw object, BigNumber instance, string, or number) resolves correctly.
+    const amount = new BigNumber(input.amount).numeric.toFixed(2)
     const refund = await this.request<PayPalRefund>(
       'POST',
       `/v2/payments/captures/${captureId}/refund`,

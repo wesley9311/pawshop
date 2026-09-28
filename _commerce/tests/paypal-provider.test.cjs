@@ -77,6 +77,15 @@ test('validateOptions requires the full credential set and a boolean sandbox fla
   assert.match(source, /sandbox` must be a boolean/);
 });
 
+test('refundPayment coerces the raw_amount BigNumberInput, never Number({value,precision})', () => {
+  // Medusa passes the refund amount as `refund.raw_amount` — a BigNumberInput
+  // shaped like `{ value, precision }` — not a plain number. `Number({ ... })`
+  // is NaN and PayPal rejects it with INVALID_REQUEST, so the provider must
+  // coerce through BigNumber.
+  assert.match(source, /new BigNumber\(input\.amount\)\.numeric/);
+  assert.doesNotMatch(source, /Number\(input\.amount\)\.toFixed\(2\)/);
+});
+
 test('the module registers as a PAYMENT provider with the paypal service', () => {
   assert.match(moduleIndex, /ModuleProvider\(Modules\.PAYMENT/);
   assert.match(moduleIndex, /services: \[PayPalPaymentProviderService\]/);
