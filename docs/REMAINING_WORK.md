@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-26（WorkBuddy 前台 Storefront 完整化：**支付前闭环 + 状态完善**，随 `235745e` 发版上线；订单链路两个硬阻塞已量清）
+更新：2026-09-28（Order Success UX 收尾：成功页真实订单信息 + 查看订单复用 Guest Lookup 预填，随 `74aff04` 两树发版上线；**订单查询已闭环，不再是硬阻塞**）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
@@ -9,6 +9,16 @@
 ---
 
 ## 0. 当前没有阻塞项；关键路径交回店主
+
+**2026-09-28 Order Success UX 收尾（本轮）**：支付成功 → 成功页真实订单信息 → 查看订单 → 订单详情完整，这个「查看订单」闭环走通。**订单查询已不再是硬阻塞**——用 Guest Lookup（`/store/pawshop-orders/lookup`，order_number+email 双因子，无需 customer auth）实现，绕过 `/store/orders` 的 customer 认证要求。随 `74aff04` 两树发版（展示站 deploy-static + 商务标准升级路径），范围只做查看订单，**不加物流追踪**（等真实 fulfillment/carrier/tracking 接入后才有 Track shipment 入口）。
+
+- **后端** `_commerce/src/api/store/pawshop-orders/lookup/route.ts`：新增返回 shipping method（`shipping_method`/`shipping_amount`）与完整收货地址（`shipping_address{first_name,last_name,address_1,address_2,city,province,postal_code,country_code}`）。原只返回 city/country。
+- **前端** `PawShop.html`：`renderOrderResult` 完整展示订单号/email/商品/total/payment status/fulfillment status/shipping method/收货地址/订单状态；成功页加「查看订单」+「返回商店」两按钮；「查看订单」复用 lookup 预填真实 display_id+email（**订单号绝不由前端生成**）。
+- **验证**：28/28 测试 + security PASS；后端 lookup 实测 Order #3 返回完整新字段；两树 current 均 `74aff04`、商务服务 NRestarts=0。
+
+**下一步（先停，校对完整闭环）**：店主 PayPal approve → 成功页真实订单号 → 查看订单 → 命中同一订单详情。确认后再决定下一块。
+
+---
 
 **2026-09-27 CloudGull Connector V1.1（PawShop 侧）轮（本轮）**：按 CloudGull 已冻结的 V1.1 契约，只实现 PawShop 侧的同一份 `/api/connector/v1/products`。**代码 + 本地验收全绿，停在凭据边界，未部署。**
 
@@ -45,6 +55,8 @@
 **本轮量清的两个硬阻塞（订单链路，均非代码可解）**：
 1. **支付**：region `payment_providers` 空 + 店主无海外主体（开不了 Stripe）→ 无真实订单。
 2. **订单查询/详情**：`/store/orders` 需 customer 认证（401），`/store/auth/customer/*` 全 404（**customer auth 未注册**）→ Order Lookup/Detail 依赖 customer 登录，而 customer 登录未启用。这是支付之外的**第二个独立硬阻塞**。
+
+> ⚠️ **订正（2026-09-28）**：第 2 条已被推翻。订单查询通过**自建 Guest Lookup**（`/store/pawshop-orders/lookup`，order_number+email 双因子校验，无需 customer auth）实现，绕过了 `/store/orders` 的 customer 认证要求。09-28 `74aff04` 起该 lookup 返回完整订单字段并驱动成功页「查看订单」闭环。**订单查询不再是硬阻塞**；`/store/orders` 的 401 与 `/store/auth/customer/*` 的 404 仍存在，但只是"未启用 customer 账号体系"这一独立事项，不影响订单查询。
 
 **未动（店主决策/法律风险）**：`shipping/returns/privacy/terms` 仍是 prelaunch 占位文案（涉及政策内容，需店主提供）；支付/订单链路（需海外主体 + customer auth）。
 
