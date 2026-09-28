@@ -49,14 +49,17 @@ function product(overrides = {}) {
   };
 }
 
-function cartPayload({ id = 'cart_1', items = [], subtotal = 0 } = {}) {
+function cartPayload({ id = 'cart_1', items = [], subtotal = 0, item_subtotal, shipping_total = 0, total } = {}) {
   return {
     cart: {
       id,
       currency_code: 'usd',
       region_id: 'reg_1',
       subtotal,
-      shipping_total: 0,
+      // Medusa's `subtotal` is goods + shipping; `item_subtotal` is goods only.
+      item_subtotal: item_subtotal !== undefined ? item_subtotal : subtotal,
+      shipping_total,
+      total: total !== undefined ? total : subtotal,
       items,
     },
   };
@@ -500,4 +503,88 @@ test('the Chinese copy states the real state of the shop', async () => {
   app.run("openCart()");
   assert.ok(app.nodes.get('cartItems').innerHTML.includes('购物车是空的'));
   assert.equal(app.nodes.get('cartSubtotal').textContent, '$0.00');
+});
+
+test('selecting a shipping method keeps the typed email and address fields', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [{ id: 'so_1', name: 'Standard Shipping', amount: 9.9 }] } }),
+      // The cart returned by selectShippingMethod has NO email/address yet —
+      // they are only written back at placeOrder(). The render must not use
+      // this empty server state to blank the visitor's draft.
+      'POST /store/carts/cart_1/shipping-methods': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 39.8, shipping_total: 9.9, item_subtotal: 29.9, total: 39.8 }) }),
+      'POST /store/carts/cart_1': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 39.8, shipping_total: 9.9, item_subtotal: 29.9, total: 39.8 }) }),
+    },
+  });
+  await app.settle();
+  await app.run("addToCart('prod_1')");
+  await app.run('checkout()');
+  await app.settle();
+
+  // Simulate the visitor typing: each keystroke fires `input`, which writes the
+  // draft AND the DOM value in lockstep (in a real browser the DOM value is
+  // what the visitor typed). We set both so the subsequent render is faithful.
+  app.run(`
+    setDraft('email', 'buyer@example.com'); document.getElementById('coEmail').value = 'buyer@example.com';
+    setDraft('firstName', 'Ada'); document.getElementById('coFirst').value = 'Ada';
+    setDraft('lastName', 'Lovelace'); document.getElementById('coLast').value = 'Lovelace';
+    setDraft('address1', '1 Main St'); document.getElementById('coAddress1').value = '1 Main St';
+    setDraft('city', 'San Francisco'); document.getElementById('coCity').value = 'San Francisco';
+    setDraft('province', 'CA'); document.getElementById('coProvince').value = 'CA';
+    setDraft('postalCode', '94107'); document.getElementById('coPostal').value = '94107';
+    setDraft('countryCode', 'us'); document.getElementById('coCountry').value = 'US';
+  `);
+
+  // Selecting a shipping method re-renders the whole checkout form. The
+  // server cart it returns has no email/address, so a buggy render that reads
+  // cart.email would blank every field back to its placeholder.
+  await app.run("pickShippingOption('so_1')");
+  await app.settle();
+
+  assert.equal(app.run('checkoutDraft.email'), 'buyer@example.com', 'email survives shipping-method re-render');
+  assert.equal(app.run('checkoutDraft.firstName'), 'Ada', 'first name survives');
+  assert.equal(app.run('checkoutDraft.address1'), '1 Main St', 'address survives');
+  assert.equal(app.run('checkoutDraft.city'), 'San Francisco', 'city survives');
+  assert.equal(app.run('checkoutDraft.province'), 'CA', 'state survives');
+  assert.equal(app.run('checkoutDraft.postalCode'), '94107', 'ZIP survives');
+
+  // The order summary must decompose goods vs shipping: Subtotal is the goods
+  // only ($29.90), not goods+shipping ($39.80).
+  const summary = app.nodes.get('checkoutBody').innerHTML;
+  assert.ok(summary.includes('$29.90'), 'subtotal shows the item subtotal, not goods+shipping');
+  assert.ok(summary.includes('$39.80'), 'total includes shipping');
+});
+
+test('shipping-method switch must not reset the email field the visitor already typed', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({
+        status: 200,
+        body: { shipping_options: [{ id: 'so_1', name: 'Standard Shipping', amount: 9.9 }, { id: 'so_2', name: 'Express Shipping', amount: 19.9 }] },
+      }),
+      'POST /store/carts/cart_1/shipping-methods': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 39.8, shipping_total: 9.9, item_subtotal: 29.9, total: 39.8 }) }),
+    },
+  });
+  await app.settle();
+  await app.run("addToCart('prod_1')");
+  await app.run('checkout()');
+  await app.settle();
+
+  // The visitor has typed an email but has NOT yet touched the address fields.
+  app.run(`
+    setDraft('email', 'owner@pawlivora.com');
+    document.getElementById('coEmail').value = 'owner@pawlivora.com';
+  `);
+
+  await app.run("pickShippingOption('so_1')");
+  await app.settle();
+
+  // The email must still be there; only the shipping method changed.
+  assert.equal(app.run('checkoutDraft.email'), 'owner@pawlivora.com', 'email is not reset by a shipping switch');
 });

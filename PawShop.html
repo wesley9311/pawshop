@@ -924,10 +924,45 @@ function closeCart() { document.getElementById('cartDrawer').classList.remove('o
 let checkoutShippingOptions = [];
 let checkoutSelectedOption = '';
 
+// Local draft of every checkout field. The visitor types into the DOM, but the
+// DOM is rebuilt on every shipping-option render, so the draft — not the DOM and
+// not the cart's server state — is the source of truth for what they typed.
+// A field stays in the draft until placeOrder() writes it back to the cart, so
+// selecting or switching a shipping method can never blank a field the visitor
+// already filled in.
+let checkoutDraft = {
+  email: '',
+  firstName: '', lastName: '',
+  address1: '', address2: '',
+  city: '', province: '', postalCode: '', countryCode: '',
+};
+
+// Seed the draft from the cart's server state (what Medusa already knows) and
+// never clear a value that is already there, so reopening checkout restores
+// anything saved on a previous visit without resetting freshly-typed fields.
+function seedCheckoutDraftFromCart() {
+  if (!cart) return;
+  if (cart.email && !checkoutDraft.email) checkoutDraft.email = cart.email;
+  const addr = cart.shippingAddress || {};
+  if (addr.firstName && !checkoutDraft.firstName) checkoutDraft.firstName = addr.firstName;
+  if (addr.lastName && !checkoutDraft.lastName) checkoutDraft.lastName = addr.lastName;
+  if (addr.address1 && !checkoutDraft.address1) checkoutDraft.address1 = addr.address1;
+  if (addr.address2 && !checkoutDraft.address2) checkoutDraft.address2 = addr.address2;
+  if (addr.city && !checkoutDraft.city) checkoutDraft.city = addr.city;
+  if (addr.province && !checkoutDraft.province) checkoutDraft.province = addr.province;
+  if (addr.postalCode && !checkoutDraft.postalCode) checkoutDraft.postalCode = addr.postalCode;
+  if (addr.countryCode && !checkoutDraft.countryCode) checkoutDraft.countryCode = addr.countryCode;
+}
+
+// Write a single field back into the local draft. Exposed globally so the
+// inline `oninput` handlers can update the draft without touching `let` scope.
+function setDraft(field, value) { checkoutDraft[field] = value; }
+
 async function checkout() {
   if (!cart || !cart.items.length) { showToast(t('cart_empty')); return; }
   checkoutSelectedOption = '';
   checkoutShippingOptions = [];
+  seedCheckoutDraftFromCart();
   renderCheckout();
   document.getElementById('checkoutModal').classList.add('open');
   // Load the shipping options Medusa actually offers for this cart's address.
@@ -949,8 +984,12 @@ function renderCheckout() {
   const body = document.getElementById('checkoutBody');
   if (!body) return;
   const items = cart ? cart.items : [];
-  const addr = cart && cart.shippingAddress ? cart.shippingAddress : {};
-  const email = cart && cart.email ? cart.email : '';
+  // Field values come from the local draft, NOT the cart's server state. The
+  // visitor's email/address are only written to the cart at placeOrder(), so a
+  // shipping-method render that reads `cart.email` would blank what they typed.
+  const d = checkoutDraft;
+  const email = d.email || '';
+  const itemSubtotal = cart && cart.itemSubtotal !== null ? cart.itemSubtotal : (cart ? cart.subtotal : 0);
   const shippingAmount = cart && cart.shippingTotal !== null ? cart.shippingTotal : 0;
   const taxAmount = cart && cart.taxTotal !== null ? cart.taxTotal : 0;
   const total = cart && cart.total !== null ? cart.total : (cart ? cart.subtotal : 0);
@@ -969,24 +1008,24 @@ function renderCheckout() {
   body.innerHTML = `
     <div>
       <label class="block text-sm font-medium mb-1" for="coEmail">${t('co_email')}</label>
-      <input type="email" id="coEmail" value="${safeHtml(email)}" placeholder="${t('co_email_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <input type="email" id="coEmail" value="${safeHtml(email)}" placeholder="${t('co_email_ph')}" oninput="setDraft('email', this.value)" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
     </div>
 
     <div>
       <h4 class="font-semibold mb-3">${t('co_shipping')}</h4>
       <div class="grid grid-cols-2 gap-3">
-        <input id="coFirst" placeholder="${t('co_first')}" value="${safeHtml(addr.firstName || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
-        <input id="coLast" placeholder="${t('co_last')}" value="${safeHtml(addr.lastName || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input id="coFirst" placeholder="${t('co_first')}" value="${safeHtml(d.firstName)}" oninput="setDraft('firstName', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input id="coLast" placeholder="${t('co_last')}" value="${safeHtml(d.lastName)}" oninput="setDraft('lastName', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
       </div>
-      <input id="coAddress1" placeholder="${t('co_address1')}" value="${safeHtml(addr.address1 || '')}" class="w-full mt-3 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
-      <input id="coAddress2" placeholder="${t('co_address2')}" value="${safeHtml(addr.address2 || '')}" class="w-full mt-3 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <input id="coAddress1" placeholder="${t('co_address1')}" value="${safeHtml(d.address1)}" oninput="setDraft('address1', this.value)" class="w-full mt-3 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <input id="coAddress2" placeholder="${t('co_address2')}" value="${safeHtml(d.address2)}" oninput="setDraft('address2', this.value)" class="w-full mt-3 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
       <div class="grid grid-cols-2 gap-3 mt-3">
-        <input id="coCity" placeholder="${t('co_city')}" value="${safeHtml(addr.city || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
-        <input id="coProvince" placeholder="${t('co_province')}" value="${safeHtml(addr.province || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input id="coCity" placeholder="${t('co_city')}" value="${safeHtml(d.city)}" oninput="setDraft('city', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input id="coProvince" placeholder="${t('co_province')}" value="${safeHtml(d.province)}" oninput="setDraft('province', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
       </div>
       <div class="grid grid-cols-2 gap-3 mt-3">
-        <input id="coPostal" placeholder="${t('co_postal')}" value="${safeHtml(addr.postalCode || '')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
-        <input id="coCountry" placeholder="${t('co_country')}" value="${safeHtml(addr.countryCode ? addr.countryCode.toUpperCase() : 'US')}" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input id="coPostal" placeholder="${t('co_postal')}" value="${safeHtml(d.postalCode)}" oninput="setDraft('postalCode', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input id="coCountry" placeholder="${t('co_country')}" value="${safeHtml(d.countryCode ? d.countryCode.toUpperCase() : 'US')}" oninput="setDraft('countryCode', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
       </div>
     </div>
 
@@ -998,7 +1037,7 @@ function renderCheckout() {
     <div class="border-t border-slate-100 pt-4">
       <h4 class="font-semibold mb-3">${t('co_order_summary')}</h4>
       <div class="space-y-1 text-sm">
-        <div class="flex justify-between"><span class="text-slate-500">${t('subtotal')}</span><span>${money(cart ? cart.subtotal : 0)}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">${t('subtotal')}</span><span>${money(itemSubtotal)}</span></div>
         <div class="flex justify-between"><span class="text-slate-500">${t('shipping')}</span><span>${money(shippingAmount)}</span></div>
         <div class="flex justify-between"><span class="text-slate-500">${t('taxes')}</span><span>${money(taxAmount)}</span></div>
         <div class="flex justify-between font-semibold text-base pt-2 border-t border-slate-100"><span>${t('total')}</span><span>${money(total)}</span></div>
@@ -1012,6 +1051,10 @@ function renderCheckout() {
 async function pickShippingOption(optionId) {
   if (!cart) return;
   checkoutSelectedOption = optionId;
+  // Capture the current DOM values into the draft before the render that
+  // follows, so a field the visitor already typed survives even if its `input`
+  // event has not fired yet (e.g. an autofilled value).
+  captureCheckoutDraftFromDom();
   try {
     cart = await store.selectShippingMethod(cart.id, optionId);
     cartState = 'ready';
@@ -1022,17 +1065,36 @@ async function pickShippingOption(optionId) {
   }
 }
 
+// Mirror whatever is currently in the checkout inputs back into the draft.
+// Called defensively right before a render so no keystroke is lost to an
+// `innerHTML` rebuild, and again so the draft stays authoritative.
+function captureCheckoutDraftFromDom() {
+  const ids = {
+    coEmail: 'email', coFirst: 'firstName', coLast: 'lastName',
+    coAddress1: 'address1', coAddress2: 'address2', coCity: 'city',
+    coProvince: 'province', coPostal: 'postalCode', coCountry: 'countryCode',
+  };
+  for (const id in ids) {
+    const el = document.getElementById(id);
+    if (el) checkoutDraft[ids[id]] = el.value;
+  }
+}
+
 async function placeOrder() {
   if (!cart) return;
-  const email = document.getElementById('coEmail').value.trim();
-  const first = document.getElementById('coFirst').value.trim();
-  const last = document.getElementById('coLast').value.trim();
-  const address1 = document.getElementById('coAddress1').value.trim();
-  const address2 = document.getElementById('coAddress2').value.trim();
-  const city = document.getElementById('coCity').value.trim();
-  const province = document.getElementById('coProvince').value.trim();
-  const postal = document.getElementById('coPostal').value.trim();
-  const country = document.getElementById('coCountry').value.trim().toLowerCase();
+  // Read from the draft (authoritative) and fall back to the DOM only to catch
+  // any value that landed in the field without an `input` event.
+  captureCheckoutDraftFromDom();
+  const d = checkoutDraft;
+  const email = (d.email || '').trim();
+  const first = (d.firstName || '').trim();
+  const last = (d.lastName || '').trim();
+  const address1 = (d.address1 || '').trim();
+  const address2 = (d.address2 || '').trim();
+  const city = (d.city || '').trim();
+  const province = (d.province || '').trim();
+  const postal = (d.postalCode || '').trim();
+  const country = (d.countryCode || '').trim().toLowerCase();
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast(t('co_email_required')); return; }
   if (!first || !last || !address1 || !city || !postal || !country) { showToast(t('co_address_required')); return; }
