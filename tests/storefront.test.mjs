@@ -588,3 +588,92 @@ test('shipping-method switch must not reset the email field the visitor already 
   // The email must still be there; only the shipping method changed.
   assert.equal(app.run('checkoutDraft.email'), 'owner@pawlivora.com', 'email is not reset by a shipping switch');
 });
+
+// The order payload the guest lookup returns, matching the production
+// /pawshop-orders/lookup response shape.
+function orderPayload(overrides = {}) {
+  return {
+    order: {
+      order_number: 1001,
+      status: 'completed',
+      payment_status: 'captured',
+      fulfillment_status: 'not_fulfilled',
+      currency_code: 'usd',
+      total: 39.8,
+      created_at: '2026-09-28T12:00:00.000Z',
+      email: 'buyer@example.com',
+      items: [{ title: 'Cardboard Cat Lounger', quantity: 1, unit_price: 29.9, total: 29.9, thumbnail: null }],
+      shipping_method: 'Standard Shipping',
+      shipping_amount: 9.9,
+      shipping_address: {
+        first_name: 'Ada', last_name: 'Lovelace',
+        address_1: '1 Main St', address_2: null,
+        city: 'San Francisco', province: 'CA', postal_code: '94107', country_code: 'us',
+      },
+      ...overrides,
+    },
+  };
+}
+
+test('an order detail renders every real field without inventing a tracking entry', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'GET /store/pawshop-orders/lookup': () => ({ status: 200, body: orderPayload() }),
+    },
+  });
+  await app.settle();
+
+  // Open the lookup, pre-fill the real number + email, then submit.
+  app.run("renderOrderLookupForm('buyer@example.com', '1001')");
+  app.run("document.getElementById('lookupNumber').value = '1001'; document.getElementById('lookupEmail').value = 'buyer@example.com';");
+  await app.run("submitOrderLookup()");
+  await app.settle();
+
+  const html = app.nodes.get('orderBody').innerHTML;
+  assert.ok(html.includes('1001'), 'real display_id order number is shown');
+  assert.ok(html.includes('buyer@example.com'), 'checkout email is shown');
+  assert.ok(html.includes('Cardboard Cat Lounger'), 'item summary is shown');
+  assert.ok(html.includes('$39.80'), 'total is shown');
+  assert.ok(html.includes('Paid'), 'payment status is shown');
+  assert.ok(html.includes('Standard Shipping'), 'shipping method is shown');
+  assert.ok(html.includes('Not yet shipped'), 'fulfillment status is shown');
+  assert.ok(html.includes('Ada Lovelace'), 'shipping name is shown');
+  assert.ok(html.includes('1 Main St'), 'shipping address is shown');
+  assert.ok(html.includes('San Francisco'), 'shipping city is shown');
+  assert.ok(html.includes('94107'), 'shipping postal code is shown');
+  // No fulfillment / carrier / tracking entry exists yet.
+  assert.ok(!html.toLowerCase().includes('track shipment'), 'no tracking entry');
+  assert.ok(!html.toLowerCase().includes('tracking number'), 'no tracking number');
+});
+
+test('the success page offers "view order" that pre-fills the real number and email', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'GET /store/pawshop-orders/lookup': () => ({ status: 200, body: orderPayload() }),
+    },
+  });
+  await app.settle();
+
+  // Render the success page directly (as handlePayPalReturn does after the
+  // order resolves).
+  app.run(`renderOrderResult(${JSON.stringify(orderPayload().order)}, { isSuccess: true })`);
+
+  const html = app.nodes.get('orderBody').innerHTML;
+  assert.ok(html.includes('View order'), 'success page offers a view-order button');
+  assert.ok(html.includes('Back to shop'), 'success page offers a back-to-shop button');
+
+  // Clicking "view order" re-opens the guest lookup and pre-fills the REAL
+  // order number (never a client-generated one) and the checkout email, then
+  // resolves to the same order detail.
+  await app.run('openOrderLookupFromSuccess()');
+  await app.settle();
+
+  assert.equal(app.nodes.get('lookupNumber').value, '1001', 'lookup is pre-filled with the real order number');
+  assert.equal(app.nodes.get('lookupEmail').value, 'buyer@example.com', 'lookup is pre-filled with the checkout email');
+
+  // After resolving, the detail view shows the same order number (no new id).
+  const detail = app.nodes.get('orderBody').innerHTML;
+  assert.ok(detail.includes('1001'), 'view order lands on the same order detail');
+});

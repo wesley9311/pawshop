@@ -36,8 +36,18 @@ type LookupResponse = {
       total: number
       thumbnail: string | null
     }>
-    shipping_city: string | null
-    shipping_country: string | null
+    shipping_method: string | null
+    shipping_amount: number | null
+    shipping_address: {
+      first_name: string | null
+      last_name: string | null
+      address_1: string | null
+      address_2: string | null
+      city: string | null
+      province: string | null
+      postal_code: string | null
+      country_code: string | null
+    } | null
   }
 }
 
@@ -110,7 +120,15 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       'items.unit_price',
       'items.total',
       'items.thumbnail',
+      'shipping_methods.name',
+      'shipping_methods.amount',
+      'shipping_address.first_name',
+      'shipping_address.last_name',
+      'shipping_address.address_1',
+      'shipping_address.address_2',
       'shipping_address.city',
+      'shipping_address.province',
+      'shipping_address.postal_code',
       'shipping_address.country_code',
     ],
   })
@@ -133,7 +151,17 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
           total: number
           thumbnail?: string | null
         }>
-        shipping_address?: { city: string | null; country_code: string | null } | null
+        shipping_methods?: Array<{ name?: string | null; amount?: number | null }> | null
+        shipping_address?: {
+          first_name?: string | null
+          last_name?: string | null
+          address_1?: string | null
+          address_2?: string | null
+          city?: string | null
+          province?: string | null
+          postal_code?: string | null
+          country_code?: string | null
+        } | null
       }
     | undefined
 
@@ -141,6 +169,9 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   if (!order) {
     return res.status(404).json({ type: 'not_found' })
   }
+
+  const shippingAddress = order.shipping_address ?? null
+  const shippingMethod = (order.shipping_methods || [])[0] ?? null
 
   const payload: LookupResponse = {
     order: {
@@ -159,8 +190,20 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
         total: Number(item.total),
         thumbnail: item.thumbnail ?? null,
       })),
-      shipping_city: order.shipping_address?.city ?? null,
-      shipping_country: order.shipping_address?.country_code ?? null,
+      shipping_method: shippingMethod?.name ?? null,
+      shipping_amount: shippingMethod?.amount != null ? Number(shippingMethod.amount) : null,
+      shipping_address: shippingAddress
+        ? {
+            first_name: shippingAddress.first_name ?? null,
+            last_name: shippingAddress.last_name ?? null,
+            address_1: shippingAddress.address_1 ?? null,
+            address_2: shippingAddress.address_2 ?? null,
+            city: shippingAddress.city ?? null,
+            province: shippingAddress.province ?? null,
+            postal_code: shippingAddress.postal_code ?? null,
+            country_code: shippingAddress.country_code ?? null,
+          }
+        : null,
     },
   }
 

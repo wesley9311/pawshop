@@ -342,8 +342,15 @@ const I18N = {
     order_lookup_cta: 'Find my order',
     order_lookup_link: 'Track an order',
     order_back: 'Back to shop',
+    order_view: 'View order',
     order_pending: 'Payment authorized, order being created…',
     order_retry: 'Check again',
+    order_email: 'Email',
+    order_payment_status: 'Payment',
+    order_fulfillment_status: 'Fulfillment',
+    order_shipping_method: 'Shipping method',
+    order_shipping_address: 'Shipping address',
+    order_not_fulfilled: 'Not yet shipped',
     co_pay_redirect: 'Redirecting to secure payment…',
     co_pay_error: 'Payment could not be started. Please try again.',
   },
@@ -429,8 +436,15 @@ const I18N = {
     order_lookup_cta: '查询订单',
     order_lookup_link: '追踪订单',
     order_back: '返回商店',
+    order_view: '查看订单',
     order_pending: '支付已授权，订单生成中…',
     order_retry: '再查一次',
+    order_email: '邮箱',
+    order_payment_status: '支付状态',
+    order_fulfillment_status: '发货状态',
+    order_shipping_method: '配送方式',
+    order_shipping_address: '收货地址',
+    order_not_fulfilled: '尚未发货',
     co_pay_redirect: '正在跳转到安全支付…',
     co_pay_error: '无法发起支付，请重试。',
   },
@@ -1193,6 +1207,37 @@ function renderPaymentBoundary() {
 
 // ===== Order status / success / lookup =====
 let orderLookupTimer = null;
+// The most recently resolved order, kept so the success page's "View order"
+// button can re-open the guest lookup with the real order number + email
+// pre-filled (never a client-generated number).
+let lastResolvedOrder = null;
+
+// Map a raw Medusa status string to a short human label. The raw value is
+// still shown for unknown states so nothing is ever silently hidden.
+function paymentStatusLabel(raw) {
+  const map = {
+    not_paid: 'Not paid', awaiting: 'Awaiting', authorized: 'Authorized',
+    partially_authorized: 'Partially authorized', captured: 'Paid',
+    partially_captured: 'Partially captured', partially_refunded: 'Partially refunded',
+    refunded: 'Refunded', canceled: 'Canceled', requires_action: 'Action required',
+  };
+  return map[raw] || raw || '—';
+}
+function fulfillmentStatusLabel(raw) {
+  const map = {
+    not_fulfilled: 'Not yet shipped', partially_fulfilled: 'Partially fulfilled',
+    fulfilled: 'Fulfilled', partially_shipped: 'Partially shipped', shipped: 'Shipped',
+    partially_delivered: 'Partially delivered', delivered: 'Delivered', canceled: 'Canceled',
+  };
+  return map[raw] || raw || '—';
+}
+function orderStatusLabel(raw) {
+  const map = {
+    pending: 'Pending', completed: 'Completed', draft: 'Draft',
+    archived: 'Archived', canceled: 'Canceled', requires_action: 'Action required',
+  };
+  return map[raw] || raw || '—';
+}
 
 function closeOrder() {
   if (orderLookupTimer) { clearInterval(orderLookupTimer); orderLookupTimer = null; }
@@ -1204,14 +1249,14 @@ function openOrderLookup() {
   renderOrderLookupForm();
 }
 
-function renderOrderLookupForm(prefillEmail) {
+function renderOrderLookupForm(prefillEmail, prefillNumber) {
   const body = document.getElementById('orderBody');
   if (!body) return;
   body.innerHTML = `
     <div>
       <p class="text-sm text-slate-500 mb-4">${t('order_lookup_note')}</p>
       <label class="block text-sm font-medium mb-1" for="lookupNumber">${t('order_number')}</label>
-      <input type="text" id="lookupNumber" placeholder="1001" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <input type="text" id="lookupNumber" value="${safeHtml(prefillNumber || '')}" placeholder="1001" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
       <label class="block text-sm font-medium mb-1" for="lookupEmail">${t('order_lookup_email')}</label>
       <input type="email" id="lookupEmail" value="${safeHtml(prefillEmail || '')}" placeholder="you@example.com" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-4 focus:outline-none focus:ring-1 focus:ring-slate-300">
       <button onclick="submitOrderLookup()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_lookup_cta')}</button>
@@ -1231,7 +1276,7 @@ async function submitOrderLookup() {
   }
 }
 
-function renderOrderResult(order) {
+function renderOrderResult(order, opts) {
   const body = document.getElementById('orderBody');
   if (!body) return;
   if (!order) {
@@ -1245,12 +1290,32 @@ function renderOrderResult(order) {
       </div>`;
     return;
   }
+
+  lastResolvedOrder = order;
+
   const items = (order.items || []).map(it => `
     <div class="flex items-center justify-between py-2 border-b border-slate-100">
       <span class="text-sm">${safeHtml(it.title)} <span class="text-slate-400">×${it.quantity}</span></span>
       <span class="text-sm font-medium">${money(it.total)}</span>
     </div>`).join('');
+
   const placedOn = order.created_at ? new Date(order.created_at).toLocaleString() : '';
+
+  // Shipping address: build a single readable block from whatever is present.
+  const addr = order.shipping_address || {};
+  const addrLines = [
+    [addr.first_name, addr.last_name].filter(Boolean).join(' '),
+    addr.address_1,
+    addr.address_2,
+    [addr.city, addr.province, addr.postal_code].filter(Boolean).join(' '),
+    addr.country_code ? addr.country_code.toUpperCase() : '',
+  ].filter(Boolean);
+  const shippingAddressHtml = addrLines.length
+    ? addrLines.map(l => `<div>${safeHtml(l)}</div>`).join('')
+    : `<div class="text-slate-400">—</div>`;
+
+  const isSuccess = !!(opts && opts.isSuccess);
+
   body.innerHTML = `
     <div>
       <div class="flex items-center gap-2 mb-4">
@@ -1263,15 +1328,41 @@ function renderOrderResult(order) {
         </div>
       </div>
       <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
-        <div><div class="text-slate-400 text-xs">${t('order_status')}</div><div class="font-medium">${safeHtml(order.status || '')}</div></div>
+        <div><div class="text-slate-400 text-xs">${t('order_status')}</div><div class="font-medium">${safeHtml(orderStatusLabel(order.status))}</div></div>
         <div><div class="text-slate-400 text-xs">${t('order_total')}</div><div class="font-medium">${money(order.total)}</div></div>
+        <div><div class="text-slate-400 text-xs">${t('order_payment_status')}</div><div class="font-medium">${safeHtml(paymentStatusLabel(order.payment_status))}</div></div>
+        <div><div class="text-slate-400 text-xs">${t('order_fulfillment_status')}</div><div class="font-medium">${safeHtml(fulfillmentStatusLabel(order.fulfillment_status))}</div></div>
         ${placedOn ? `<div><div class="text-slate-400 text-xs">${t('order_placed_on')}</div><div class="font-medium">${placedOn}</div></div>` : ''}
-        ${order.shipping_city ? `<div><div class="text-slate-400 text-xs">${t('order_shipping_to')}</div><div class="font-medium">${safeHtml(order.shipping_city)}</div></div>` : ''}
+        ${order.email ? `<div><div class="text-slate-400 text-xs">${t('order_email')}</div><div class="font-medium break-all">${safeHtml(order.email)}</div></div>` : ''}
+        <div><div class="text-slate-400 text-xs">${t('order_shipping_method')}</div><div class="font-medium">${safeHtml(order.shipping_method || '—')}</div></div>
       </div>
       <h4 class="font-semibold text-sm mb-2">${t('order_items')}</h4>
       ${items}
-      <button onclick="closeOrder()" class="w-full mt-5 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_back')}</button>
+      <h4 class="font-semibold text-sm mt-4 mb-2">${t('order_shipping_address')}</h4>
+      <div class="text-sm text-slate-600 mb-2">${shippingAddressHtml}</div>
+      ${isSuccess ? `
+        <button onclick="openOrderLookupFromSuccess()" class="w-full mt-5 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_view')}</button>
+        <button onclick="closeOrder()" class="w-full mt-2 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50">${t('order_back')}</button>
+      ` : `
+        <button onclick="closeOrder()" class="w-full mt-5 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_back')}</button>
+      `}
     </div>`;
+}
+
+// "View order" on the success page re-opens the guest lookup pre-filled with
+// the real order number and checkout email, then submits it so the buyer lands
+// on the same order detail. The order number is never generated client-side —
+// it comes straight from the Medusa order that was just resolved.
+function openOrderLookupFromSuccess() {
+  if (!lastResolvedOrder) return;
+  const number = lastResolvedOrder.order_number;
+  const email = lastResolvedOrder.email;
+  if (!number || !email) { renderOrderLookupForm(); return; }
+  // Pre-fill the lookup form and immediately resolve it to the detail view.
+  renderOrderLookupForm(email, String(number));
+  document.getElementById('lookupNumber').value = String(number);
+  document.getElementById('lookupEmail').value = email;
+  submitOrderLookup();
 }
 
 // After PayPal approval the buyer lands back on the storefront with the order
@@ -1313,7 +1404,7 @@ async function handlePayPalReturn() {
         cart = null;
         cartState = 'idle';
         renderCart();
-        renderOrderResult(order);
+        renderOrderResult(order, { isSuccess: true });
       } else if (attempts >= 20) {
         clearInterval(orderLookupTimer);
         orderLookupTimer = null;
