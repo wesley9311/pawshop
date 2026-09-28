@@ -311,6 +311,8 @@ const I18N = {
     co_boundary_when: 'Checkout opens once a payment provider is connected.',
     co_boundary_continue: 'Back to shop',
     co_error: 'Checkout could not be completed. Please try again.',
+    co_cart_expired: 'This cart was already used for an order. Starting a fresh cart.',
+    cart_refreshed: 'Your cart was updated to a new order. Start a fresh cart.',
     cart_empty: 'Your cart is empty', cart_unavailable: 'The cart is temporarily unavailable. Please refresh.',
     cart_continue: 'Continue shopping',
     line_total: 'Line total',
@@ -396,6 +398,8 @@ const I18N = {
     co_boundary_when: '支付通道接通后即可完成结算。',
     co_boundary_continue: '返回商店',
     co_error: '结算未能完成，请重试。',
+    co_cart_expired: '该购物车已用于下单，正在为你开启新购物车。',
+    cart_refreshed: '购物车已更新为新订单，请重新选购。',
     cart_empty: '购物车是空的', cart_unavailable: '购物车暂时不可用，请刷新页面。',
     cart_continue: '继续购物',
     line_total: '小计',
@@ -726,13 +730,25 @@ async function ensureRegion() {
 }
 
 async function ensureCart() {
-  if (cart && cart.id) return cart;
+  if (cart && cart.id && !cart.completed) return cart;
+  // A completed cart (order already placed) can't be added to; start fresh.
+  if (cart && cart.completed) { cart = null; }
   await ensureRegion();
   const created = await store.createCart(regionId);
   if (!created) throw new Error('cart_not_created');
   cart = created;
   persistCartId(cart.id);
   return cart;
+}
+
+// Drop the in-memory cart and its stored id so the next action builds a new
+// one. Used when a cart turns out to be completed (order placed) and Medusa
+// refuses any further mutation on it.
+function resetCart() {
+  cart = null;
+  cartState = 'idle';
+  persistCartId(null);
+  renderCart();
 }
 
 async function restoreCart() {
@@ -768,6 +784,27 @@ async function addToCart(productId, fromModal) {
       openCart();
     }
   } catch (error) {
+    // The cart was completed by an order we didn't create here (e.g. the
+    // buyer approved in PayPal and the webhook placed the order). Recover by
+    // starting a fresh cart and retrying the exact same add — no refresh.
+    if (error && error.kind === 'cart_completed') {
+      resetCart();
+      try {
+        await ensureCart();
+        cart = await store.addLineItem(cart.id, variant.id, qty);
+        cartState = 'ready';
+        persistCartId(cart.id);
+        renderCart();
+        showToast(t('toast_added'));
+        openCart();
+        return;
+      } catch (retryError) {
+        cartState = cart ? 'ready' : 'error';
+        renderCart();
+        showToast(retryError && retryError.kind === 'network' ? t('shop_unreachable') : t('add_failed'));
+        return;
+      }
+    }
     cartState = cart ? 'ready' : 'error';
     renderCart();
     showToast(error && error.kind === 'network' ? t('shop_unreachable') : t('add_failed'));
@@ -787,6 +824,11 @@ async function changeQty(lineId, delta) {
     cartState = 'ready';
     renderCart();
   } catch (error) {
+    if (error && error.kind === 'cart_completed') {
+      resetCart();
+      showToast(t('cart_refreshed'));
+      return;
+    }
     showToast(t('cart_failed'));
   }
 }
@@ -798,6 +840,11 @@ async function removeLine(lineId) {
     cartState = 'ready';
     renderCart();
   } catch (error) {
+    if (error && error.kind === 'cart_completed') {
+      resetCart();
+      showToast(t('cart_refreshed'));
+      return;
+    }
     showToast(t('cart_failed'));
   }
 }
@@ -1045,6 +1092,15 @@ async function placeOrder() {
     // Hand off to PayPal. Same-tab redirect so the return URL comes back here.
     window.location.href = approvalUrl;
   } catch (e) {
+    if (e && e.kind === 'cart_completed') {
+      // The cart was already completed (an order exists for it). Recover the
+      // checkout by starting over on a fresh cart — no refresh required.
+      resetCart();
+      closeCheckout();
+      showToast(t('co_cart_expired'));
+      if (btn) { btn.disabled = false; btn.textContent = original; }
+      return;
+    }
     showToast(e && e.kind === 'network' ? t('shop_unreachable') : t('co_error'));
     if (btn) { btn.disabled = false; btn.textContent = original; }
   }
@@ -1186,7 +1242,15 @@ async function handlePayPalReturn() {
       if (order) {
         clearInterval(orderLookupTimer);
         orderLookupTimer = null;
+        // The order exists, so the cart it was placed from is now completed
+        // and unusable. Clear both the lookup marker and the stored cart id so
+        // the buyer's next visit starts a fresh cart instead of hitting
+        // "Cart ... is already completed" on every add/update.
         try { localStorage.removeItem('pawshop_order_lookup'); } catch (_) {}
+        try { localStorage.removeItem(LS_CART_ID); } catch (_) {}
+        cart = null;
+        cartState = 'idle';
+        renderCart();
         renderOrderResult(order);
       } else if (attempts >= 20) {
         clearInterval(orderLookupTimer);

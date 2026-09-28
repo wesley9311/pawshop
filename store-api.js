@@ -214,6 +214,9 @@
       currencyCode: isNonEmptyString(raw.currency_code) ? raw.currency_code : '',
       regionId: isNonEmptyString(raw.region_id) ? raw.region_id : '',
       email: isNonEmptyString(raw.email) ? raw.email : '',
+      // A completed cart is the immutable record of an order that was placed;
+      // Medusa refuses add/update/checkout on it with 400 "already completed".
+      completed: raw.completed_at != null,
       items: items,
       itemCount: count,
       // item subtotal = goods only; subtotal = goods + shipping (pre-tax).
@@ -257,6 +260,15 @@
         var failure = new Error((payload && payload.message) || ('The shop refused the request (' + response.status + ').'));
         failure.kind = response.status === 404 ? 'not_found' : 'rejected';
         failure.status = response.status;
+        // Expose Medusa's error `type` (e.g. "invalid_data", "not_found",
+        // "not_allowed") so callers can react to a completed/expired cart
+        // instead of collapsing every failure into one generic toast.
+        failure.type = payload && payload.type ? payload.type : '';
+        // A completed cart is the one "invalid_data" case the storefront can
+        // and should self-heal: clear the stale id and start a new cart.
+        if (/already completed/i.test(payload && payload.message || '')) {
+          failure.kind = 'cart_completed';
+        }
         throw failure;
       }
       return payload;
@@ -290,8 +302,11 @@
         return normalizeCart(payload && payload.cart);
       },
 
-      // Resolves to null when the stored cart no longer exists, so callers can
-      // start a fresh one instead of showing a stale basket.
+      // Resolves to null when the stored cart no longer exists, or has been
+      // completed by an order, so callers can start a fresh one instead of
+      // showing a stale basket. A completed cart still answers 200 (with
+      // `completed_at` set) — Medusa only 404s an id that never existed — so
+      // we must also treat `completed` as "start over".
       async getCart(cartId) {
         var payload;
         try {
@@ -300,7 +315,9 @@
           if (error && error.kind === 'not_found') return null;
           throw error;
         }
-        return normalizeCart(payload && payload.cart);
+        var cart = normalizeCart(payload && payload.cart);
+        if (cart && cart.completed) return null;
+        return cart;
       },
 
       async addLineItem(cartId, variantId, quantity) {

@@ -324,6 +324,48 @@ test('a cart that no longer exists is forgotten, not faked', async () => {
   assert.ok(app.nodes.get('cartItems').innerHTML.includes('Your cart is empty'));
 });
 
+test('a completed cart (order already placed) is forgotten, not reused', async () => {
+  const completed = cartPayload({ id: 'cart_done', items: [lineItem()], subtotal: 29.9 });
+  completed.cart.completed_at = '2026-09-28T08:03:56.531Z';
+  const app = bootPawShop({
+    storage: new Map([['pawshop_medusa_cart_id', 'cart_done']]),
+    routes: {
+      // A completed cart still answers 200 with completed_at set (not 404).
+      'GET /store/carts/cart_done': () => ({ status: 200, body: completed }),
+    },
+  });
+  await app.settle();
+
+  assert.equal(app.storage.has('pawshop_medusa_cart_id'), false, 'completed cart id is cleared');
+  assert.equal(app.run('cart'), null);
+  assert.ok(app.nodes.get('cartItems').innerHTML.includes('Your cart is empty'));
+});
+
+test('adding to a cart that got completed mid-session starts a fresh cart and retries', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload({ id: 'cart_new' }) }),
+      // At load the cart is still open, so it restores fine.
+      'GET /store/carts/cart_1': () => ({ status: 200, body: cartPayload({ id: 'cart_1', items: [lineItem()], subtotal: 29.9 }) }),
+      // By the time the buyer adds, the cart has been completed (webhook placed
+      // the order), so the first add is refused and a fresh cart is used.
+      'POST /store/carts/cart_1/line-items': () => ({ status: 400, body: { type: 'invalid_data', message: 'Cart cart_1 is already completed.' } }),
+      'POST /store/carts/cart_new/line-items': () => ({ status: 200, body: cartPayload({ id: 'cart_new', items: [lineItem()], subtotal: 29.9 }) }),
+    },
+    storage: new Map([['pawshop_medusa_cart_id', 'cart_1']]),
+  });
+  await app.settle();
+
+  await app.run("addToCart('prod_1')");
+  await app.settle();
+
+  // The completed cart was dropped and the add retried on a fresh cart.
+  assert.ok(app.calls.some(call => call.path === '/store/carts/cart_new/line-items'), 'add retried on a fresh cart');
+  assert.equal(app.storage.get('pawshop_medusa_cart_id'), 'cart_new', 'new cart id persisted');
+  assert.equal(app.nodes.get('cartCount').textContent, 1);
+});
+
 test('checkout writes cart data but can never complete a cart or send customer credentials', async () => {
   const app = bootPawShop({
     routes: {
