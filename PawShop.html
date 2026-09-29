@@ -298,8 +298,8 @@ const I18N = {
     co_city: 'City', co_province: 'State', co_postal: 'ZIP code', co_country: 'Country',
     co_billing_same: 'Billing address is the same as shipping',
     co_shipping_option: 'Shipping method', co_select_shipping: 'Select a shipping method',
-    co_order_summary: 'Order summary', co_place_order: 'Place order',
-    co_placing: 'Placing order…',
+    co_order_summary: 'Order summary', co_place_order: 'Confirm and pay',
+    co_placing: 'Confirming…',
     total: 'Total',
     co_email_required: 'Please enter a valid email address.',
     co_address_required: 'Please fill in the shipping address.',
@@ -392,8 +392,8 @@ const I18N = {
     co_city: '城市', co_province: '州', co_postal: '邮编', co_country: '国家',
     co_billing_same: '账单地址与收货地址相同',
     co_shipping_option: '配送方式', co_select_shipping: '请选择配送方式',
-    co_order_summary: '订单摘要', co_place_order: '提交订单',
-    co_placing: '正在提交…',
+    co_order_summary: '订单摘要', co_place_order: '确认并支付',
+    co_placing: '确认中…',
     total: '合计',
     co_email_required: '请输入有效的邮箱地址。',
     co_address_required: '请填写收货地址。',
@@ -933,7 +933,7 @@ function closeCart() { document.getElementById('cartDrawer').classList.remove('o
 // ===== Checkout: real cart -> email -> address -> shipping option -> totals -> payment boundary =====
 // Everything the visitor enters is written back to the Medusa cart, and every
 // total shown is the value Medusa computed. There is no payment provider wired
-// to the US region yet, so "Place order" stops at that boundary -- it never
+// to the US region yet, so "Confirm and pay" stops at that boundary -- it never
 // creates an order and never pretends payment.
 let checkoutShippingOptions = [];
 let checkoutSelectedOption = '';
