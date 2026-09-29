@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-29（Order Detail UX Owner 实测修正：去掉支付回跳时的瞬时 lookup/邮箱层闪现、去掉重复"您的订单"标题、详情重排为三层 + 统一字体层级 + 呼吸空间，随 `5d72626` 发版到展示站；**状态：ORDER SUCCESS UX = OWNER ACCEPTANCE PENDING**，等店主按验收清单 A–F 复测）
+更新：2026-09-29（Checkout→Payment→Success UX 用户视角校对：CTA 文案改为「确认并支付 / Confirm and pay」，随 `1c7704d` 发版到展示站；**状态：ORDER SUCCESS UX = OWNER ACCEPTANCE PENDING**，等店主按验收清单 A–F 复测）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
@@ -9,6 +9,23 @@
 ---
 
 ## 0. 当前没有阻塞项；关键路径交回店主
+
+**2026-09-29 Checkout→Payment→Success UX 用户视角校对（本轮）**：Owner 按真实用户购物节奏校对，要求更少步骤/更少弹层/更少误操作。本轮只做 UX 审核 + 最小必要修正，不扩账户中心、不加物流、不加"是/否"确认弹窗、不改 Payment/provider/backend semantics。
+
+- **CTA 文案**：`co_place_order` = "Place order/提交订单" → **"Confirm and pay / 确认并支付"**；`co_placing`（loading 态）= "Placing order…/正在提交…" → **"Confirming…/确认中…"**。这是本轮唯一代码改动。
+- **审计结论（对照 7 条原则，其余均已符合）**：
+  1. Checkout 页面承担最终确认职责，无额外"是/否"确认弹窗（无 `confirm()`）。
+  2. 最终 CTA = 确认并支付 / Confirm and pay ✅
+  3. PayPal 返回后只回答一个问题（订单是否成功创建）：成功→"下单成功"，失败/超时→"支付已授权，订单生成中…"+ 重试。
+  4. 标题中文 "下单成功"（英文保留 "Order placed"）。
+  5. 成功页轻量：下单成功 + public number + Total + payment status + 返回商店 + View order 次级入口（不自动展开）。
+  6. 完整详情/物流归长期「我的 → 我的订单 → 订单详情 → 物流」，当前无账户中心故不建。
+  7. 无自动闪现 lookup/email/详情多层 UI。
+- **验证**：21/21 storefront 契约测试 + check-security PASS；展示站 `deploy-static.sh` 原子发版到 `1c7704d`，`readlink current` 确认，边界 200 全绿，线上文案确认无旧 "Place order/提交订单" 残留。
+
+**下一步（先停，交回店主复测）**：店主按 §4.2 清单 A–F 复测，通过后标记 OWNER VERIFIED ✅ 并停手。
+
+---
 
 **2026-09-29 Order Detail UX Owner 实测修正（本轮）**：店主已真实走 PayPal 成功回跳并检查订单详情，发现交互/信息层级问题。本轮只做交互与层级校正，不扩功能、不改 Payment/provider/backend order semantics、不加物流追踪/账户中心。
 
