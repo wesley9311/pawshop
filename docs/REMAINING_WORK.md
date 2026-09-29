@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-29（成功页 note 去掉未上线的「确认邮件稍后送达」承诺，改为「订单已成功创建」，随 `ef2767c` 发版到展示站；**状态：ORDER SUCCESS UX = OWNER ACCEPTANCE PENDING**，等店主按验收清单 A–F 复测）
+更新：2026-09-29（**ORDER SUCCESS UX = OWNER VERIFIED ✅**：店主已按验收清单 A–F 复测通过。本轮结项，不再扩展——成功页 note 已去掉未上线邮件承诺、CTA 已改「确认并支付」、详情三层、无自动闪现 lookup。展示站现行 `ef2767c`）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
@@ -23,7 +23,7 @@
   7. 无自动闪现 lookup/email/详情多层 UI。
 - **验证**：21/21 storefront 契约测试 + check-security PASS；展示站 `deploy-static.sh` 原子发版到 `1c7704d`，`readlink current` 确认，边界 200 全绿，线上文案确认无旧 "Place order/提交订单" 残留。
 
-**下一步（先停，交回店主复测）**：店主按 §4.2 清单 A–F 复测，通过后标记 OWNER VERIFIED ✅ 并停手。
+**下一步（已结项 ✅）**：店主已按 §4.2 清单 A–F 复测通过，**ORDER SUCCESS UX = OWNER VERIFIED**。本轮停手，不再扩展。
 
 ---
 
@@ -41,7 +41,7 @@
 - **底部**：保留「返回商店」（`order_back`），无物流追踪、无账户中心。
 - **验证**：21/21 storefront 契约测试 + `check-security` PASS；展示站 `deploy-static.sh` 原子发版到 `5d72626`，`readlink current` 确认，边界（PawShop.html/store-api.js/root 200、lookup 无 key 400）全绿。
 
-**下一步（先停，交回店主复测）**：店主按验收清单复测——A 支付回跳全程不闪现 lookup 层；B 成功确认页只出现一次、稳定不跳；C 主动 View order 后才进入完整详情；D "您的订单"只出现一次、无双引号；E 详情按三层顺序；F 滚动区块间距自然。通过后标记 OWNER VERIFIED ✅ 并停手。
+**下一步（已结项 ✅）**：店主已按验收清单复测通过，**ORDER SUCCESS UX = OWNER VERIFIED**。
 
 ---
 
