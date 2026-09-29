@@ -309,6 +309,7 @@ const I18N = {
     co_postal_invalid: 'Enter a valid ZIP code (12345 or 12345-6789).',
     co_country_unsupported: 'We cannot ship to {country} yet.',
     co_shipping_unavailable: 'We cannot ship to this address yet.',
+    co_check_highlighted: 'Please check the highlighted address fields.',
     co_billing_same: 'Billing address is the same as shipping',
     co_shipping_option: 'Shipping method', co_select_shipping: 'Select a shipping method',
     co_order_summary: 'Order summary', co_place_order: 'Confirm and pay',
@@ -416,6 +417,7 @@ const I18N = {
     co_postal_invalid: '请输入有效的邮编（12345 或 12345-6789）。',
     co_country_unsupported: '暂无法配送到{country}。',
     co_shipping_unavailable: '暂无法配送到该地址。',
+    co_check_highlighted: '请检查标出的地址信息。',
     co_billing_same: '账单地址与收货地址相同',
     co_shipping_option: '配送方式', co_select_shipping: '请选择配送方式',
     co_order_summary: '订单摘要', co_place_order: '确认并支付',
@@ -1145,6 +1147,41 @@ function fieldClass(field, base) {
   return checkoutFieldErrors[field] ? `${base} border-red-400` : base;
 }
 
+// The DOM ids of every address field, in the order a buyer reads them top to
+// bottom. Used to focus and scroll to the first invalid field after a failed
+// submit, so the error is impossible to miss instead of silently sitting below
+// the fold.
+const CHECKOUT_FIELD_IDS = {
+  email: 'coEmail',
+  firstName: 'coFirst',
+  lastName: 'coLast',
+  address1: 'coAddress1',
+  city: 'coCity',
+  province: 'coProvince',
+  postalCode: 'coPostal',
+  countryCode: 'coCountry',
+};
+
+// Focus (and scroll to) the first field that currently has an error. Call this
+// only after renderCheckout() has (re)drawn the form, so the target element
+// exists. Returns the id of the focused field, or '' when nothing was invalid.
+function focusFirstInvalidField() {
+  const order = ['email', 'firstName', 'lastName', 'address1', 'city', 'province', 'postalCode', 'countryCode'];
+  for (const field of order) {
+    if (!checkoutFieldErrors[field]) continue;
+    const el = document.getElementById(CHECKOUT_FIELD_IDS[field]);
+    if (!el) continue;
+    try {
+      el.focus();
+      if (typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    } catch (_) { /* focus/scroll are best-effort; the inline error is still shown */ }
+    return CHECKOUT_FIELD_IDS[field];
+  }
+  return '';
+}
+
 // A searchable country select. Options come from the region's shippable list
 // (the authoritative "where we deliver" set), so a country the region cannot
 // ship to is simply not offered — the buyer can never pick a non-shippable
@@ -1272,6 +1309,7 @@ function renderCheckout() {
       </div>
     </div>
 
+    ${Object.keys(checkoutFieldErrors).length ? `<p class="mt-3 text-sm text-red-600">${t('co_check_highlighted')}</p>` : ''}
     <button onclick="placeOrder()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('co_place_order')}</button>
   `;
 }
@@ -1356,6 +1394,7 @@ async function placeOrder() {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     setFieldError('email', t('co_email_required'));
     renderCheckout();
+    focusFirstInvalidField();
     return;
   }
   // Structured per-field validation: each message says what is wrong and how to
@@ -1364,6 +1403,9 @@ async function placeOrder() {
   if (Object.keys(errs).length) {
     checkoutFieldErrors = errs;
     renderCheckout();
+    // Never fail silently: jump to the first invalid field so the buyer sees
+    // exactly what to fix, and surface a light summary by the button.
+    focusFirstInvalidField();
     return;
   }
   // Shipping-zone guard: refuse to proceed when the chosen country is not in the

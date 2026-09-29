@@ -17,6 +17,9 @@ function makeNode() {
   const classes = new Set();
   return {
     innerHTML: '', textContent: '', value: '', style: {}, placeholder: '',
+    focused: false,
+    focus() { this.focused = true; },
+    scrollIntoView() {},
     classList: {
       add: name => classes.add(name),
       remove: name => classes.delete(name),
@@ -942,4 +945,52 @@ test('a shippable US address still completes the full PayPal sandbox checkout', 
 
   assert.ok(app.calls.some(c => c.path === '/store/payment-collections'), 'payment collection created');
   assert.equal(app.run('location.href'), 'https://www.sandbox.paypal.com/checkoutnow?token=abc', 'handed off to PayPal');
+});
+
+test('an invalid ZIP focuses the field, shows the summary, and never reaches payment', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [{ id: 'so_1', name: 'Standard Shipping', amount: 9.9 }] } }),
+      'POST /store/carts/cart_1/shipping-methods': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 39.8, shipping_total: 9.9 }) }),
+      'POST /store/carts/cart_1': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 39.8, shipping_total: 9.9 }) }),
+      'POST /store/payment-collections': () => ({ status: 200, body: { payment_collection: { id: 'paycol_1' } } }),
+      'POST /store/payment-collections/paycol_1/payment-sessions': () => ({ status: 200, body: { payment_collection: { id: 'paycol_1', payment_sessions: [{ id: 'payses_1', provider_id: 'pp_paypal_paypal', data: { approval_url: 'https://www.sandbox.paypal.com/checkoutnow?token=abc' } }] } } }),
+    },
+  });
+  await app.settle();
+  await app.run("addToCart('prod_1')");
+  await app.run('checkout()');
+  await app.settle();
+  await app.run("pickShippingOption('so_1')");
+  await app.settle();
+
+  // Fill a valid US address except for an invalid ZIP (101100 is 6 digits).
+  app.run(`
+    document.getElementById('coEmail').value = 'buyer@example.com';
+    document.getElementById('coFirst').value = 'Ada';
+    document.getElementById('coLast').value = 'Lovelace';
+    document.getElementById('coAddress1').value = '1 Main St';
+    document.getElementById('coCity').value = 'New York';
+    document.getElementById('coProvince').value = 'NY';
+    document.getElementById('coPostal').value = '101100';
+    document.getElementById('coCountry').value = 'US';
+  `);
+
+  const before = app.calls.length;
+  await app.run('placeOrder()');
+  await app.settle();
+
+  // No payment collection was created (we never reached the payment step).
+  assert.ok(!app.calls.slice(before).some(c => c.path === '/store/payment-collections'),
+    'invalid ZIP never starts payment');
+  assert.ok(!String(app.run('location.href')).includes('paypal.com'), 'no PayPal handoff on invalid ZIP');
+
+  // The invalid field is focused and its inline error is present.
+  assert.equal(app.run("document.getElementById('coPostal').focused"), true, 'the ZIP field is focused');
+  const body = app.run("document.getElementById('checkoutBody').innerHTML");
+  assert.ok(/Enter a valid ZIP code/.test(body), 'the ZIP error message is shown inline');
+  assert.ok(/Please check the highlighted address fields/.test(body), 'the summary message is shown near the button');
 });
