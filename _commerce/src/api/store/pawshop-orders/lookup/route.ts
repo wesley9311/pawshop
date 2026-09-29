@@ -1,5 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http'
 import { refetchEntities } from '@medusajs/framework/http'
+import { getOrderDetailWorkflow } from '@medusajs/core-flows'
 import { commerceIsOpen } from '../../../../lib/production-modes.cjs'
 
 // Guest order lookup: order number + email → verified order summary.
@@ -141,75 +142,96 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     return res.status(404).json({ type: 'not_found' })
   }
 
-  // Re-read the order by id with the email still enforced, so a caller who
-  // guesses a cart id cannot read someone else's order without the email.
-  const result = await refetchEntities({
+  // Re-verify the email against the resolved order id. This is the second half
+  // of the anti-enumeration gate and matters especially for the cart_id branch
+  // above, which resolves an order id from the order_cart link without touching
+  // email. A caller who guesses a cart id must still know the order's email, or
+  // this lookup is rejected with the same 404 as every other failure.
+  const emailGate = await refetchEntities({
     entity: 'order',
     idOrFilter: { id: orderId, email },
     scope: req.scope,
-    fields: [
-      'id',
-      'display_id',
-      'status',
-      'payment_status',
-      'fulfillment_status',
-      'currency_code',
-      'total',
-      'created_at',
-      'email',
-      'items.title',
-      'items.quantity',
-      'items.unit_price',
-      'items.total',
-      'items.thumbnail',
-      'shipping_methods.name',
-      'shipping_methods.amount',
-      'shipping_address.first_name',
-      'shipping_address.last_name',
-      'shipping_address.address_1',
-      'shipping_address.address_2',
-      'shipping_address.city',
-      'shipping_address.province',
-      'shipping_address.postal_code',
-      'shipping_address.country_code',
-    ],
+    fields: ['id'],
+  })
+  if (!emailGate.data?.[0]) {
+    return res.status(404).json({ type: 'not_found' })
+  }
+
+  // Read the order through Medusa's official get-order-detail workflow. What
+  // changes here is the *source* of payment_status / fulfillment_status:
+  // those are not stored columns on the `order` entity — they are computed on
+  // `OrderDetail` by aggregating `payment_collections` and `fulfillments`. The
+  // official workflow runs exactly that aggregation, so we reuse it instead of
+  // re-deriving the status in this route (which would risk drifting from
+  // Medusa's own semantics).
+  const { result: orderDetail } = await getOrderDetailWorkflow(req.scope).run({
+    input: {
+      order_id: orderId,
+      filters: { is_draft_order: false },
+      fields: [
+        'id',
+        'display_id',
+        'status',
+        'currency_code',
+        'total',
+        'created_at',
+        'email',
+        'items.title',
+        'items.quantity',
+        'items.unit_price',
+        'items.total',
+        'items.thumbnail',
+        'shipping_methods.name',
+        'shipping_methods.amount',
+        'shipping_address.first_name',
+        'shipping_address.last_name',
+        'shipping_address.address_1',
+        'shipping_address.address_2',
+        'shipping_address.city',
+        'shipping_address.province',
+        'shipping_address.postal_code',
+        'shipping_address.country_code',
+      ],
+    },
   })
 
-  const order = result.data?.[0] as unknown as
-    | {
-        id: string
-        display_id: number
-        status: string
-        payment_status?: string | null
-        fulfillment_status?: string | null
-        currency_code: string
-        total: number
-        created_at: string
-        email: string
-        items?: Array<{
-          title: string
-          quantity: number
-          unit_price: number
-          total: number
-          thumbnail?: string | null
-        }>
-        shipping_methods?: Array<{ name?: string | null; amount?: number | null }> | null
-        shipping_address?: {
-          first_name?: string | null
-          last_name?: string | null
-          address_1?: string | null
-          address_2?: string | null
-          city?: string | null
-          province?: string | null
-          postal_code?: string | null
-          country_code?: string | null
-        } | null
-      }
-    | undefined
-
   // No match (or email mismatch) → the identical 404 as any other failure.
-  if (!order) {
+  if (!orderDetail) {
     return res.status(404).json({ type: 'not_found' })
+  }
+
+  // Narrow the workflow's `OrderDetailDTO` down to the exact shape this route
+  // serializes. `payment_status` / `fulfillment_status` arrive as Medusa's own
+  // aggregated strings; the numeric/date fields arrive as JSON-serialized
+  // primitives from the query graph.
+  const order = orderDetail as unknown as {
+    id: string
+    display_id: number
+    status: string
+    payment_status: string
+    fulfillment_status: string
+    currency_code: string
+    total: number | string
+    created_at: string
+    email: string
+    items: Array<{
+      title: string
+      quantity: number
+      unit_price: number
+      total: number | string
+      thumbnail: string | null
+    }>
+    shipping_methods: Array<{ name: string | null; amount: number | null }> | null
+    shipping_address: {
+      first_name: string | null
+      last_name: string | null
+      address_1: string | null
+      address_2: string | null
+      city: string | null
+      province: string | null
+      postal_code: string | null
+      country_code: string | null
+    } | null
   }
 
   const shippingAddress = order.shipping_address ?? null
