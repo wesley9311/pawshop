@@ -1317,68 +1317,117 @@ function renderOrderSuccess(order) {
   lastResolvedOrder = order;
   const number = order.public_order_number || order.order_number;
   body.innerHTML = `
-    <div>
-      <div class="flex items-center gap-2 mb-4">
-        <div class="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
-          <i class="fas fa-check text-emerald-600"></i>
+    <div class="text-center">
+      <div class="w-12 h-12 mx-auto bg-emerald-100 rounded-full flex items-center justify-center mb-3">
+        <i class="fas fa-check text-emerald-600 text-lg"></i>
+      </div>
+      <div class="text-base font-semibold mb-1">${t('order_success')}</div>
+      <div class="text-sm text-slate-500 mb-4">${t('order_number')}: ${safeHtml(number)}</div>
+      <div class="border border-slate-100 rounded-lg divide-y divide-slate-100 mb-4 text-left">
+        <div class="flex items-center justify-between px-4 py-3">
+          <span class="text-sm text-slate-500">${t('order_total')}</span>
+          <span class="text-sm font-semibold">${money(order.total)}</span>
         </div>
-        <div>
-          <div class="font-semibold">${t('order_success')}</div>
-          <div class="text-xs text-slate-400">${t('order_number')}: ${safeHtml(number)}</div>
+        <div class="flex items-center justify-between px-4 py-3">
+          <span class="text-sm text-slate-500">${t('order_payment_status')}</span>
+          <span class="text-sm font-medium">${safeHtml(paymentStatusLabel(order.payment_status))}</span>
+        </div>
+        <div class="flex items-center justify-between px-4 py-3">
+          <span class="text-sm text-slate-500">${t('order_shipping_method')}</span>
+          <span class="text-sm font-medium">${safeHtml(order.shipping_method || '—')}</span>
         </div>
       </div>
-      <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
-        <div><div class="text-slate-400 text-xs">${t('order_total')}</div><div class="font-medium">${money(order.total)}</div></div>
-        <div><div class="text-slate-400 text-xs">${t('order_payment_status')}</div><div class="font-medium">${safeHtml(paymentStatusLabel(order.payment_status))}</div></div>
-        <div><div class="text-slate-400 text-xs">${t('order_shipping_method')}</div><div class="font-medium">${safeHtml(order.shipping_method || '—')}</div></div>
-      </div>
-      <button onclick="openOrderLookupFromSuccess()" class="w-full mt-2 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_view')}</button>
+      <button onclick="openOrderLookupFromSuccess()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_view')}</button>
       <button onclick="closeOrder()" class="w-full mt-2 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50">${t('order_back')}</button>
     </div>`;
 }
 
+// A field row in the order detail: a label on top, a value below, with the same
+// typography everywhere (label = xs slate-500, value = sm slate-800 medium).
+function orderField(label, value) {
+  return `<div>
+    <div class="text-xs text-slate-500 mb-1">${label}</div>
+    <div class="text-sm text-slate-800 font-medium break-words">${value}</div>
+  </div>`;
+}
+
 // B. Order detail: the full view reached through View order / Guest Lookup. It
-//    carries everything the success page omits — checkout email, item lines,
-//    the shipping address, fulfillment/order status, and placed_at.
+//    is laid out in three layers — (1) items + order/fulfillment status + email,
+//    (2) the shipping address, (3) the final money summary — with clear section
+//    headings and consistent spacing so the reading order is obvious while
+//    scrolling. Nothing is guessed: every status renders only the backend's raw
+//    value (through its label map, falling back to the raw string or "—").
 function renderOrderDetail(order) {
   const body = document.getElementById('orderBody');
   if (!body) return;
   lastResolvedOrder = order;
 
   const items = (order.items || []).map(it => `
-    <div class="flex items-center justify-between py-2 border-b border-slate-100">
-      <span class="text-sm">${safeHtml(it.title)} <span class="text-slate-400">×${it.quantity}</span></span>
-      <span class="text-sm font-medium">${money(it.total)}</span>
+    <div class="flex items-center justify-between py-3 border-b border-slate-100 last:border-b-0">
+      <div class="min-w-0">
+        <div class="text-sm text-slate-800">${safeHtml(it.title)}</div>
+        <div class="text-xs text-slate-500 mt-0.5">${t('quantity')} × ${it.quantity}</div>
+      </div>
+      <span class="text-sm font-medium text-slate-800">${money(it.total)}</span>
     </div>`).join('');
 
-  const placedOn = order.created_at ? new Date(order.created_at).toLocaleString() : '';
   const number = order.public_order_number || order.order_number;
+  const addr = order.shipping_address || {};
+
+  const sectionTitle = (text) => `<h4 class="text-sm font-semibold text-slate-800 mb-3">${text}</h4>`;
 
   body.innerHTML = `
     <div>
-      <div class="flex items-center gap-2 mb-4">
-        <div class="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center">
-          <i class="fas fa-receipt text-slate-500"></i>
+      <div class="text-sm text-slate-500 mb-5">${t('order_number')}: ${safeHtml(number)}</div>
+
+      <!-- Layer 1: items + status + email -->
+      <section class="mb-6">
+        ${sectionTitle(t('order_items'))}
+        <div class="divide-y divide-slate-100 mb-4">${items}</div>
+        <div class="space-y-3">
+          ${orderField(t('order_status'), safeHtml(orderStatusLabel(order.status)))}
+          ${orderField(t('order_fulfillment_status'), safeHtml(fulfillmentStatusLabel(order.fulfillment_status)))}
+          ${order.email ? orderField(t('order_email'), safeHtml(order.email)) : ''}
         </div>
-        <div>
-          <div class="font-semibold">${t('order_title')}</div>
-          <div class="text-xs text-slate-400">${t('order_number')}: ${safeHtml(number)}</div>
+      </section>
+
+      <!-- Layer 2: shipping address -->
+      <section class="mb-6">
+        ${sectionTitle(t('order_shipping_address'))}
+        <div class="space-y-3">
+          ${orderField(t('co_first') + ' / ' + t('co_last'), safeHtml([addr.first_name, addr.last_name].filter(Boolean).join(' ') || '—'))}
+          ${orderField(t('co_address1'), safeHtml(addr.address_1 || '—'))}
+          ${addr.address_2 ? orderField(t('co_address2'), safeHtml(addr.address_2)) : ''}
+          ${orderField(t('co_city') + ' / ' + t('co_province'), safeHtml([addr.city, addr.province].filter(Boolean).join(', ') || '—'))}
+          ${orderField(t('co_postal'), safeHtml(addr.postal_code || '—'))}
+          ${orderField(t('co_country'), safeHtml(addr.country_code ? addr.country_code.toUpperCase() : '—'))}
         </div>
-      </div>
-      <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
-        <div><div class="text-slate-400 text-xs">${t('order_total')}</div><div class="font-medium">${money(order.total)}</div></div>
-        <div><div class="text-slate-400 text-xs">${t('order_payment_status')}</div><div class="font-medium">${safeHtml(paymentStatusLabel(order.payment_status))}</div></div>
-        <div><div class="text-slate-400 text-xs">${t('order_fulfillment_status')}</div><div class="font-medium">${safeHtml(fulfillmentStatusLabel(order.fulfillment_status))}</div></div>
-        <div><div class="text-slate-400 text-xs">${t('order_status')}</div><div class="font-medium">${safeHtml(orderStatusLabel(order.status))}</div></div>
-        <div><div class="text-slate-400 text-xs">${t('order_shipping_method')}</div><div class="font-medium">${safeHtml(order.shipping_method || '—')}</div></div>
-        ${placedOn ? `<div><div class="text-slate-400 text-xs">${t('order_placed_on')}</div><div class="font-medium">${placedOn}</div></div>` : ''}
-        ${order.email ? `<div class="col-span-2"><div class="text-slate-400 text-xs">${t('order_email')}</div><div class="font-medium break-all">${safeHtml(order.email)}</div></div>` : ''}
-      </div>
-      <h4 class="font-semibold text-sm mb-2">${t('order_items')}</h4>
-      ${items}
-      <h4 class="font-semibold text-sm mt-4 mb-2">${t('order_shipping_address')}</h4>
-      <div class="text-sm text-slate-600 mb-2">${shippingAddressBlock(order.shipping_address)}</div>
-      <button onclick="closeOrder()" class="w-full mt-5 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_back')}</button>
+      </section>
+
+      <!-- Layer 3: final money summary -->
+      <section class="mb-2">
+        ${sectionTitle(t('order_total'))}
+        <div class="border border-slate-100 rounded-lg divide-y divide-slate-100 mb-4">
+          <div class="flex items-center justify-between px-4 py-3">
+            <span class="text-sm text-slate-500">${t('order_total')}</span>
+            <span class="text-sm font-semibold">${money(order.total)}</span>
+          </div>
+          ${order.shipping_amount != null ? `<div class="flex items-center justify-between px-4 py-3">
+            <span class="text-sm text-slate-500">${t('order_shipping_method')}</span>
+            <span class="text-sm font-medium">${safeHtml(order.shipping_method || '—')}</span>
+          </div>
+          <div class="flex items-center justify-between px-4 py-3">
+            <span class="text-sm text-slate-500">${t('shipping')}</span>
+            <span class="text-sm font-medium">${money(order.shipping_amount)}</span>
+          </div>` : ''}
+          <div class="flex items-center justify-between px-4 py-3">
+            <span class="text-sm text-slate-500">${t('order_payment_status')}</span>
+            <span class="text-sm font-medium">${safeHtml(paymentStatusLabel(order.payment_status))}</span>
+          </div>
+        </div>
+      </section>
+
+      <button onclick="closeOrder()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_back')}</button>
     </div>`;
 }
 
@@ -1396,20 +1445,22 @@ function renderOrderNotFound() {
     </div>`;
 }
 
-// "View order" on the success page re-opens the guest lookup pre-filled with
-// the real order number and checkout email, then submits it so the buyer lands
-// on the same order detail. The order number is never generated client-side —
-// it comes straight from the Medusa order that was just resolved.
-function openOrderLookupFromSuccess() {
+// "View order" on the success page resolves the order we already hold straight
+// into the detail view — no guest-lookup form flashes in between. We already
+// have the real order (number + email come from the Medusa order that was just
+// resolved), so we re-fetch it to refresh the detail and render directly.
+async function openOrderLookupFromSuccess() {
   if (!lastResolvedOrder) return;
   const number = lastResolvedOrder.public_order_number || lastResolvedOrder.order_number;
   const email = lastResolvedOrder.email;
   if (!number || !email) { renderOrderLookupForm(); return; }
-  // Pre-fill the lookup form and immediately resolve it to the detail view.
-  renderOrderLookupForm(email, String(number));
-  document.getElementById('lookupNumber').value = String(number);
-  document.getElementById('lookupEmail').value = email;
-  submitOrderLookup();
+  try {
+    const order = await store.lookupOrder(String(number), email);
+    if (order) renderOrderDetail(order);
+    else renderOrderNotFound();
+  } catch (e) {
+    showToast(e && e.kind === 'network' ? t('shop_unreachable') : t('order_not_found'));
+  }
 }
 
 // After PayPal approval the buyer lands back on the storefront with the order

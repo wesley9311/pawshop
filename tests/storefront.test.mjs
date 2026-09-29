@@ -648,7 +648,7 @@ test('an order detail renders every real field without inventing a tracking entr
   assert.ok(!html.toLowerCase().includes('tracking number'), 'no tracking number');
 });
 
-test('the success page offers "view order" that pre-fills the real number and email', async () => {
+test('the success page offers "view order" that resolves straight to the detail (no lookup flash)', async () => {
   const app = bootPawShop({
     routes: {
       'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
@@ -670,18 +670,17 @@ test('the success page offers "view order" that pre-fills the real number and em
   assert.ok(html.includes('View order'), 'success page offers a view-order button');
   assert.ok(html.includes('Back to shop'), 'success page offers a back-to-shop button');
 
-  // Clicking "view order" re-opens the guest lookup and pre-fills the REAL
-  // public order number (never a client-generated one) and the checkout email,
-  // then resolves to the same order detail.
+  // Clicking "view order" must resolve the order we already hold straight into
+  // the detail view — it must NOT render the guest-lookup form in between (no
+  // order-number/email inputs flash on screen).
   await app.run('openOrderLookupFromSuccess()');
   await app.settle();
 
-  assert.equal(app.nodes.get('lookupNumber').value, 'PS-20260928-1001', 'lookup is pre-filled with the public order number');
-  assert.equal(app.nodes.get('lookupEmail').value, 'buyer@example.com', 'lookup is pre-filled with the checkout email');
-
-  // After resolving, the detail view shows the same public order number (no new id).
   const detail = app.nodes.get('orderBody').innerHTML;
   assert.ok(detail.includes('PS-20260928-1001'), 'view order lands on the same order detail');
+  assert.ok(detail.includes('Cardboard Cat Lounger'), 'detail carries the item list');
+  assert.equal(app.nodes.get('lookupNumber'), undefined, 'no guest-lookup number input is rendered in between');
+  assert.equal(app.nodes.get('lookupEmail'), undefined, 'no guest-lookup email input is rendered in between');
 });
 
 test('the success page is a light confirmation and does not duplicate the order detail', async () => {
