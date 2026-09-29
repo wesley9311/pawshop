@@ -659,9 +659,14 @@ test('the success page offers "view order" that pre-fills the real number and em
 
   // Render the success page directly (as handlePayPalReturn does after the
   // order resolves).
-  app.run(`renderOrderResult(${JSON.stringify(orderPayload().order)}, { isSuccess: true })`);
+  app.run(`renderOrderSuccess(${JSON.stringify(orderPayload().order)})`);
 
   const html = app.nodes.get('orderBody').innerHTML;
+  assert.ok(html.includes('Order placed'), 'success page confirms the order');
+  assert.ok(html.includes('PS-20260928-1001'), 'success page shows the public order number');
+  assert.ok(html.includes('$39.80'), 'success page shows the total');
+  assert.ok(html.includes('Paid'), 'success page shows the payment status');
+  assert.ok(html.includes('Standard Shipping'), 'success page shows the shipping method');
   assert.ok(html.includes('View order'), 'success page offers a view-order button');
   assert.ok(html.includes('Back to shop'), 'success page offers a back-to-shop button');
 
@@ -677,6 +682,37 @@ test('the success page offers "view order" that pre-fills the real number and em
   // After resolving, the detail view shows the same public order number (no new id).
   const detail = app.nodes.get('orderBody').innerHTML;
   assert.ok(detail.includes('PS-20260928-1001'), 'view order lands on the same order detail');
+});
+
+test('the success page is a light confirmation and does not duplicate the order detail', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'GET /store/pawshop-orders/lookup': () => ({ status: 200, body: orderPayload() }),
+    },
+  });
+  await app.settle();
+
+  const order = orderPayload().order;
+  app.run(`renderOrderSuccess(${JSON.stringify(order)})`);
+  const successHtml = app.nodes.get('orderBody').innerHTML;
+
+  // The success page must NOT repeat the full item list, the shipping address,
+  // the checkout email, or the fulfillment/order status — those belong to the
+  // order detail only.
+  assert.ok(!successHtml.includes('Cardboard Cat Lounger'), 'success page omits the item list');
+  assert.ok(!successHtml.includes('1 Main St'), 'success page omits the shipping address');
+  assert.ok(!successHtml.includes('buyer@example.com'), 'success page omits the checkout email');
+  assert.ok(!successHtml.includes('Not yet shipped'), 'success page omits the fulfillment status');
+
+  // The detail view, reached through the lookup, carries all of them.
+  app.run(`renderOrderDetail(${JSON.stringify(order)})`);
+  const detailHtml = app.nodes.get('orderBody').innerHTML;
+  assert.ok(detailHtml.includes('Cardboard Cat Lounger'), 'detail shows the item list');
+  assert.ok(detailHtml.includes('1 Main St'), 'detail shows the shipping address');
+  assert.ok(detailHtml.includes('buyer@example.com'), 'detail shows the checkout email');
+  assert.ok(detailHtml.includes('Not yet shipped'), 'detail shows the fulfillment status');
+  assert.ok(detailHtml.includes('Ada Lovelace'), 'detail shows the shipping name');
 });
 
 test('the lookup normalizes "6", "#6", and "PS-..." to a resolvable order number', async () => {

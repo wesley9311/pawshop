@@ -1285,27 +1285,64 @@ async function submitOrderLookup() {
   if (!number) { showToast(t('order_not_found')); return; }
   try {
     const order = await store.lookupOrder(number, email);
-    renderOrderResult(order);
+    if (order) renderOrderDetail(order);
+    else renderOrderNotFound();
   } catch (e) {
     showToast(e && e.kind === 'network' ? t('shop_unreachable') : t('order_not_found'));
   }
 }
 
-function renderOrderResult(order, opts) {
+// A single readable block from whatever shipping-address fields are present.
+function shippingAddressBlock(addr) {
+  const a = addr || {};
+  const lines = [
+    [a.first_name, a.last_name].filter(Boolean).join(' '),
+    a.address_1,
+    a.address_2,
+    [a.city, a.province, a.postal_code].filter(Boolean).join(' '),
+    a.country_code ? a.country_code.toUpperCase() : '',
+  ].filter(Boolean);
+  return lines.length
+    ? lines.map(l => `<div>${safeHtml(l)}</div>`).join('')
+    : `<div class="text-slate-400">—</div>`;
+}
+
+// A. Post-payment success page: a light confirmation only. It shows the order
+//    is placed and the essentials, and points at "View order" for the full
+//    detail. It deliberately does NOT repeat the full item list or address —
+//    those live in the order detail (B), so the two layers never duplicate.
+function renderOrderSuccess(order) {
   const body = document.getElementById('orderBody');
   if (!body) return;
-  if (!order) {
-    body.innerHTML = `
-      <div class="text-center py-6">
-        <div class="w-14 h-14 mx-auto bg-slate-100 rounded-full flex items-center justify-center mb-4">
-          <i class="fas fa-search text-slate-400 text-xl"></i>
+  lastResolvedOrder = order;
+  const number = order.public_order_number || order.order_number;
+  body.innerHTML = `
+    <div>
+      <div class="flex items-center gap-2 mb-4">
+        <div class="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
+          <i class="fas fa-check text-emerald-600"></i>
         </div>
-        <p class="text-sm text-slate-500 mb-6">${t('order_not_found')}</p>
-        <button onclick="renderOrderLookupForm()" class="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('order_retry')}</button>
-      </div>`;
-    return;
-  }
+        <div>
+          <div class="font-semibold">${t('order_success')}</div>
+          <div class="text-xs text-slate-400">${t('order_number')}: ${safeHtml(number)}</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
+        <div><div class="text-slate-400 text-xs">${t('order_total')}</div><div class="font-medium">${money(order.total)}</div></div>
+        <div><div class="text-slate-400 text-xs">${t('order_payment_status')}</div><div class="font-medium">${safeHtml(paymentStatusLabel(order.payment_status))}</div></div>
+        <div><div class="text-slate-400 text-xs">${t('order_shipping_method')}</div><div class="font-medium">${safeHtml(order.shipping_method || '—')}</div></div>
+      </div>
+      <button onclick="openOrderLookupFromSuccess()" class="w-full mt-2 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_view')}</button>
+      <button onclick="closeOrder()" class="w-full mt-2 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50">${t('order_back')}</button>
+    </div>`;
+}
 
+// B. Order detail: the full view reached through View order / Guest Lookup. It
+//    carries everything the success page omits — checkout email, item lines,
+//    the shipping address, fulfillment/order status, and placed_at.
+function renderOrderDetail(order) {
+  const body = document.getElementById('orderBody');
+  if (!body) return;
   lastResolvedOrder = order;
 
   const items = (order.items || []).map(it => `
@@ -1315,52 +1352,47 @@ function renderOrderResult(order, opts) {
     </div>`).join('');
 
   const placedOn = order.created_at ? new Date(order.created_at).toLocaleString() : '';
-
-  // Shipping address: build a single readable block from whatever is present.
-  const addr = order.shipping_address || {};
-  const addrLines = [
-    [addr.first_name, addr.last_name].filter(Boolean).join(' '),
-    addr.address_1,
-    addr.address_2,
-    [addr.city, addr.province, addr.postal_code].filter(Boolean).join(' '),
-    addr.country_code ? addr.country_code.toUpperCase() : '',
-  ].filter(Boolean);
-  const shippingAddressHtml = addrLines.length
-    ? addrLines.map(l => `<div>${safeHtml(l)}</div>`).join('')
-    : `<div class="text-slate-400">—</div>`;
-
-  const isSuccess = !!(opts && opts.isSuccess);
+  const number = order.public_order_number || order.order_number;
 
   body.innerHTML = `
     <div>
       <div class="flex items-center gap-2 mb-4">
-        <div class="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
-          <i class="fas fa-check text-emerald-600"></i>
+        <div class="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center">
+          <i class="fas fa-receipt text-slate-500"></i>
         </div>
         <div>
-          <div class="font-semibold">${t('order_success')}</div>
-          <div class="text-xs text-slate-400">${t('order_number')}: ${safeHtml(order.public_order_number || order.order_number)}</div>
+          <div class="font-semibold">${t('order_title')}</div>
+          <div class="text-xs text-slate-400">${t('order_number')}: ${safeHtml(number)}</div>
         </div>
       </div>
       <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
-        <div><div class="text-slate-400 text-xs">${t('order_status')}</div><div class="font-medium">${safeHtml(orderStatusLabel(order.status))}</div></div>
         <div><div class="text-slate-400 text-xs">${t('order_total')}</div><div class="font-medium">${money(order.total)}</div></div>
         <div><div class="text-slate-400 text-xs">${t('order_payment_status')}</div><div class="font-medium">${safeHtml(paymentStatusLabel(order.payment_status))}</div></div>
         <div><div class="text-slate-400 text-xs">${t('order_fulfillment_status')}</div><div class="font-medium">${safeHtml(fulfillmentStatusLabel(order.fulfillment_status))}</div></div>
-        ${placedOn ? `<div><div class="text-slate-400 text-xs">${t('order_placed_on')}</div><div class="font-medium">${placedOn}</div></div>` : ''}
-        ${order.email ? `<div><div class="text-slate-400 text-xs">${t('order_email')}</div><div class="font-medium break-all">${safeHtml(order.email)}</div></div>` : ''}
+        <div><div class="text-slate-400 text-xs">${t('order_status')}</div><div class="font-medium">${safeHtml(orderStatusLabel(order.status))}</div></div>
         <div><div class="text-slate-400 text-xs">${t('order_shipping_method')}</div><div class="font-medium">${safeHtml(order.shipping_method || '—')}</div></div>
+        ${placedOn ? `<div><div class="text-slate-400 text-xs">${t('order_placed_on')}</div><div class="font-medium">${placedOn}</div></div>` : ''}
+        ${order.email ? `<div class="col-span-2"><div class="text-slate-400 text-xs">${t('order_email')}</div><div class="font-medium break-all">${safeHtml(order.email)}</div></div>` : ''}
       </div>
       <h4 class="font-semibold text-sm mb-2">${t('order_items')}</h4>
       ${items}
       <h4 class="font-semibold text-sm mt-4 mb-2">${t('order_shipping_address')}</h4>
-      <div class="text-sm text-slate-600 mb-2">${shippingAddressHtml}</div>
-      ${isSuccess ? `
-        <button onclick="openOrderLookupFromSuccess()" class="w-full mt-5 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_view')}</button>
-        <button onclick="closeOrder()" class="w-full mt-2 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50">${t('order_back')}</button>
-      ` : `
-        <button onclick="closeOrder()" class="w-full mt-5 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_back')}</button>
-      `}
+      <div class="text-sm text-slate-600 mb-2">${shippingAddressBlock(order.shipping_address)}</div>
+      <button onclick="closeOrder()" class="w-full mt-5 py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_back')}</button>
+    </div>`;
+}
+
+// Shared entry: render the not-found / retry state (used when a lookup misses).
+function renderOrderNotFound() {
+  const body = document.getElementById('orderBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="text-center py-6">
+      <div class="w-14 h-14 mx-auto bg-slate-100 rounded-full flex items-center justify-center mb-4">
+        <i class="fas fa-search text-slate-400 text-xl"></i>
+      </div>
+      <p class="text-sm text-slate-500 mb-6">${t('order_not_found')}</p>
+      <button onclick="renderOrderLookupForm()" class="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('order_retry')}</button>
     </div>`;
 }
 
@@ -1419,7 +1451,7 @@ async function handlePayPalReturn() {
         cart = null;
         cartState = 'idle';
         renderCart();
-        renderOrderResult(order, { isSuccess: true });
+        renderOrderSuccess(order);
       } else if (attempts >= 20) {
         clearInterval(orderLookupTimer);
         orderLookupTimer = null;
