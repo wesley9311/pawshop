@@ -344,7 +344,7 @@ const I18N = {
     order_success: 'Order placed',
     order_success_note: 'Thank you! Your order has been created successfully.',
     order_number: 'Order number',
-    order_status: 'Status',
+    order_status: 'Order status',
     order_total: 'Total',
     order_placed_on: 'Placed on',
     order_items: 'Items',
@@ -360,11 +360,38 @@ const I18N = {
     order_pending: 'Payment authorized, order being created…',
     order_retry: 'Check again',
     order_email: 'Email',
-    order_payment_status: 'Payment',
-    order_fulfillment_status: 'Fulfillment',
+    order_payment_status: 'Payment status',
+    order_fulfillment_status: 'Fulfillment status',
     order_shipping_method: 'Shipping method',
     order_shipping_address: 'Shipping address',
     order_not_fulfilled: 'Not yet shipped',
+    // Customer-facing status labels. The backend keeps Medusa/PayPal's raw
+    // status; these are the buyer's words, never "not paid" for an authorized
+    // payment (which would wrongly invite a double payment).
+    pay_not_paid: 'Payment not completed',
+    pay_awaiting: 'Payment processing',
+    pay_authorized: 'Payment confirmed',
+    pay_partially_authorized: 'Payment partly confirmed',
+    pay_captured: 'Paid',
+    pay_partially_captured: 'Partly paid',
+    pay_partially_refunded: 'Partially refunded',
+    pay_refunded: 'Refunded',
+    pay_canceled: 'Canceled',
+    pay_requires_action: 'Action required',
+    ful_not_fulfilled: 'Not yet shipped',
+    ful_partially_fulfilled: 'Partially fulfilled',
+    ful_fulfilled: 'Fulfilled',
+    ful_partially_shipped: 'Partially shipped',
+    ful_shipped: 'Shipped',
+    ful_partially_delivered: 'Partially delivered',
+    ful_delivered: 'Delivered',
+    ful_canceled: 'Canceled',
+    ost_pending: 'Processing',
+    ost_completed: 'Completed',
+    ost_draft: 'Draft',
+    ost_archived: 'Archived',
+    ost_canceled: 'Canceled',
+    ost_requires_action: 'Action required',
     co_pay_redirect: 'Redirecting to secure payment…',
     co_pay_error: 'Payment could not be started. Please try again.',
   },
@@ -422,7 +449,7 @@ const I18N = {
     co_shipping_option: '配送方式', co_select_shipping: '请选择配送方式',
     co_order_summary: '订单摘要', co_place_order: '确认并支付',
     co_placing: '确认中…',
-    total: '合计',
+    total: '总计',
     co_email_required: '请输入有效的邮箱地址。',
     co_address_required: '请填写收货地址。',
     co_shipping_required: '请选择配送方式。',
@@ -452,8 +479,8 @@ const I18N = {
     order_success: '下单成功',
     order_success_note: '谢谢！你的订单已成功创建。',
     order_number: '订单号',
-    order_status: '状态',
-    order_total: '合计',
+    order_status: '订单状态',
+    order_total: '总计',
     order_placed_on: '下单时间',
     order_items: '商品',
     order_shipping_to: '收货地',
@@ -469,10 +496,34 @@ const I18N = {
     order_retry: '再查一次',
     order_email: '邮箱',
     order_payment_status: '支付状态',
-    order_fulfillment_status: '发货状态',
+    order_fulfillment_status: '配送状态',
     order_shipping_method: '配送方式',
     order_shipping_address: '收货地址',
     order_not_fulfilled: '尚未发货',
+    pay_not_paid: '支付未完成',
+    pay_awaiting: '支付处理中',
+    pay_authorized: '支付已确认',
+    pay_partially_authorized: '支付部分确认',
+    pay_captured: '已支付',
+    pay_partially_captured: '部分支付',
+    pay_partially_refunded: '部分退款',
+    pay_refunded: '已退款',
+    pay_canceled: '已取消',
+    pay_requires_action: '待处理',
+    ful_not_fulfilled: '尚未发货',
+    ful_partially_fulfilled: '部分履行',
+    ful_fulfilled: '已履行',
+    ful_partially_shipped: '部分发货',
+    ful_shipped: '已发货',
+    ful_partially_delivered: '部分送达',
+    ful_delivered: '已送达',
+    ful_canceled: '已取消',
+    ost_pending: '处理中',
+    ost_completed: '已完成',
+    ost_draft: '草稿',
+    ost_archived: '已归档',
+    ost_canceled: '已取消',
+    ost_requires_action: '待处理',
     co_pay_redirect: '正在跳转到安全支付…',
     co_pay_error: '无法发起支付，请重试。',
   },
@@ -1522,31 +1573,50 @@ let orderLookupTimer = null;
 // pre-filled (never a client-generated number).
 let lastResolvedOrder = null;
 
-// Map a raw Medusa status string to a short human label. The raw value is
-// still shown for unknown states so nothing is ever silently hidden.
+// Map a raw Medusa status string to a short, customer-facing label. The raw
+// backend value is the source of truth; this layer only translates it into
+// customer language (the backend keeps Medusa/PayPal's original status). The
+// mapping is deliberately customer-first: an "authorized" payment is shown as
+// "confirmed" — never "not paid" — so a buyer is not misled into paying twice.
+// Unknown states fall back to the raw string so nothing is silently hidden.
 function paymentStatusLabel(raw) {
-  const map = {
-    not_paid: 'Not paid', awaiting: 'Awaiting', authorized: 'Authorized',
-    partially_authorized: 'Partially authorized', captured: 'Paid',
-    partially_captured: 'Partially captured', partially_refunded: 'Partially refunded',
-    refunded: 'Refunded', canceled: 'Canceled', requires_action: 'Action required',
-  };
-  return map[raw] || raw || '—';
+  const key = {
+    not_paid: 'pay_not_paid',
+    awaiting: 'pay_awaiting',
+    authorized: 'pay_authorized',
+    partially_authorized: 'pay_partially_authorized',
+    captured: 'pay_captured',
+    partially_captured: 'pay_partially_captured',
+    partially_refunded: 'pay_partially_refunded',
+    refunded: 'pay_refunded',
+    canceled: 'pay_canceled',
+    requires_action: 'pay_requires_action',
+  }[raw];
+  return key ? t(key) : (raw || '—');
 }
 function fulfillmentStatusLabel(raw) {
-  const map = {
-    not_fulfilled: 'Not yet shipped', partially_fulfilled: 'Partially fulfilled',
-    fulfilled: 'Fulfilled', partially_shipped: 'Partially shipped', shipped: 'Shipped',
-    partially_delivered: 'Partially delivered', delivered: 'Delivered', canceled: 'Canceled',
-  };
-  return map[raw] || raw || '—';
+  const key = {
+    not_fulfilled: 'ful_not_fulfilled',
+    partially_fulfilled: 'ful_partially_fulfilled',
+    fulfilled: 'ful_fulfilled',
+    partially_shipped: 'ful_partially_shipped',
+    shipped: 'ful_shipped',
+    partially_delivered: 'ful_partially_delivered',
+    delivered: 'ful_delivered',
+    canceled: 'ful_canceled',
+  }[raw];
+  return key ? t(key) : (raw || '—');
 }
 function orderStatusLabel(raw) {
-  const map = {
-    pending: 'Pending', completed: 'Completed', draft: 'Draft',
-    archived: 'Archived', canceled: 'Canceled', requires_action: 'Action required',
-  };
-  return map[raw] || raw || '—';
+  const key = {
+    pending: 'ost_pending',
+    completed: 'ost_completed',
+    draft: 'ost_draft',
+    archived: 'ost_archived',
+    canceled: 'ost_canceled',
+    requires_action: 'ost_requires_action',
+  }[raw];
+  return key ? t(key) : (raw || '—');
 }
 
 function closeOrder() {
@@ -1632,15 +1702,12 @@ function renderOrderSuccess(order) {
         <i class="fas fa-check text-emerald-600 text-lg"></i>
       </div>
       <div class="text-base font-semibold mb-1">${t('order_success')}</div>
+      <div class="text-sm text-slate-500 mb-1">${t('order_success_note')}</div>
       <div class="text-sm text-slate-500 mb-4">${t('order_number')}: ${safeHtml(number)}</div>
       <div class="border border-slate-100 rounded-lg divide-y divide-slate-100 mb-4 text-left">
         <div class="flex items-center justify-between px-4 py-3">
           <span class="text-sm text-slate-500">${t('order_total')}</span>
           <span class="text-sm font-semibold">${money(order.total)}</span>
-        </div>
-        <div class="flex items-center justify-between px-4 py-3">
-          <span class="text-sm text-slate-500">${t('order_payment_status')}</span>
-          <span class="text-sm font-medium">${safeHtml(paymentStatusLabel(order.payment_status))}</span>
         </div>
         <div class="flex items-center justify-between px-4 py-3">
           <span class="text-sm text-slate-500">${t('order_shipping_method')}</span>

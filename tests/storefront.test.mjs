@@ -668,7 +668,8 @@ test('the success page offers "view order" that resolves straight to the detail 
   assert.ok(html.includes('Order placed'), 'success page confirms the order');
   assert.ok(html.includes('PS-20260928-1001'), 'success page shows the public order number');
   assert.ok(html.includes('$39.80'), 'success page shows the total');
-  assert.ok(html.includes('Paid'), 'success page shows the payment status');
+  assert.ok(!html.includes('Paid'), 'success page does NOT expose the raw payment status');
+  assert.ok(!html.includes('Payment'), 'success page does NOT expose the payment lifecycle');
   assert.ok(html.includes('Standard Shipping'), 'success page shows the shipping method');
   assert.ok(html.includes('View order'), 'success page offers a view-order button');
   assert.ok(html.includes('Back to shop'), 'success page offers a back-to-shop button');
@@ -993,4 +994,40 @@ test('an invalid ZIP focuses the field, shows the summary, and never reaches pay
   const body = app.run("document.getElementById('checkoutBody').innerHTML");
   assert.ok(/Enter a valid ZIP code/.test(body), 'the ZIP error message is shown inline');
   assert.ok(/Please check the highlighted address fields/.test(body), 'the summary message is shown near the button');
+});
+
+test('payment status maps to customer language: authorized is "confirmed", never "not paid"', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'GET /store/pawshop-orders/lookup': () => ({ status: 200, body: orderPayload({ payment_status: 'authorized' }) }),
+    },
+  });
+  await app.settle();
+
+  app.run('renderOrderDetail(' + JSON.stringify(orderPayload({ payment_status: 'authorized' }).order) + ')');
+  const html = app.nodes.get('orderBody').innerHTML;
+
+  // An authorized (but not yet captured) payment is "confirmed", never "not paid".
+  assert.ok(html.includes('Payment confirmed'), 'authorized renders as "Payment confirmed"');
+  assert.ok(!html.includes('Not paid'), 'authorized must never render as "Not paid"');
+  assert.ok(!html.includes('Payment not completed'), 'authorized must never render as "not completed"');
+});
+
+test('payment status maps to Chinese customer language', async () => {
+  const app = bootPawShop({
+    lang: 'zh',
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'GET /store/pawshop-orders/lookup': () => ({ status: 200, body: orderPayload({ payment_status: 'authorized' }) }),
+    },
+  });
+  await app.settle();
+
+  app.run('renderOrderDetail(' + JSON.stringify(orderPayload({ payment_status: 'authorized' }).order) + ')');
+  const html = app.nodes.get('orderBody').innerHTML;
+
+  assert.ok(html.includes('支付已确认'), 'authorized renders as 支付已确认 in Chinese');
+  assert.ok(!html.includes('未支付'), 'authorized must never render as 未支付 in Chinese');
+  assert.ok(html.includes('尚未发货'), 'not_fulfilled renders as 尚未发货 in Chinese');
 });
