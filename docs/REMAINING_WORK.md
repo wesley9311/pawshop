@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-29（Checkout→Payment→Success UX 用户视角校对：CTA 文案改为「确认并支付 / Confirm and pay」，随 `1c7704d` 发版到展示站；**状态：ORDER SUCCESS UX = OWNER ACCEPTANCE PENDING**，等店主按验收清单 A–F 复测）
+更新：2026-09-29（成功页 note 去掉未上线的「确认邮件稍后送达」承诺，改为「订单已成功创建」，随 `ef2767c` 发版到展示站；**状态：ORDER SUCCESS UX = OWNER ACCEPTANCE PENDING**，等店主按验收清单 A–F 复测）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
