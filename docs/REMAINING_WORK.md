@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-29（Order Success UX 最终口径：public order number `PS-YYYYMMDD-NNNN` 服务端生成 + Guest Lookup 容错 6/#6/PS-xxx，随 `623f3be` 两树发版上线；**状态：TECHNICALLY VERIFIED — OWNER ACCEPTANCE PENDING**，等店主 PayPal approve → 成功页显示 public number → View order → 命中同一订单详情）
+更新：2026-09-29（Order Detail UX Owner 实测修正：去掉支付回跳时的瞬时 lookup/邮箱层闪现、去掉重复"您的订单"标题、详情重排为三层 + 统一字体层级 + 呼吸空间，随 `5d72626` 发版到展示站；**状态：ORDER SUCCESS UX = OWNER ACCEPTANCE PENDING**，等店主按验收清单 A–F 复测）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
@@ -9,6 +9,24 @@
 ---
 
 ## 0. 当前没有阻塞项；关键路径交回店主
+
+**2026-09-29 Order Detail UX Owner 实测修正（本轮）**：店主已真实走 PayPal 成功回跳并检查订单详情，发现交互/信息层级问题。本轮只做交互与层级校正，不扩功能、不改 Payment/provider/backend order semantics、不加物流追踪/账户中心。
+
+- **去掉支付回跳时的瞬时 Lookup 层**：`openOrderLookupFromSuccess()` 原先先 `renderOrderLookupForm()` 再 `submitOrderLookup()`，造成「闪现一层 → 消失 → 又出现订单内容」。现改为直接 `store.lookupOrder(public_number, email)` → `renderOrderDetail`，全程不再渲染 order-number+email 输入层。`handlePayPalReturn()` 本身轮询用的是 `store.lookupOrder(null, email, cartId)` → `renderOrderSuccess`，本就不闪现 lookup。
+- **去掉重复"您的订单"标题**：详情正文原先又渲染一次 `t('order_title')`，与 modal 顶部标题重复。现正文顶部只显示 `订单号：PS-…`，标题只出现在 modal 顶部一次。
+- **统一字体层级**：抽出 `orderField(label, value)` 复用（label = `text-xs text-slate-500`，value = `text-sm text-slate-800 font-medium`）；section 标题统一 `sectionTitle()`。避免多个近似字号混用。
+- **详情重排为三层**：
+  - 第一层：Items（含数量、单价小计）+ Order status + Fulfillment status + Email
+  - 第二层：收货地址（姓名 / Address1 / Address2 可选 / City·Province / Postal code / Country）
+  - 第三层：Total + Payment status +（shipping_amount 非 null 时追加 shipping method + shipping 金额）
+  - 不猜支付/履行状态：`paymentStatusLabel`/`fulfillmentStatusLabel`/`orderStatusLabel` 仍是 `map[raw] || raw || '—'`。
+- **呼吸空间**：section 间 `mb-6`（24px），字段间 `space-y-3`（12px），商品间 `divide-y` 轻分割线，无大面积空白。
+- **底部**：保留「返回商店」（`order_back`），无物流追踪、无账户中心。
+- **验证**：21/21 storefront 契约测试 + `check-security` PASS；展示站 `deploy-static.sh` 原子发版到 `5d72626`，`readlink current` 确认，边界（PawShop.html/store-api.js/root 200、lookup 无 key 400）全绿。
+
+**下一步（先停，交回店主复测）**：店主按验收清单复测——A 支付回跳全程不闪现 lookup 层；B 成功确认页只出现一次、稳定不跳；C 主动 View order 后才进入完整详情；D "您的订单"只出现一次、无双引号；E 详情按三层顺序；F 滚动区块间距自然。通过后标记 OWNER VERIFIED ✅ 并停手。
+
+---
 
 **2026-09-28 Order Success UX 收尾（本轮）**：支付成功 → 成功页真实订单信息 → 查看订单 → 订单详情完整，这个「查看订单」闭环走通。**订单查询已不再是硬阻塞**——用 Guest Lookup（`/store/pawshop-orders/lookup`，order_number+email 双因子，无需 customer auth）实现，绕过 `/store/orders` 的 customer 认证要求。随 `74aff04` 两树发版（展示站 deploy-static + 商务标准升级路径），范围只做查看订单，**不加物流追踪**（等真实 fulfillment/carrier/tracking 接入后才有 Track shipment 入口）。
 
