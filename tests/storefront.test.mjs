@@ -595,6 +595,7 @@ function orderPayload(overrides = {}) {
   return {
     order: {
       order_number: 1001,
+      public_order_number: 'PS-20260928-1001',
       status: 'completed',
       payment_status: 'captured',
       fulfillment_status: 'not_fulfilled',
@@ -631,7 +632,7 @@ test('an order detail renders every real field without inventing a tracking entr
   await app.settle();
 
   const html = app.nodes.get('orderBody').innerHTML;
-  assert.ok(html.includes('1001'), 'real display_id order number is shown');
+  assert.ok(html.includes('PS-20260928-1001'), 'public order number is shown as the primary order number');
   assert.ok(html.includes('buyer@example.com'), 'checkout email is shown');
   assert.ok(html.includes('Cardboard Cat Lounger'), 'item summary is shown');
   assert.ok(html.includes('$39.80'), 'total is shown');
@@ -665,15 +666,55 @@ test('the success page offers "view order" that pre-fills the real number and em
   assert.ok(html.includes('Back to shop'), 'success page offers a back-to-shop button');
 
   // Clicking "view order" re-opens the guest lookup and pre-fills the REAL
-  // order number (never a client-generated one) and the checkout email, then
-  // resolves to the same order detail.
+  // public order number (never a client-generated one) and the checkout email,
+  // then resolves to the same order detail.
   await app.run('openOrderLookupFromSuccess()');
   await app.settle();
 
-  assert.equal(app.nodes.get('lookupNumber').value, '1001', 'lookup is pre-filled with the real order number');
+  assert.equal(app.nodes.get('lookupNumber').value, 'PS-20260928-1001', 'lookup is pre-filled with the public order number');
   assert.equal(app.nodes.get('lookupEmail').value, 'buyer@example.com', 'lookup is pre-filled with the checkout email');
 
-  // After resolving, the detail view shows the same order number (no new id).
+  // After resolving, the detail view shows the same public order number (no new id).
   const detail = app.nodes.get('orderBody').innerHTML;
-  assert.ok(detail.includes('1001'), 'view order lands on the same order detail');
+  assert.ok(detail.includes('PS-20260928-1001'), 'view order lands on the same order detail');
+});
+
+test('the lookup normalizes "6", "#6", and "PS-..." to a resolvable order number', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'GET /store/pawshop-orders/lookup': () => ({ status: 200, body: orderPayload() }),
+    },
+  });
+  await app.settle();
+
+  // Each human-typed form reduces to the same canonical value.
+  assert.equal(app.run("normalizeLookupNumber('6')"), '6', 'raw display_id stays');
+  assert.equal(app.run("normalizeLookupNumber('#6')"), '6', '"#6" strips the hash');
+  assert.equal(app.run("normalizeLookupNumber('PS-20260929-0006')"), 'PS-20260929-0006', 'public number is kept');
+  assert.equal(app.run("normalizeLookupNumber('  #6  ')"), '6', 'whitespace + hash still normalize');
+  assert.equal(app.run("normalizeLookupNumber('PS-20260929-6')"), 'PS-20260929-6', 'unpadded public number is kept');
+  assert.equal(app.run("normalizeLookupNumber('abc')"), '', 'garbage yields empty (backend 404s)');
+  assert.equal(app.run("normalizeLookupNumber('')"), '', 'empty yields empty');
+});
+
+test('submitting "#6" sends the canonical bare display_id to the lookup', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'GET /store/pawshop-orders/lookup': () => ({ status: 200, body: orderPayload({ order_number: 6, public_order_number: 'PS-20260929-0006' }) }),
+    },
+  });
+  await app.settle();
+
+  app.run("renderOrderLookupForm('buyer@example.com')");
+  app.run("document.getElementById('lookupNumber').value = '#6'; document.getElementById('lookupEmail').value = 'buyer@example.com';");
+  await app.run('submitOrderLookup()');
+  await app.settle();
+
+  // The request must carry a bare "6", not "#6", so the backend can resolve it.
+  const lookupCall = app.calls.find(c => c.path === '/store/pawshop-orders/lookup');
+  assert.ok(lookupCall, 'a lookup request was made');
+  assert.ok(lookupCall.url.includes('order_number=6'), 'lookup is sent the bare display_id, not "#6"');
+  assert.ok(!lookupCall.url.includes('%23'), 'the hash is never URL-encoded into the query');
 });

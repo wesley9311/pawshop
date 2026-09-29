@@ -19,9 +19,48 @@ import { commerceIsOpen } from '../../../../lib/production-modes.cjs'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+// Public order number format: PS-YYYYMMDD-NNNN, where YYYYMMDD is the order's
+// creation date and NNNN is the real Medusa display_id zero-padded to 4 digits.
+// It is always derived from real order data on the server — never assembled by
+// the client — and is stable for any historical order. It is a cosmetic alias
+// for the display_id, not a replacement of the Medusa primary key.
+const PUBLIC_PREFIX = 'PS-'
+const PUBLIC_PATTERN = /^PS-(\d{8})-(\d+)$/
+
+function buildPublicOrderNumber(displayId: number, createdAt: string): string {
+  const d = new Date(createdAt)
+  const yyyy = String(d.getUTCFullYear())
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  return `${PUBLIC_PREFIX}${yyyy}${mm}${dd}-${String(displayId).padStart(4, '0')}`
+}
+
+// Accept every human-typed form of an order number and reduce it to the raw
+// Medusa display_id used for the query: "6", "#6", "PS-20260929-0006" all
+// resolve to 6. Anything that cannot be reduced to a positive integer is
+// invalid and returns the same 404 as every other failure.
+function parseOrderNumberInput(raw: unknown): number | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  // Public order number → extract the display_id portion (rightmost segment).
+  const pub = trimmed.match(PUBLIC_PATTERN)
+  if (pub) {
+    const n = Number(pub[2])
+    return Number.isInteger(n) && n > 0 ? n : null
+  }
+
+  // "#6" → strip a leading "#" and parse the digits.
+  const bare = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed
+  const n = Number(bare)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
 type LookupResponse = {
   order: {
     order_number: number
+    public_order_number: string
     status: string
     payment_status: string | null
     fulfillment_status: string | null
@@ -63,7 +102,10 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   }
 
   // Two lookup modes, both gated by the same email:
-  //  1. order_number + email — the buyer already has their order number.
+  //  1. order_number + email — the buyer already has their order number. The
+  //     order_number accepts the raw display_id ("6"), the "#6" display form,
+  //     or the public order number ("PS-20260929-0006"); all normalize to the
+  //     same display_id.
   //  2. cart_id + email — the buyer just returned from PayPal approval and only
   //     has their cart id; the order is resolved through the order_cart link.
   const rawNumber = req.query.order_number
@@ -72,8 +114,8 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   let orderId: string | null = null
 
   if (rawNumber !== undefined) {
-    const orderNumber = Number(rawNumber)
-    if (!Number.isInteger(orderNumber) || orderNumber <= 0) {
+    const orderNumber = parseOrderNumberInput(rawNumber)
+    if (orderNumber === null) {
       return res.status(404).json({ type: 'not_found' })
     }
     const byNumber = await refetchEntities({
@@ -176,6 +218,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const payload: LookupResponse = {
     order: {
       order_number: order.display_id,
+      public_order_number: buildPublicOrderNumber(order.display_id, order.created_at),
       status: order.status,
       payment_status: order.payment_status ?? null,
       fulfillment_status: order.fulfillment_status ?? null,

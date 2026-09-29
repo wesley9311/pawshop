@@ -1263,11 +1263,26 @@ function renderOrderLookupForm(prefillEmail, prefillNumber) {
     </div>`;
 }
 
+// Reduce any human-typed order number to the canonical value we send to the
+// lookup endpoint. Accepts the raw display_id ("6"), the "#6" display form, and
+// the public order number ("PS-20260929-0006"). Returns the canonical string
+// (the bare digits for a display_id, or the full public number) or '' when the
+// input cannot be reduced to something the backend can resolve.
+function normalizeLookupNumber(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return '';
+  const pub = s.match(/^PS-(\d{8})-(\d+)$/i);
+  if (pub) return 'PS-' + pub[1] + '-' + pub[2];
+  const bare = s.startsWith('#') ? s.slice(1) : s;
+  if (/^\d+$/.test(bare)) return bare;
+  return '';
+}
+
 async function submitOrderLookup() {
-  const number = document.getElementById('lookupNumber').value.trim();
+  const number = normalizeLookupNumber(document.getElementById('lookupNumber').value);
   const email = document.getElementById('lookupEmail').value.trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast(t('co_email_required')); return; }
-  if (!/^\d+$/.test(number)) { showToast(t('order_not_found')); return; }
+  if (!number) { showToast(t('order_not_found')); return; }
   try {
     const order = await store.lookupOrder(number, email);
     renderOrderResult(order);
@@ -1324,7 +1339,7 @@ function renderOrderResult(order, opts) {
         </div>
         <div>
           <div class="font-semibold">${t('order_success')}</div>
-          <div class="text-xs text-slate-400">${t('order_number')}: ${order.order_number}</div>
+          <div class="text-xs text-slate-400">${t('order_number')}: ${safeHtml(order.public_order_number || order.order_number)}</div>
         </div>
       </div>
       <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
@@ -1355,7 +1370,7 @@ function renderOrderResult(order, opts) {
 // it comes straight from the Medusa order that was just resolved.
 function openOrderLookupFromSuccess() {
   if (!lastResolvedOrder) return;
-  const number = lastResolvedOrder.order_number;
+  const number = lastResolvedOrder.public_order_number || lastResolvedOrder.order_number;
   const email = lastResolvedOrder.email;
   if (!number || !email) { renderOrderLookupForm(); return; }
   // Pre-fill the lookup form and immediately resolve it to the detail view.
