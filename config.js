@@ -7,6 +7,12 @@ const PAWSHOP_PUBLIC_CONFIG = Object.freeze({
   shipsFrom: 'China',
   inquiryEnabled: false,
 
+  // Recommended shipping country shown first at checkout. This is a default
+  // only: the real list of shippable countries always comes from the region
+  // (`/store/regions` -> `countries`), and the buyer can switch to any other
+  // shippable country. It is never used to force or lock the final country.
+  defaultCountry: 'US',
+
   // Shipping costs, taxes and totals are always read from the Medusa cart.
   // There is no hardcoded shipping amount in the storefront: the US region's
   // "Standard Shipping" option (and any future options) come from the cart.

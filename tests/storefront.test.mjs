@@ -753,3 +753,193 @@ test('submitting "#6" sends the canonical bare display_id to the lookup', async 
   assert.ok(lookupCall.url.includes('order_number=6'), 'lookup is sent the bare display_id, not "#6"');
   assert.ok(!lookupCall.url.includes('%23'), 'the hash is never URL-encoded into the query');
 });
+
+// ===== Checkout Country / Address UX =====
+// A region whose shippable list is authoritative: the US only (the current
+// pilot). Tests override this to exercise multi-country and unsupported cases.
+function regionRoute(countries) {
+  return () => ({
+    status: 200,
+    body: {
+      regions: [{
+        id: 'reg_1',
+        name: 'United States',
+        currency_code: 'usd',
+        countries: countries.map(c => ({ iso_2: c.code, display_name: c.name })),
+      }],
+    },
+  });
+}
+const US_ONLY = [{ code: 'us', name: 'United States' }];
+
+// A checkout helper that seeds a cart with one line item and opens checkout so
+// the address form and shipping options are populated.
+async function openCheckout(app) {
+  await app.settle();
+  await app.run("addToCart('prod_1')");
+  await app.run('checkout()');
+  await app.settle();
+}
+
+test('checkout recommends the configured default country and preselects it', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [] } }),
+      'GET /store/regions': regionRoute(US_ONLY),
+    },
+  });
+  await openCheckout(app);
+
+  // The default country is the configured recommendation, and it is preselected
+  // in the country control without the visitor having typed anything.
+  assert.equal(app.run('checkoutDraft.countryCode'), 'us', 'recommended country is preselected in the draft');
+  assert.equal(app.run('recommendedCountryCode()'), 'us', 'recommendedCountryCode resolves the shippable default');
+  const body = app.nodes.get('checkoutBody').innerHTML;
+  assert.ok(body.includes('United States'), 'the country selector lists the shippable country');
+  assert.ok(body.includes('coCountry'), 'a country control is rendered');
+});
+
+test('the country selector offers every shippable country and is switchable', async () => {
+  const twoCountries = [{ code: 'us', name: 'United States' }, { code: 'ca', name: 'Canada' }];
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [] } }),
+      'GET /store/regions': regionRoute(twoCountries),
+    },
+  });
+  await openCheckout(app);
+
+  const body = app.nodes.get('checkoutBody').innerHTML;
+  assert.ok(body.includes('United States'), 'US is offered');
+  assert.ok(body.includes('Canada'), 'Canada is offered');
+
+  // Switching to Canada updates the draft and clears a US-specific state, since
+  // a US state code no longer applies. The country is never locked to the default.
+  await app.run("onCountryChange('ca')");
+  await app.settle();
+  assert.equal(app.run('checkoutDraft.countryCode'), 'ca', 'country switch updates the draft');
+  assert.equal(app.run('checkoutDraft.province'), '', 'a US state is dropped when switching to Canada');
+  assert.equal(app.run('isShippableCountry("ca")'), true, 'Canada is shippable in this fixture');
+});
+
+test('a US address requires a real state code and rejects an invalid one', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [] } }),
+      'GET /store/regions': regionRoute(US_ONLY),
+    },
+  });
+  await openCheckout(app);
+
+  // A made-up state code is rejected; a real one is accepted.
+  const bad = app.run(`validateAddress({ firstName: 'A', lastName: 'B', address1: '1 Main St', city: 'X', province: 'ZZ', postalCode: '94107', countryCode: 'us' })`);
+  assert.ok(bad.province, 'an invalid US state is flagged');
+  const good = app.run(`validateAddress({ firstName: 'A', lastName: 'B', address1: '1 Main St', city: 'X', province: 'CA', postalCode: '94107', countryCode: 'us' })`);
+  assert.ok(!good.province, 'a valid US state passes');
+});
+
+test('a US ZIP is structurally validated (ZIP and ZIP+4)', async () => {
+  const app = bootPawShop({ routes: { 'GET /store/regions': regionRoute(US_ONLY) } });
+  await app.settle();
+  const base = { firstName: 'A', lastName: 'B', address1: '1 Main St', city: 'X', province: 'CA', countryCode: 'us' };
+
+  assert.ok(!app.run(`validateAddress({ ...${JSON.stringify(base)}, postalCode: '94107' })`).postalCode, '5-digit ZIP passes');
+  assert.ok(!app.run(`validateAddress({ ...${JSON.stringify(base)}, postalCode: '94107-1234' })`).postalCode, 'ZIP+4 passes');
+  assert.ok(app.run(`validateAddress({ ...${JSON.stringify(base)}, postalCode: '1234' })`).postalCode, 'too-short ZIP rejected');
+  assert.ok(app.run(`validateAddress({ ...${JSON.stringify(base)}, postalCode: 'abcde' })`).postalCode, 'non-numeric ZIP rejected');
+});
+
+test('changing the country reloads shipping options for the new destination', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [{ id: 'so_1', name: 'Standard Shipping', amount: 9.9 }] } }),
+      'GET /store/regions': regionRoute([{ code: 'us', name: 'United States' }, { code: 'ca', name: 'Canada' }]),
+    },
+  });
+  await openCheckout(app);
+  const callsBefore = app.calls.filter(c => c.path === '/store/shipping-options').length;
+
+  await app.run("onCountryChange('ca')");
+  await app.settle();
+
+  const callsAfter = app.calls.filter(c => c.path === '/store/shipping-options').length;
+  assert.ok(callsAfter > callsBefore, 'changing the country re-queries shipping options');
+});
+
+test('an unsupported destination is refused before payment', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [] } }),
+      'GET /store/regions': regionRoute(US_ONLY),
+    },
+  });
+  await openCheckout(app);
+
+  // Force a non-shippable country into the draft and try to pay.
+  app.run(`
+    checkoutDraft.countryCode = 'jp';
+    checkoutDraft.firstName = 'A'; checkoutDraft.lastName = 'B';
+    checkoutDraft.address1 = '1 Main St'; checkoutDraft.city = 'Tokyo';
+    checkoutDraft.province = 'Tokyo'; checkoutDraft.postalCode = '100-0001';
+    checkoutDraft.email = 'buyer@example.com';
+  `);
+  await app.run('placeOrder()');
+  await app.settle();
+
+  // No payment collection and no cart write: the unsupported country is blocked.
+  assert.ok(!app.calls.some(c => c.path === '/store/payment-collections'), 'no payment collection for an unsupported country');
+  assert.ok(!app.calls.some(c => c.method === 'POST' && c.path === '/store/carts/cart_1'), 'address is not written for an unsupported country');
+});
+
+test('a shippable US address still completes the full PayPal sandbox checkout', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [{ id: 'so_1', name: 'Standard Shipping', amount: 9.9 }] } }),
+      'POST /store/carts/cart_1/shipping-methods': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 39.8, shipping_total: 9.9 }) }),
+      'POST /store/carts/cart_1': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 39.8, shipping_total: 9.9 }) }),
+      'POST /store/payment-collections': () => ({ status: 200, body: { payment_collection: { id: 'paycol_1' } } }),
+      'POST /store/payment-collections/paycol_1/payment-sessions': () => ({
+        status: 200,
+        body: { payment_collection: { id: 'paycol_1', payment_sessions: [{ id: 'payses_1', provider_id: 'pp_paypal_paypal', data: { approval_url: 'https://www.sandbox.paypal.com/checkoutnow?token=abc' } }] } },
+      }),
+      'GET /store/regions': regionRoute(US_ONLY),
+    },
+  });
+  await openCheckout(app);
+  await app.run("pickShippingOption('so_1')");
+  await app.settle();
+  app.run(`
+    document.getElementById('coEmail').value = 'buyer@example.com';
+    document.getElementById('coFirst').value = 'Ada';
+    document.getElementById('coLast').value = 'Lovelace';
+    document.getElementById('coAddress1').value = '1 Main St';
+    document.getElementById('coCity').value = 'San Francisco';
+    document.getElementById('coProvince').value = 'CA';
+    document.getElementById('coPostal').value = '94107';
+    document.getElementById('coCountry').value = 'us';
+  `);
+
+  await app.run('placeOrder()');
+  await app.settle();
+
+  assert.ok(app.calls.some(c => c.path === '/store/payment-collections'), 'payment collection created');
+  assert.equal(app.run('location.href'), 'https://www.sandbox.paypal.com/checkoutnow?token=abc', 'handed off to PayPal');
+});

@@ -296,6 +296,19 @@ const I18N = {
     co_first: 'First name', co_last: 'Last name',
     co_address1: 'Address', co_address2: 'Apt, suite, unit (optional)',
     co_city: 'City', co_province: 'State', co_postal: 'ZIP code', co_country: 'Country',
+    co_country_ph: 'Select a country', co_province_ph: 'State / Province',
+    co_country_required: 'Please select a country.',
+    co_first_required: 'Please enter a first name.',
+    co_last_required: 'Please enter a last name.',
+    co_address1_required: 'Please enter a street address.',
+    co_city_required: 'Please enter a city.',
+    co_state_required: 'Please select a state.',
+    co_state_invalid: 'Select a valid US state.',
+    co_province_required: 'Please enter a state or province.',
+    co_postal_required: 'Please enter a ZIP code.',
+    co_postal_invalid: 'Enter a valid ZIP code (12345 or 12345-6789).',
+    co_country_unsupported: 'We cannot ship to {country} yet.',
+    co_shipping_unavailable: 'We cannot ship to this address yet.',
     co_billing_same: 'Billing address is the same as shipping',
     co_shipping_option: 'Shipping method', co_select_shipping: 'Select a shipping method',
     co_order_summary: 'Order summary', co_place_order: 'Confirm and pay',
@@ -390,6 +403,19 @@ const I18N = {
     co_first: '名', co_last: '姓',
     co_address1: '地址', co_address2: '公寓/单元（选填）',
     co_city: '城市', co_province: '州', co_postal: '邮编', co_country: '国家',
+    co_country_ph: '选择国家', co_province_ph: '州 / 省',
+    co_country_required: '请选择国家。',
+    co_first_required: '请输入名。',
+    co_last_required: '请输入姓。',
+    co_address1_required: '请输入街道地址。',
+    co_city_required: '请输入城市。',
+    co_state_required: '请选择州。',
+    co_state_invalid: '请选择有效的美国州。',
+    co_province_required: '请输入州或省份。',
+    co_postal_required: '请输入邮编。',
+    co_postal_invalid: '请输入有效的邮编（12345 或 12345-6789）。',
+    co_country_unsupported: '暂无法配送到{country}。',
+    co_shipping_unavailable: '暂无法配送到该地址。',
     co_billing_same: '账单地址与收货地址相同',
     co_shipping_option: '配送方式', co_select_shipping: '请选择配送方式',
     co_order_summary: '订单摘要', co_place_order: '确认并支付',
@@ -470,6 +496,10 @@ function setLang(l) {
 let products = [];
 let catalogState = 'loading';   // loading | ready | unavailable
 let regionId = '';
+// The countries the active region ships to, loaded from /store/regions. Empty
+// until ensureRegion() runs; the checkout treats "not loaded yet" as "loading"
+// rather than "nothing shippable".
+let shippableCountries = [];
 let cart = null;
 let cartState = 'idle';         // idle | loading | ready | error
 let currentCategory = 'all';
@@ -739,7 +769,14 @@ function persistCartId(id) {
 async function ensureRegion() {
   if (regionId) return regionId;
   const regions = await store.regions();
-  regionId = regions.length ? regions[0].id : '';
+  if (regions.length) {
+    regionId = regions[0].id;
+    // Cache the authoritative list of countries this region ships to. It is the
+    // single source of truth for the checkout country selector: the default
+    // recommendation comes from it, and a country that is not on it can never
+    // be used to reach payment.
+    shippableCountries = (regions[0].countries || []).map(c => ({ code: String(c.code || '').toLowerCase(), name: String(c.name || '') }));
+  }
   return regionId;
 }
 
@@ -938,6 +975,72 @@ function closeCart() { document.getElementById('cartDrawer').classList.remove('o
 let checkoutShippingOptions = [];
 let checkoutSelectedOption = '';
 
+// The 50 US states + DC + populated territories, keyed by the two-letter code
+// Medusa expects in `address.province`. This is the only "valid US state" list
+// the checkout accepts: an entry not on it (or a free-typed value for a US
+// address) is rejected with a field-level error instead of being sent upstream.
+const US_STATES = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
+  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
+  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
+  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
+  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
+  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
+  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+  DC: 'District of Columbia',
+  AS: 'American Samoa', GU: 'Guam', MP: 'Northern Mariana Islands', PR: 'Puerto Rico', VI: 'U.S. Virgin Islands',
+};
+
+// Per-field validation errors for the checkout address form, keyed by draft
+// field. Rendered inline next to each input; an empty string means valid. This
+// is the frontend's first pass — the server (Medusa region + service-zone
+// scoping) is still the final authority at completion time.
+let checkoutFieldErrors = {};
+
+function resetCheckoutFieldErrors() {
+  checkoutFieldErrors = {};
+}
+
+function setFieldError(field, message) { checkoutFieldErrors[field] = message || ''; }
+
+// Structured address validation for the selected country. Returns a map of
+// { field: message } (empty = valid). "Where it is wrong and how to fix it" is
+// encoded in each message, never a single generic error.
+function validateAddress(draft) {
+  const errs = {};
+  const country = (draft.countryCode || '').trim().toLowerCase();
+  const first = (draft.firstName || '').trim();
+  const last = (draft.lastName || '').trim();
+  const address1 = (draft.address1 || '').trim();
+  const city = (draft.city || '').trim();
+  const province = (draft.province || '').trim();
+  const postal = (draft.postalCode || '').trim();
+
+  if (!first) errs.firstName = t('co_first_required');
+  if (!last) errs.lastName = t('co_last_required');
+  if (!address1) errs.address1 = t('co_address1_required');
+  if (!city) errs.city = t('co_city_required');
+  if (!country) errs.countryCode = t('co_country_required');
+
+  if (country === 'us') {
+    // United States: the state must be a real code and the ZIP must match
+    // either 5 digits or ZIP+4.
+    if (!province) errs.province = t('co_state_required');
+    else if (!US_STATES[province.toUpperCase()]) errs.province = t('co_state_invalid');
+    if (!postal) errs.postalCode = t('co_postal_required');
+    else if (!/^\d{5}(-\d{4})?$/.test(postal)) errs.postalCode = t('co_postal_invalid');
+  } else {
+    // Non-US: only require the fields to be present; we do not impose a US ZIP
+    // shape (and never a "no CJK characters" rule) on a foreign address.
+    if (!province) errs.province = t('co_province_required');
+    if (!postal) errs.postalCode = t('co_postal_required');
+  }
+  return errs;
+}
+
 // Local draft of every checkout field. The visitor types into the DOM, but the
 // DOM is rebuilt on every shipping-option render, so the draft — not the DOM and
 // not the cart's server state — is the source of truth for what they typed.
@@ -976,23 +1079,105 @@ async function checkout() {
   if (!cart || !cart.items.length) { showToast(t('cart_empty')); return; }
   checkoutSelectedOption = '';
   checkoutShippingOptions = [];
+  resetCheckoutFieldErrors();
+  // Ensure we know the shippable countries before drawing the country selector.
+  try { await ensureRegion(); } catch (_) { /* region already cached or shop unreachable */ }
   seedCheckoutDraftFromCart();
+  // Recommend the configured default country when the visitor has not already
+  // chosen one, but never overwrite an explicit choice. The recommendation is a
+  // default only and the buyer can switch to any other shippable country.
+  if (!checkoutDraft.countryCode) {
+    const preferred = recommendedCountryCode();
+    if (preferred) checkoutDraft.countryCode = preferred;
+  }
   renderCheckout();
   document.getElementById('checkoutModal').classList.add('open');
-  // Load the shipping options Medusa actually offers for this cart's address.
-  try {
-    checkoutShippingOptions = await store.listShippingOptions(cart.id);
-    if (checkoutShippingOptions.length && cart.shippingMethods.length) {
-      const current = cart.shippingMethods[0] && cart.shippingMethods[0].optionId;
-      if (current && checkoutShippingOptions.some(o => o.id === current)) checkoutSelectedOption = current;
-    }
-  } catch (_) {
-    checkoutShippingOptions = [];
-  }
+  await refreshCheckoutShippingOptions();
   renderCheckout();
 }
 
+// The default country to recommend: the configured default if it is actually
+// shippable, otherwise the first shippable country. Falls back to '' when the
+// list is not loaded yet.
+function recommendedCountryCode() {
+  const configured = String(CONFIG.defaultCountry || '').toLowerCase();
+  if (configured && shippableCountries.some(c => c.code === configured)) return configured;
+  return shippableCountries.length ? shippableCountries[0].code : '';
+}
+
+// True when the given country code is on the region's shippable list. When the
+// list is still empty (not yet loaded) we do NOT treat it as "not shippable" —
+// that would wrongly block the very first render.
+function isShippableCountry(code) {
+  const c = String(code || '').toLowerCase();
+  if (!shippableCountries.length) return true;
+  return shippableCountries.some(x => x.code === c);
+}
+
+// Reload the shipping options Medusa actually offers for the cart's current
+// address. A country/region outside the service zone yields an empty list, which
+// the checkout turns into "cannot ship here" instead of letting the buyer pay.
+async function refreshCheckoutShippingOptions() {
+  if (!cart) return;
+  try {
+    checkoutShippingOptions = await store.listShippingOptions(cart.id);
+    if (checkoutShippingOptions.length && cart.shippingMethods && cart.shippingMethods.length) {
+      const current = cart.shippingMethods[0] && cart.shippingMethods[0].optionId;
+      if (current && checkoutShippingOptions.some(o => o.id === current)) checkoutSelectedOption = current;
+    } else if (!checkoutShippingOptions.length) {
+      checkoutSelectedOption = '';
+    }
+  } catch (_) {
+    checkoutShippingOptions = [];
+    checkoutSelectedOption = '';
+  }
+}
+
 function closeCheckout() { document.getElementById('checkoutModal').classList.remove('open'); }
+
+function fieldErrorHtml(field) {
+  const msg = checkoutFieldErrors[field];
+  if (!msg) return '';
+  return `<p class="mt-1 text-xs text-red-600">${safeHtml(msg)}</p>`;
+}
+
+function fieldClass(field, base) {
+  return checkoutFieldErrors[field] ? `${base} border-red-400` : base;
+}
+
+// A searchable country select. Options come from the region's shippable list
+// (the authoritative "where we deliver" set), so a country the region cannot
+// ship to is simply not offered — the buyer can never pick a non-shippable
+// country and walk into payment. The configured default is preselected.
+function countrySelectHtml(selectedCode) {
+  const sel = String(selectedCode || '').toLowerCase();
+  if (!shippableCountries.length) {
+    // List not loaded yet (rare): fall back to a single disabled placeholder so
+    // the form never shows an empty selector.
+    return `<select id="coCountry" disabled class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"><option>${t('co_country_ph')}</option></select>`;
+  }
+  const options = shippableCountries.map(c => {
+    const chosen = c.code === sel ? ' selected' : '';
+    return `<option value="${safeToken(c.code)}"${chosen}>${safeHtml(c.name)}</option>`;
+  }).join('');
+  return `<select id="coCountry" onchange="onCountryChange(this.value)" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">${options}</select>`;
+}
+
+// State/Province control depends on the country: the US gets a curated dropdown
+// of valid state codes; every other country gets a free-text input. Changing the
+// country swaps this control in place.
+function stateControlHtml() {
+  const country = String(checkoutDraft.countryCode || '').toLowerCase();
+  const prov = String(checkoutDraft.province || '');
+  if (country === 'us') {
+    const codes = Object.keys(US_STATES);
+    const options = [`<option value="">${t('co_state_required')}</option>`].concat(
+      codes.map(c => `<option value="${safeToken(c)}"${prov.toUpperCase() === c ? ' selected' : ''}>${safeHtml(c + ' — ' + US_STATES[c])}</option>`)
+    ).join('');
+    return `<select id="coProvince" onchange="setDraft('province', this.value); setFieldError('province', '')" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">${options}</select>`;
+  }
+  return `<input id="coProvince" placeholder="${t('co_province_ph')}" value="${safeHtml(prov)}" oninput="setDraft('province', this.value); setFieldError('province', '')" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">`;
+}
 
 function renderCheckout() {
   const body = document.getElementById('checkoutBody');
@@ -1008,6 +1193,11 @@ function renderCheckout() {
   const taxAmount = cart && cart.taxTotal !== null ? cart.taxTotal : 0;
   const total = cart && cart.total !== null ? cart.total : (cart ? cart.subtotal : 0);
 
+  const countryHtml = countrySelectHtml(d.countryCode);
+  const stateHtml = stateControlHtml();
+  // When the region offers no shipping option for the current address, the buyer
+  // must not be able to continue to payment. We show that explicitly instead of
+  // a silently empty list.
   const optionsHtml = checkoutShippingOptions.length
     ? checkoutShippingOptions.map(o => `
       <label class="flex items-center justify-between gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:border-slate-400 ${checkoutSelectedOption === o.id ? 'border-slate-900 ring-1 ring-slate-900' : ''}">
@@ -1022,24 +1212,48 @@ function renderCheckout() {
   body.innerHTML = `
     <div>
       <label class="block text-sm font-medium mb-1" for="coEmail">${t('co_email')}</label>
-      <input type="email" id="coEmail" value="${safeHtml(email)}" placeholder="${t('co_email_ph')}" oninput="setDraft('email', this.value)" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <input type="email" id="coEmail" value="${safeHtml(email)}" placeholder="${t('co_email_ph')}" oninput="setDraft('email', this.value); setFieldError('email', '')" class="${fieldClass('email', 'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+      ${fieldErrorHtml('email')}
     </div>
 
     <div>
       <h4 class="font-semibold mb-3">${t('co_shipping')}</h4>
       <div class="grid grid-cols-2 gap-3">
-        <input id="coFirst" placeholder="${t('co_first')}" value="${safeHtml(d.firstName)}" oninput="setDraft('firstName', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
-        <input id="coLast" placeholder="${t('co_last')}" value="${safeHtml(d.lastName)}" oninput="setDraft('lastName', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <div>
+          <input id="coFirst" placeholder="${t('co_first')}" value="${safeHtml(d.firstName)}" oninput="setDraft('firstName', this.value); setFieldError('firstName', '')" class="${fieldClass('firstName', 'px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+          ${fieldErrorHtml('firstName')}
+        </div>
+        <div>
+          <input id="coLast" placeholder="${t('co_last')}" value="${safeHtml(d.lastName)}" oninput="setDraft('lastName', this.value); setFieldError('lastName', '')" class="${fieldClass('lastName', 'px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+          ${fieldErrorHtml('lastName')}
+        </div>
       </div>
-      <input id="coAddress1" placeholder="${t('co_address1')}" value="${safeHtml(d.address1)}" oninput="setDraft('address1', this.value)" class="w-full mt-3 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
-      <input id="coAddress2" placeholder="${t('co_address2')}" value="${safeHtml(d.address2)}" oninput="setDraft('address2', this.value)" class="w-full mt-3 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
-      <div class="grid grid-cols-2 gap-3 mt-3">
-        <input id="coCity" placeholder="${t('co_city')}" value="${safeHtml(d.city)}" oninput="setDraft('city', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
-        <input id="coProvince" placeholder="${t('co_province')}" value="${safeHtml(d.province)}" oninput="setDraft('province', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <div class="mt-3">
+        <input id="coAddress1" placeholder="${t('co_address1')}" value="${safeHtml(d.address1)}" oninput="setDraft('address1', this.value); setFieldError('address1', '')" class="${fieldClass('address1', 'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+        ${fieldErrorHtml('address1')}
+      </div>
+      <div class="mt-3">
+        <input id="coAddress2" placeholder="${t('co_address2')}" value="${safeHtml(d.address2)}" oninput="setDraft('address2', this.value)" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
       </div>
       <div class="grid grid-cols-2 gap-3 mt-3">
-        <input id="coPostal" placeholder="${t('co_postal')}" value="${safeHtml(d.postalCode)}" oninput="setDraft('postalCode', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
-        <input id="coCountry" placeholder="${t('co_country')}" value="${safeHtml(d.countryCode ? d.countryCode.toUpperCase() : 'US')}" oninput="setDraft('countryCode', this.value)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <div>
+          <input id="coCity" placeholder="${t('co_city')}" value="${safeHtml(d.city)}" oninput="setDraft('city', this.value); setFieldError('city', '')" class="${fieldClass('city', 'px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+          ${fieldErrorHtml('city')}
+        </div>
+        <div>
+          ${stateHtml}
+          ${fieldErrorHtml('province')}
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3 mt-3">
+        <div>
+          <input id="coPostal" placeholder="${t('co_postal')}" value="${safeHtml(d.postalCode)}" oninput="setDraft('postalCode', this.value); setFieldError('postalCode', '')" class="${fieldClass('postalCode', 'px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+          ${fieldErrorHtml('postalCode')}
+        </div>
+        <div>
+          ${countryHtml}
+          ${fieldErrorHtml('countryCode')}
+        </div>
       </div>
     </div>
 
@@ -1094,6 +1308,35 @@ function captureCheckoutDraftFromDom() {
   }
 }
 
+// Fired when the buyer changes the country. It re-points the draft, clears the
+// state/province only when it no longer belongs to the new country (a US state
+// code is meaningless for a non-US country and vice versa), clears any stale
+// error, re-renders so the state control switches shape, and reloads shipping
+// options so an unsupported destination can never reach payment.
+async function onCountryChange(code) {
+  const next = String(code || '').toLowerCase();
+  const prev = String(checkoutDraft.countryCode || '').toLowerCase();
+  // If the country actually changed, a previously chosen state/province belongs
+  // to the old country — drop it so we never send a mismatched value. If the
+  // country is unchanged, keep the visitor's entry intact.
+  if (next !== prev) {
+    checkoutDraft.province = '';
+    setFieldError('province', '');
+  }
+  checkoutDraft.countryCode = next;
+  setFieldError('countryCode', '');
+  // Preserve every other field from the DOM, then re-assert the country: the
+  // DOM's country control may still hold the previous value, so it must not
+  // overwrite the explicitly chosen one.
+  captureCheckoutDraftFromDom();
+  checkoutDraft.countryCode = next;
+  renderCheckout();
+  // Recompute eligibility for the new country; an empty option list is turned
+  // into a "cannot ship here" message at payment time.
+  await refreshCheckoutShippingOptions();
+  renderCheckout();
+}
+
 async function placeOrder() {
   if (!cart) return;
   // Read from the draft (authoritative) and fall back to the DOM only to catch
@@ -1110,9 +1353,34 @@ async function placeOrder() {
   const postal = (d.postalCode || '').trim();
   const country = (d.countryCode || '').trim().toLowerCase();
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast(t('co_email_required')); return; }
-  if (!first || !last || !address1 || !city || !postal || !country) { showToast(t('co_address_required')); return; }
-  if (!checkoutSelectedOption) { showToast(t('co_shipping_required')); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    setFieldError('email', t('co_email_required'));
+    renderCheckout();
+    return;
+  }
+  // Structured per-field validation: each message says what is wrong and how to
+  // fix it, and is shown inline next to the offending field.
+  const errs = validateAddress(d);
+  if (Object.keys(errs).length) {
+    checkoutFieldErrors = errs;
+    renderCheckout();
+    return;
+  }
+  // Shipping-zone guard: refuse to proceed when the chosen country is not in the
+  // region's shippable set, or when no shipping option exists for the address.
+  if (shippableCountries.length && !isShippableCountry(country)) {
+    const name = shippableCountries.length === 1 ? shippableCountries[0].name : country.toUpperCase();
+    showToast(t('co_country_unsupported').replace('{country}', country.toUpperCase()));
+    return;
+  }
+  if (!checkoutSelectedOption) {
+    if (!checkoutShippingOptions.length) {
+      showToast(t('co_shipping_unavailable'));
+      return;
+    }
+    showToast(t('co_shipping_required'));
+    return;
+  }
 
   const address = {
     firstName: first, lastName: last, address1, address2,

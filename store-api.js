@@ -279,7 +279,30 @@
 
       async regions() {
         var payload = await request('/regions');
-        return (payload && Array.isArray(payload.regions)) ? payload.regions : [];
+        var raw = (payload && Array.isArray(payload.regions)) ? payload.regions : [];
+        var out = [];
+        for (var i = 0; i < raw.length; i++) {
+          var region = raw[i];
+          // Each region carries the list of countries it ships to. That list is
+          // the authoritative "where can we deliver" set the checkout uses to
+          // (a) recommend a default country and (b) refuse a non-shippable one.
+          var countries = [];
+          if (region && Array.isArray(region.countries)) {
+            for (var j = 0; j < region.countries.length; j++) {
+              var c = region.countries[j];
+              if (c && isNonEmptyString(c.iso_2)) {
+                countries.push({ code: c.iso_2.toLowerCase(), name: isNonEmptyString(c.display_name) ? c.display_name : (isNonEmptyString(c.name) ? c.name : c.iso_2) });
+              }
+            }
+          }
+          out.push({
+            id: isNonEmptyString(region.id) ? region.id : '',
+            name: isNonEmptyString(region.name) ? region.name : '',
+            currencyCode: isNonEmptyString(region.currency_code) ? region.currency_code.toLowerCase() : '',
+            countries: countries,
+          });
+        }
+        return out;
       },
 
       // Prices are region-scoped, so the caller passes the region it sells in.
