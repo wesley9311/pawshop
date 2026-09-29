@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-28（Order Success UX 收尾：成功页真实订单信息 + 查看订单复用 Guest Lookup 预填，随 `74aff04` 两树发版上线；**订单查询已闭环，不再是硬阻塞**）
+更新：2026-09-29（Order Success UX 最终口径：public order number `PS-YYYYMMDD-NNNN` 服务端生成 + Guest Lookup 容错 6/#6/PS-xxx，随 `623f3be` 两树发版上线；**状态：TECHNICALLY VERIFIED — OWNER ACCEPTANCE PENDING**，等店主 PayPal approve → 成功页显示 public number → View order → 命中同一订单详情）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
