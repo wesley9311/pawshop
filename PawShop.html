@@ -341,8 +341,8 @@ const I18N = {
     order_title: 'Your order',
     order_confirming: 'Confirming your order…',
     order_confirming_note: 'You approved the payment. Your order is being finalized — this may take a few seconds.',
-    order_success: 'Order placed',
-    order_success_note: 'Thank you! Your order has been created successfully.',
+    order_success: 'Payment confirmed',
+    order_success_note: 'Your order has been created successfully.',
     order_number: 'Order number',
     order_status: 'Order status',
     order_total: 'Total',
@@ -358,6 +358,10 @@ const I18N = {
     order_back: 'Back to shop',
     order_view: 'View order',
     order_pending: 'Payment authorized, order being created…',
+    order_canceled_title: 'Payment not completed',
+    order_canceled_note: 'You did not complete payment, so no order was created.',
+    order_canceled_retry: 'Try again',
+    order_canceled_cart: 'Back to cart',
     order_retry: 'Check again',
     order_email: 'Email',
     order_payment_status: 'Payment status',
@@ -476,8 +480,8 @@ const I18N = {
     order_title: '你的订单',
     order_confirming: '正在确认订单…',
     order_confirming_note: '你已授权支付。订单正在生成，可能需要几秒钟。',
-    order_success: '下单成功',
-    order_success_note: '谢谢！你的订单已成功创建。',
+    order_success: '支付已确认',
+    order_success_note: '订单已成功创建',
     order_number: '订单号',
     order_status: '订单状态',
     order_total: '总计',
@@ -493,6 +497,10 @@ const I18N = {
     order_back: '返回商店',
     order_view: '查看订单',
     order_pending: '支付已授权，订单生成中…',
+    order_canceled_title: '支付未完成',
+    order_canceled_note: '你尚未完成支付，因此没有创建订单。',
+    order_canceled_retry: '重试支付',
+    order_canceled_cart: '返回购物车',
     order_retry: '再查一次',
     order_email: '邮箱',
     order_payment_status: '支付状态',
@@ -1715,7 +1723,7 @@ function renderOrderSuccess(order) {
         </div>
       </div>
       <button onclick="openOrderLookupFromSuccess()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_view')}</button>
-      <button onclick="closeOrder()" class="w-full mt-2 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50">${t('order_back')}</button>
+      <button onclick="closeOrder()" class="w-full mt-2 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50">${t('cart_continue')}</button>
     </div>`;
 }
 
@@ -1822,6 +1830,26 @@ function renderOrderNotFound() {
     </div>`;
 }
 
+// PayPal cancel (or a return that never carried a PayerID): the buyer did not
+// complete payment, so no order was created. This is NOT the success state — it
+// is explicit that payment is incomplete and offers to retry or go back to the
+// (still intact) cart. The cart id is deliberately left in place so "Try again"
+// can reuse the same basket.
+function renderPayPalCanceled() {
+  const body = document.getElementById('orderBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="text-center py-6">
+      <div class="w-14 h-14 mx-auto bg-amber-100 rounded-full flex items-center justify-center mb-4">
+        <i class="fas fa-exclamation text-amber-600 text-xl"></i>
+      </div>
+      <h4 class="font-bold mb-2">${t('order_canceled_title')}</h4>
+      <p class="text-sm text-slate-500 mb-6">${t('order_canceled_note')}</p>
+      <button onclick="closeOrder(); checkout();" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_canceled_retry')}</button>
+      <button onclick="closeOrder(); openCart();" class="w-full mt-2 py-3 border border-slate-200 text-sm font-medium rounded hover:bg-slate-50">${t('order_canceled_cart')}</button>
+    </div>`;
+}
+
 // "View order" on the success page resolves the order we already hold straight
 // into the detail view — no guest-lookup form flashes in between. We already
 // have the real order (number + email come from the Medusa order that was just
@@ -1848,8 +1876,23 @@ async function handlePayPalReturn() {
   try { lookup = JSON.parse(localStorage.getItem('pawshop_order_lookup') || 'null'); } catch (_) { lookup = null; }
   if (!lookup || !lookup.email) return;
 
-  const isReturn = /[?&](token|PayerID|paymentId)=/.test(window.location.search);
-  if (!isReturn) return;
+  // PayPal returns to the SAME storefront URL for both approve and cancel. The
+  // only reliable signal is the PayerID parameter: an approved checkout carries
+  // it, a canceled one does not. A cancel must never be mistaken for an
+  // in-flight order — it shows "payment not completed" and offers retry/cart.
+  const search = window.location.search || '';
+  const hasToken = /[?&](token|paymentId)=/.test(search);
+  if (!hasToken) return;
+
+  const hasPayerID = /[?&]PayerID=/.test(search);
+  if (!hasPayerID) {
+    document.getElementById('orderModal').classList.add('open');
+    renderPayPalCanceled();
+    // The saved cart id stays (so the buyer can retry the same basket), but the
+    // return marker is stale — drop it so a later visit is not misread.
+    try { localStorage.removeItem('pawshop_order_lookup'); } catch (_) {}
+    return;
+  }
 
   document.getElementById('orderModal').classList.add('open');
   const body = document.getElementById('orderBody');

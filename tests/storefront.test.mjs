@@ -665,14 +665,17 @@ test('the success page offers "view order" that resolves straight to the detail 
   app.run(`renderOrderSuccess(${JSON.stringify(orderPayload().order)})`);
 
   const html = app.nodes.get('orderBody').innerHTML;
-  assert.ok(html.includes('Order placed'), 'success page confirms the order');
+  assert.ok(html.includes('Payment confirmed'), 'success page confirms payment (not "Order placed")');
+  assert.ok(html.includes('Your order has been created successfully'), 'success page confirms the order was created');
   assert.ok(html.includes('PS-20260928-1001'), 'success page shows the public order number');
   assert.ok(html.includes('$39.80'), 'success page shows the total');
-  assert.ok(!html.includes('Paid'), 'success page does NOT expose the raw payment status');
-  assert.ok(!html.includes('Payment'), 'success page does NOT expose the payment lifecycle');
+  assert.ok(!html.includes('Paid'), 'success page never says "Paid" (AUTHORIZE flow, not captured)');
+  assert.ok(!html.includes('captured'), 'success page does NOT expose the raw lifecycle value');
+  assert.ok(!html.includes('authorized'), 'success page does NOT expose the raw lifecycle value');
   assert.ok(html.includes('Standard Shipping'), 'success page shows the shipping method');
   assert.ok(html.includes('View order'), 'success page offers a view-order button');
-  assert.ok(html.includes('Back to shop'), 'success page offers a back-to-shop button');
+  assert.ok(html.includes('Continue shopping'), 'success page offers a continue-shopping button');
+  assert.ok(!html.includes('Back to shop'), 'success page does NOT use the "back to shop" wording');
 
   // Clicking "view order" must resolve the order we already hold straight into
   // the detail view — it must NOT render the guest-lookup form in between (no
@@ -1030,4 +1033,58 @@ test('payment status maps to Chinese customer language', async () => {
   assert.ok(html.includes('支付已确认'), 'authorized renders as 支付已确认 in Chinese');
   assert.ok(!html.includes('未支付'), 'authorized must never render as 未支付 in Chinese');
   assert.ok(html.includes('尚未发货'), 'not_fulfilled renders as 尚未发货 in Chinese');
+});
+
+test('a PayPal cancel (no PayerID) shows "payment not completed", never the success page', async () => {
+  const app = bootPawShop({
+    storage: new Map([
+      ['pawshop_order_lookup', JSON.stringify({ email: 'buyer@example.com', cartId: 'cart_1' })],
+      ['pawshop_medusa_cart_id', 'cart_1'],
+    ]),
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+    },
+  });
+  await app.settle();
+
+  // PayPal cancels back to the same URL with a token but no PayerID.
+  app.run("location.search = '?token=EC-12345'");
+  app.run('handlePayPalReturn()');
+  await app.settle();
+
+  const html = app.nodes.get('orderBody').innerHTML;
+  assert.ok(html.includes('Payment not completed'), 'cancel shows "payment not completed"');
+  assert.ok(html.includes('Back to cart'), 'cancel offers a back-to-cart action');
+  assert.ok(html.includes('Try again'), 'cancel offers a retry action');
+  assert.ok(!html.includes('Payment confirmed'), 'cancel must NEVER show the success confirmation');
+  assert.ok(!html.includes('Your order has been created'), 'cancel must NEVER claim the order was created');
+  assert.ok(!html.includes('PS-'), 'cancel must NEVER show an order number');
+
+  // The stale return marker is dropped, but the cart id survives so the buyer
+  // can retry the same basket.
+  assert.equal(app.storage.get('pawshop_order_lookup'), undefined, 'return marker is cleared on cancel');
+  assert.equal(app.storage.get('pawshop_medusa_cart_id'), 'cart_1', 'cart id survives cancel for retry');
+});
+
+test('a PayPal cancel renders "payment not completed" in Chinese', async () => {
+  const app = bootPawShop({
+    lang: 'zh',
+    storage: new Map([
+      ['pawshop_order_lookup', JSON.stringify({ email: 'buyer@example.com', cartId: 'cart_1' })],
+    ]),
+    routes: {
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+    },
+  });
+  await app.settle();
+
+  app.run("location.search = '?token=EC-12345'");
+  app.run('handlePayPalReturn()');
+  await app.settle();
+
+  const html = app.nodes.get('orderBody').innerHTML;
+  assert.ok(html.includes('支付未完成'), 'cancel shows 支付未完成 in Chinese');
+  assert.ok(html.includes('返回购物车'), 'cancel offers 返回购物车 in Chinese');
+  assert.ok(html.includes('重试支付'), 'cancel offers 重试支付 in Chinese');
+  assert.ok(!html.includes('支付已确认'), 'cancel never shows 支付已确认 in Chinese');
 });
