@@ -999,6 +999,49 @@ test('an invalid ZIP focuses the field, shows the summary, and never reaches pay
   assert.ok(/Please check the highlighted address fields/.test(body), 'the summary message is shown near the button');
 });
 
+test('an invalid address field gets a red border that wins the cascade (no grey override)', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/regions': () => ({ status: 200, body: { regions: [{ id: 'reg_1', countries: [{ code: 'us', name: 'United States' }] }] } }),
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [{ id: 'so_1', name: 'Standard Shipping', amount: 9.9 }] } }),
+    },
+  });
+  await app.settle();
+  await app.run("addToCart('prod_1')");
+  await app.run('checkout()');
+  await app.settle();
+
+  // Flag every address control as invalid and render the form. setFieldError()
+  // mutates the live checkoutFieldErrors object the script closes over, so this
+  // exercises the same path placeOrder() takes on a failed validation.
+  app.run("shippableCountries = [{ code: 'us', name: 'United States' }]; setFieldError('postalCode','x'); setFieldError('province','x'); setFieldError('countryCode','x'); renderCheckout();");
+
+  // The harness's fake DOM does not parse innerHTML, so read the rendered markup.
+  const tagFor = (id) => {
+    const html = app.run("document.getElementById('checkoutBody').innerHTML");
+    const i = html.indexOf(`id="${id}"`);
+    return i < 0 ? '' : html.slice(i, html.indexOf('>', i));
+  };
+
+  // Regression: the compiled sheet emits .border-slate-200 AFTER .border-red-400,
+  // so "border-slate-200 border-red-400" resolves to grey. The error state must
+  // carry the error colour EXCLUSIVELY.
+  const zipTag = tagFor('coPostal');
+  assert.ok(/border-red-400/.test(zipTag), 'invalid ZIP carries border-red-400');
+  assert.ok(!/border-slate-200/.test(zipTag), 'invalid ZIP must not also carry the grey border');
+  assert.ok(/border-red-400/.test(tagFor('coProvince')), 'invalid state carries border-red-400');
+  assert.ok(/border-red-400/.test(tagFor('coCountry')), 'invalid country carries border-red-400');
+
+  // A clean field keeps the neutral border and carries no error colour.
+  app.run('resetCheckoutFieldErrors(); renderCheckout();');
+  const cleanTag = tagFor('coPostal');
+  assert.ok(/border-slate-200/.test(cleanTag), 'clean ZIP keeps border-slate-200');
+  assert.ok(!/border-red-400/.test(cleanTag), 'clean ZIP has no error border');
+});
+
 test('payment status maps to customer language: authorized is "confirmed", never "not paid"', async () => {
   const app = bootPawShop({
     routes: {

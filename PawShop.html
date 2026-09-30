@@ -1203,7 +1203,15 @@ function fieldErrorHtml(field) {
 }
 
 function fieldClass(field, base) {
-  return checkoutFieldErrors[field] ? `${base} border-red-400` : base;
+  if (!checkoutFieldErrors[field]) return base;
+  // Swap the neutral border colour for the error colour instead of appending a
+  // second colour class. The compiled sheet emits .border-slate-200 AFTER
+  // .border-red-400, so a class list of "border-slate-200 border-red-400"
+  // resolves to grey and the invalid field shows no red at all. Only one border
+  // colour may be present for the error state to actually be visible.
+  return /\bborder-slate-200\b/.test(base)
+    ? base.replace(/\bborder-slate-200\b/, 'border-red-400')
+    : `${base} border-red-400`;
 }
 
 // The DOM ids of every address field, in the order a buyer reads them top to
@@ -1256,7 +1264,7 @@ function countrySelectHtml(selectedCode) {
     const chosen = c.code === sel ? ' selected' : '';
     return `<option value="${safeToken(c.code)}"${chosen}>${safeHtml(c.name)}</option>`;
   }).join('');
-  return `<select id="coCountry" onchange="onCountryChange(this.value)" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">${options}</select>`;
+  return `<select id="coCountry" onchange="onCountryChange(this.value)" class="${fieldClass('countryCode', 'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">${options}</select>`;
 }
 
 // State/Province control depends on the country: the US gets a curated dropdown
@@ -1270,9 +1278,9 @@ function stateControlHtml() {
     const options = [`<option value="">${t('co_state_required')}</option>`].concat(
       codes.map(c => `<option value="${safeToken(c)}"${prov.toUpperCase() === c ? ' selected' : ''}>${safeHtml(c + ' — ' + US_STATES[c])}</option>`)
     ).join('');
-    return `<select id="coProvince" onchange="setDraft('province', this.value); setFieldError('province', '')" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">${options}</select>`;
+    return `<select id="coProvince" onchange="setDraft('province', this.value); setFieldError('province', '')" class="${fieldClass('province', 'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">${options}</select>`;
   }
-  return `<input id="coProvince" placeholder="${t('co_province_ph')}" value="${safeHtml(prov)}" oninput="setDraft('province', this.value); setFieldError('province', '')" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300">`;
+  return `<input id="coProvince" placeholder="${t('co_province_ph')}" value="${safeHtml(prov)}" oninput="setDraft('province', this.value); setFieldError('province', '')" class="${fieldClass('province', 'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">`;
 }
 
 function renderCheckout() {
