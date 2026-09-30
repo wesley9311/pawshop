@@ -1,6 +1,8 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-29（**ORDER SUCCESS UX = OWNER VERIFIED ✅**：店主已按验收清单 A–F 复测通过。本轮结项，不再扩展——成功页 note 已去掉未上线邮件承诺、CTA 已改「确认并支付」、详情三层、无自动闪现 lookup。展示站现行 `ef2767c`）
+更新：2026-09-30（**CHECKOUT COUNTRY / ADDRESS UX = OWNER VERIFIED ✅**：店主已按 Owner 验收路径复测通过——United States→NY→无效 ZIP 时页面有反应、自动 focus/scroll 到 invalid 字段、ZIP 红框+明确错误提示、按钮恢复可操作；修正为合法地址后正常进入 PayPal。**A11 仍保持独立缺口**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`，本轮只验收前端 UX，未把 server-side validation 标记为完成。展示站现行 `81e45f6`）
+
+前一轮：2026-09-29（**ORDER SUCCESS UX = OWNER VERIFIED ✅**：店主已按验收清单 A–F 复测通过。本轮结项，不再扩展——成功页 note 已去掉未上线邮件承诺、CTA 已改「确认并支付」、详情三层、无自动闪现 lookup。展示站现行 `ef2767c`）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
 
 图例：**P0** 阻塞上线 / **P1** 上线前应完成 / **P2** 可延后。**归属** 指谁能做：
@@ -9,6 +11,20 @@
 ---
 
 ## 0. 当前没有阻塞项；关键路径交回店主
+
+**2026-09-30 Checkout Country / Address UX Owner 验收（本轮）**：店主按验收路径复测通过，前端关单。本轮只收口前端 UX，不扩功能、不改 Payment/Region/Service Zone。
+
+- **验收路径（全部通过）**：
+  1. 无效 ZIP（US→NY→"INVALID"）→ Confirm and pay：页面**不**表现为"按钮没反应"——自动 focus/scroll 到第一个 invalid 字段（ZIP），ZIP 红框 + 明确错误提示 "Enter a valid ZIP code (12345 or 12345-6789)."，按钮恢复可操作（未 disabled、未 stuck loading）。
+  2. 修正合法地址（New York / NY / 10001 / US）→ Confirm and pay → **正常跳转 PayPal Sandbox**（`checkoutnow?token=…`）。
+  3. 切换 State/Shipping 不丢已填字段（city/state/postal/country 全保留）。
+  4. 无额外确认弹窗（无 `confirm()`）。
+  5. Shipping option 正常（`so_…` radio 可选、可选中）。
+  6. 错误提示能让普通用户知道怎么改（每条 inline 错误指明"错在哪 + 怎么改"，另有总提示 "Please check the highlighted address fields."）。
+- **生产核实**：展示站 `current` → `81e45f6`（含 `f04cd98` Country/Address UX + `e35d2e3` focus/scroll 修复），`PawShop.html` 关键逻辑（`validateAddress`/`focusFirstInvalidField`/`fieldClass` 红框）已落地。
+- **⚠️ A11 仍独立缺口（不因本轮通过而关闭）**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`。当前 backend 只验证 Region/country，不验证 US State/ZIP（详见 A11 行）。**前端 UX 验收通过 ≠ server-side validation 已完成**，A11 下一块单独处理。
+
+---
 
 **2026-09-29 Checkout→Payment→Success UX 用户视角校对（本轮）**：Owner 按真实用户购物节奏校对，要求更少步骤/更少弹层/更少误操作。本轮只做 UX 审核 + 最小必要修正，不扩账户中心、不加物流、不加"是/否"确认弹窗、不改 Payment/provider/backend semantics。
 
@@ -185,6 +201,7 @@ nginx 已开三段反代：`/admin/`（Basic + Medusa 会话双层）、`/auth/u
 | A8 | ~~`sshd` 多开公网 22222 端口 + `Match User admin` 块~~ → **🟢 2026-09-18 17:05 查清：建议保持原样，无需任何动作** | — | **Agent** | **更正前一版"主机上手工加的无文档配置"的说法**：`Port 22222` 是**服务器开通当天的平台初始配置**（`Server listening on :: port 22222` 最早 `Sep 06 17:43`，`99-pawshop.conf` 文件时间 `Sep 6 18:29`）。`admin` 是**阿里云 SWAS 平台创建的用户**（UID 1000、密码锁定 `L`、带 `NOPASSWD: ALL` sudo），其 `authorized_keys` 里的非生产密钥注释为 **`swas-imported-key`**（阿里云导入密钥）→ 那 ~320 次 `Accepted publickey admin from 100.104.x.x` 是**阿里云控制台「远程连接」走内网**，末次 `Sep 14 17:36`，**全发生在我 Sep 16 开始工作之前**。**处置：不关端口**——关掉收益≈0（爆破本就不可能成功，只允许密钥），却可能打断阿里云控制台那条内网通道；已写成 `RUNBOOK` 的正式约定。 |
 | A9 | 店主 `~/Downloads/AccessKey.csv` 明文凭据 | P2 | **店主** | 含一对真实 AccessKey（ID 24 位 / Secret 30 位，文件时间 `2026-09-13 17:56`）。**指纹比对确认不是生产在用的任何一把**（备份 OSS 密钥 `30f36f937bf4`/`977ae2c163a8`、商务 S3 密钥 `c5d4a2e09e69`/`816c291af801` 均不同）→ 生产不受影响。建议确认已无用后删除；若仍在使用，应改为独立 RAM 用户并尽快轮换。**我未改动该文件**（个人目录只读不写）。 |
 | A10 | `_commerce/scripts` 没有静态"未定义标识符"检查（本轮真实差点上线） | P2 | Agent（**提议**） | 本轮我把 `manifestKeyTest` 用在 `sync-production-backups.mjs` 里**却漏了导入**：`node --check` 只做语法分析（语法合法，通过），四个契约测试只匹配字符串（也通过），**本地全绿但一上生产就是 `ReferenceError`**。是逐行复核 diff 才发现的。这些脚本本地跑不起来（模块加载即抛"必须 Linux/非 root"），所以没有"跑一下就知道"的兜底。**提议**：给 `_commerce/scripts` 加 ESLint（`no-undef` + `sourceType: module`）作为本地门禁；在没做之前，改这类脚本必须**逐行核对新用到的符号是否都在导入行里**。 |
+| A11 | **SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED** | P1（提议） | **Agent** | 结算地址的服务端结构化校验尚未实现。**当前生产行为（2026-09-29 核实）**：① `country_code` 由 Medusa Region 校验（`update-cart.js` 里 `country_code` 不在 region → 抛 `INVALID_DATA`，见 `_commerce/node_modules/@medusajs/core-flows/dist/cart/workflows/update-cart.js` 第 30-34 行）；② **US `province`/state 服务端不校验**；③ **US `postal_code` 服务端不校验**；④ 后端唯一的 store 自定义路由 `pawshop-orders/lookup` 只读展示地址、不做校验，`store-api.js` 的 `toSnakeAddress()` 只做 snake_case 字段转换。**当前由前端兜底**：`PawShop.html` 的 `validateAddress()` 强制有效 US 州码（50 州+DC+territories）与 `ZIP`/`ZIP+4`。**将来任务**：在支付/结账完成（finalization）前加服务端地址结构校验，**不得复制或冲突 Region/Service Zone 的权威**（Region 仍管"国家是否可配送"，服务端新增的只管"州/邮编格式与地址结构"）。实施前切 High，本轮只记录不扩后端。 |
 
 **已结项（2026-09-18，全部有实跑证据）**：
 
