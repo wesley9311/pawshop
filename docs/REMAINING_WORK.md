@@ -1,6 +1,8 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-30（**红框视觉缺陷已修 + PayPal 回跳 UX 已发版，两项均待店主验收**：① `ADDRESS INVALID-FIELD RED BORDER` 根因有二——`assets/tailwind.css` 从未包含 `.border-red-400`；且即使包含，编译产物把 `.border-slate-200` 排在 `.border-red-400` **之后**，`border-slate-200 border-red-400` 仍解析为灰色。改为「错误态只保留单一边框色类」（`fieldClass` 用替换而非追加），并让 State/Country 控件也走 `fieldClass`；重建 CSS（hash `a39414b8…`）。② `PAYPAL RETURN SUCCESS/CANCEL UX`（commit `dae62b9`）随本次发版上线。展示站现行 `48b44d6`；**未标记 OWNER VERIFIED**。前一轮 `CHECKOUT COUNTRY / ADDRESS UX = OWNER VERIFIED ✅` 不变；**A11 仍独立缺口**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`）
+更新：2026-09-30（**A11 服务端地址结构校验已实现并上线（商务站 `f00139c`）**：在 `POST /store/carts` 与 `POST /store/carts/:id` 两个 cart 写路由上加 storefront 专属 middleware（`_commerce/src/lib/address-structure.cjs`）；全国家必填完整性 + 仅 US 校验州码（50 州+DC+territories）与 ZIP/ZIP+4；**不碰 Region 权威**（国家是否可配送仍由 Medusa 裁决）、不碰 PayPal provider/capture/refund、不碰 checkout UI。19 新测试；commerce 194/194、types、security、storefront 44/44 全绿；生产 live 实测 10 条路径全符合预期。**未标记 OWNER VERIFIED**。前两轮的 `ADDRESS INVALID-FIELD RED BORDER`（`48b44d6`）与 `PAYPAL RETURN SUCCESS/CANCEL UX`（`dae62b9`）展示站已上线，仍待店主复看。前一轮 `CHECKOUT COUNTRY / ADDRESS UX = OWNER VERIFIED ✅` 不变。详见下文 §0）
+
+更新（上一轮）：2026-09-30（**红框视觉缺陷已修 + PayPal 回跳 UX 已发版，两项均待店主验收**：① `ADDRESS INVALID-FIELD RED BORDER` 根因有二——`assets/tailwind.css` 从未包含 `.border-red-400`；且即使包含，编译产物把 `.border-slate-200` 排在 `.border-red-400` **之后**，`border-slate-200 border-red-400` 仍解析为灰色。改为「错误态只保留单一边框色类」（`fieldClass` 用替换而非追加），并让 State/Country 控件也走 `fieldClass`；重建 CSS（hash `a39414b8…`）。② `PAYPAL RETURN SUCCESS/CANCEL UX`（commit `dae62b9`）随本次发版上线。展示站现行 `48b44d6`；**未标记 OWNER VERIFIED**。前一轮 `CHECKOUT COUNTRY / ADDRESS UX = OWNER VERIFIED ✅` 不变；**A11 仍独立缺口**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`）
 
 前一轮：2026-09-29（**ORDER SUCCESS UX = OWNER VERIFIED ✅**：店主已按验收清单 A–F 复测通过。本轮结项，不再扩展——成功页 note 已去掉未上线邮件承诺、CTA 已改「确认并支付」、详情三层、无自动闪现 lookup。展示站现行 `ef2767c`）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
@@ -12,7 +14,20 @@
 
 ## 0. 当前没有阻塞项；关键路径交回店主
 
-**2026-09-30 红框视觉修复 + PayPal 回跳 UX 发版（本轮，待店主验收）**：两件事——修已确认的 Tailwind 红框视觉缺陷、发版 PayPal return success/cancel UX。范围只这两项，不碰 A11、不升级 Tailwind、不改 provider/capture/refund/Medusa/address validation。
+**2026-09-30 A11 服务端地址结构校验（本轮，High，已上线，待店主验收）**：Medusa 的 `AddressPayload` 把每个地址字段都标成 `.nullish()`，所以 store API 接受「US 地址但没 city、没州、没 ZIP」。前端表单会校验，但**浏览器不是权威**。本轮补服务端最后一道防线；严格只做 A11，不扩功能、不碰 PayPal/Region/checkout UI。
+
+- **插入点（为什么是这里）**：`_commerce/src/api/middlewares.ts` 里对 `POST /store/carts` 与 `POST /store/carts/:id` 挂 storefront-profile 专属 middleware `validateCartShippingAddress`（实体在 `_commerce/src/lib/address-structure.cjs`）。**这两个路由是前台存地址的唯一入口**，因此它是「最小且正确」的插入点——任何地址在写库前就被拦，shipping method 选择、payment collection、PayPal hand-off 因此**永远位于一个「已通过校验的地址」之下游**。不带地址的 cart 更新（`email`、shipping method）原样 `next()` 放行。
+- **精确规则**：① 全国家必填 `first_name`/`last_name`/`address_1`/`city`/`country_code`/`province`/`postal_code`；② **仅 US** 加结构校验——`province` ∈ {50 州 + DC + AS/GU/MP/PR/VI}（共 56 码），`postal_code` 匹配 `^\d{5}(-\d{4})?$`（ZIP 或 ZIP+4）；③ **非 US 只做必填完整性**，不发明任何国家级格式。失败返回 `400 {"type":"invalid_data","code":"cart_shipping_address_invalid","errors":[{field,code,message}]}`（`field` 用 Medusa snake_case key，可直接映射回表单）。
+- **Region 权威未被削弱（关键设计）**：middleware 只用 `country_code` **选择套哪套结构规则**，**从不拒绝国家**。国家是否可配送仍由 Medusa Region 裁决——live 实测：非 region 国家 CA 带全字段通过本 middleware，随后被 Medusa 以 `{"type":"invalid_data","message":"Country with code ca is not within region United States"}` 拒绝（**没有**本模块的 `code` 字段）。两层职责清晰可分。
+- **未触碰**：PayPal provider、authorize/capture/refund/webhook、Region/Service Zone/shipping option 数据模型、checkout UI 结构（前端 `validateAddress()` 保留，后端成为最终防线，不是替代）。
+- **测试**：新增 `_commerce/tests/cart-address-validation.test.cjs` 19 条（NY+10001 通过、无效州拒、无效 ZIP 拒、必填缺失/畸形拒、非 US 仅必填、middleware 放行分支、两条路由挂载）。**commerce 全量 194/194**、`check:types` 干净、root `check:security` 通过、storefront `tests/*.test.mjs` **44/44**（PayPal checkout 回归未破）。
+- **生产 live 实测（对运行中的 `/store`，`pk_…` 公开键）**：无效州+无效 ZIP → 400（两个 field error）；缺 city → 400；NY+10001 → 200；ZIP+4 → 200；无地址 → 200（放行）；update 路由上同上；非 region 国家由 Medusa 拒（见上）。region 支付通道 `pp_paypal_paypal` enabled、shipping option 正常解析 → **PayPal 路径未被影响**。
+- **发版**：`f00139c9908ad34a95a345c1404fd1e0971ba924`，走 **code-only 路径**（`prepare-commerce-release.sh` → `prepare-code-only-release.sh` → `deploy-commerce.sh`，无 DB 迁移/恢复演练）。`/srv/pawshop-commerce/current` 已切到 `f00139c`，`NRestarts=0`、`/health` 200、档位 `production-storefront/open`、gate=1。**展示站未动**（仍 `48b44d6`）。
+- **⚠️ 本轮不自行标记 OWNER VERIFIED**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION` 等店主验收。
+
+---
+
+**2026-09-30 红框视觉修复 + PayPal 回跳 UX 发版（前一轮，待店主验收）**：两件事——修已确认的 Tailwind 红框视觉缺陷、发版 PayPal return success/cancel UX。范围只这两项，不碰 A11、不升级 Tailwind、不改 provider/capture/refund/Medusa/address validation。
 
 - **修复 `ADDRESS INVALID-FIELD RED BORDER`（commit `48b44d6`）**：出问题的不是一处而是三处——(a) 提交在库的 `assets/tailwind.css` 里**根本没有 `.border-red-400`**（前两个 commit 只改了 `PawShop.html`，重建的 CSS 从未提交/部署）；(b) **即便类存在也仍是灰框**：编译产物把 `.border-slate-200`（偏移 9838）排在 `.border-red-400`（9646）**之后**，两者同特异度、后者在前，所以灰色赢；`fieldClass` 现改为**用错误色替换中性色**（不并列两个边框色类）；(c) **State / Country 控件从没走 `fieldClass`**（州下拉与国别 select 是硬编码 class），错误时永远不会有红框，现均已绑定。用 pinned `tailwindcss 3.4.17` 重建（未升级）。
 - **CSS 校验**：`assets/tailwind.css` sha256 = `a39414b8ecd65fdd709654e69d6ce2c7e025201f9463ffa41cdb2bf8cd684a9c`，**本地 = 生产 release = 公网 HTTPS 三者一致**（`https://pawlivora.com/assets/tailwind.css` 拉取同 hash，size 18140）；含 `.border-red-400` / `.bg-amber-100` / `.text-red-600`。
@@ -20,7 +35,7 @@
 - **生产实测（真实 Chrome 打生产站）**：无效 ZIP → ZIP 边框 `rgb(248,113,113)` + inline 错误红字 + State 保持灰；空 State → State 边框红 + ZIP 回灰；`?token=…`（无 PayerID）→ "Payment not completed" + Try again / Back to cart，**绝不进成功态**；`?token=…&PayerID=…` 且后端 lookup 返回订单 → "Payment confirmed" + "Your order has been created successfully" + 订单号 + "Continue shopping"，无 raw lifecycle 词。
 - **成功仍以后端为准**：`renderOrderSuccess` 只在该 cartId+email 的 `lookupOrder` 真的返回订单后调用（PayerID 只用于区分「继续轮询」与「取消」，从不单独判定成功）。
 - **⚠️ 本轮不自行标记 OWNER VERIFIED**：`ADDRESS INVALID-FIELD RED BORDER` 与 `PAYPAL RETURN SUCCESS/CANCEL UX` 均等店主复看。
-- **⚠️ A11 仍独立缺口（不因本轮而关闭）**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`。当前 backend 只验证 Region/country，不验证 US State/ZIP。**前端 UX 通过 ≠ server-side validation 完成**。
+- **⚠️ 当时 A11 仍为独立缺口（本轮不关闭）**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`。**（→ 已于 2026-09-30 第三轮实现并上线，见本文件 §0 顶部与 A11 行。）**
 
 ---
 
@@ -34,7 +49,7 @@
   5. Shipping option 正常（`so_…` radio 可选、可选中）。
   6. 错误提示能让普通用户知道怎么改（每条 inline 错误指明"错在哪 + 怎么改"，另有总提示 "Please check the highlighted address fields."）。
 - **生产核实**：展示站 `current` → `81e45f6`（含 `f04cd98` Country/Address UX + `e35d2e3` focus/scroll 修复），`PawShop.html` 关键逻辑（`validateAddress`/`focusFirstInvalidField`/`fieldClass` 红框）已落地。
-- **⚠️ A11 仍独立缺口（不因本轮通过而关闭）**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`。当前 backend 只验证 Region/country，不验证 US State/ZIP（详见 A11 行）。**前端 UX 验收通过 ≠ server-side validation 已完成**，A11 下一块单独处理。
+- **⚠️ 当时 A11 仍为独立缺口（本轮通过不关闭）**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`。**（→ 已于 2026-09-30 第三轮实现并上线，见本文件 §0 顶部与 A11 行。）**
 
 ---
 
@@ -213,7 +228,7 @@ nginx 已开三段反代：`/admin/`（Basic + Medusa 会话双层）、`/auth/u
 | A8 | ~~`sshd` 多开公网 22222 端口 + `Match User admin` 块~~ → **🟢 2026-09-18 17:05 查清：建议保持原样，无需任何动作** | — | **Agent** | **更正前一版"主机上手工加的无文档配置"的说法**：`Port 22222` 是**服务器开通当天的平台初始配置**（`Server listening on :: port 22222` 最早 `Sep 06 17:43`，`99-pawshop.conf` 文件时间 `Sep 6 18:29`）。`admin` 是**阿里云 SWAS 平台创建的用户**（UID 1000、密码锁定 `L`、带 `NOPASSWD: ALL` sudo），其 `authorized_keys` 里的非生产密钥注释为 **`swas-imported-key`**（阿里云导入密钥）→ 那 ~320 次 `Accepted publickey admin from 100.104.x.x` 是**阿里云控制台「远程连接」走内网**，末次 `Sep 14 17:36`，**全发生在我 Sep 16 开始工作之前**。**处置：不关端口**——关掉收益≈0（爆破本就不可能成功，只允许密钥），却可能打断阿里云控制台那条内网通道；已写成 `RUNBOOK` 的正式约定。 |
 | A9 | 店主 `~/Downloads/AccessKey.csv` 明文凭据 | P2 | **店主** | 含一对真实 AccessKey（ID 24 位 / Secret 30 位，文件时间 `2026-09-13 17:56`）。**指纹比对确认不是生产在用的任何一把**（备份 OSS 密钥 `30f36f937bf4`/`977ae2c163a8`、商务 S3 密钥 `c5d4a2e09e69`/`816c291af801` 均不同）→ 生产不受影响。建议确认已无用后删除；若仍在使用，应改为独立 RAM 用户并尽快轮换。**我未改动该文件**（个人目录只读不写）。 |
 | A10 | `_commerce/scripts` 没有静态"未定义标识符"检查（本轮真实差点上线） | P2 | Agent（**提议**） | 本轮我把 `manifestKeyTest` 用在 `sync-production-backups.mjs` 里**却漏了导入**：`node --check` 只做语法分析（语法合法，通过），四个契约测试只匹配字符串（也通过），**本地全绿但一上生产就是 `ReferenceError`**。是逐行复核 diff 才发现的。这些脚本本地跑不起来（模块加载即抛"必须 Linux/非 root"），所以没有"跑一下就知道"的兜底。**提议**：给 `_commerce/scripts` 加 ESLint（`no-undef` + `sourceType: module`）作为本地门禁；在没做之前，改这类脚本必须**逐行核对新用到的符号是否都在导入行里**。 |
-| A11 | **SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED** | P1（提议） | **Agent** | 结算地址的服务端结构化校验尚未实现。**当前生产行为（2026-09-29 核实）**：① `country_code` 由 Medusa Region 校验（`update-cart.js` 里 `country_code` 不在 region → 抛 `INVALID_DATA`，见 `_commerce/node_modules/@medusajs/core-flows/dist/cart/workflows/update-cart.js` 第 30-34 行）；② **US `province`/state 服务端不校验**；③ **US `postal_code` 服务端不校验**；④ 后端唯一的 store 自定义路由 `pawshop-orders/lookup` 只读展示地址、不做校验，`store-api.js` 的 `toSnakeAddress()` 只做 snake_case 字段转换。**当前由前端兜底**：`PawShop.html` 的 `validateAddress()` 强制有效 US 州码（50 州+DC+territories）与 `ZIP`/`ZIP+4`。**将来任务**：在支付/结账完成（finalization）前加服务端地址结构校验，**不得复制或冲突 Region/Service Zone 的权威**（Region 仍管"国家是否可配送"，服务端新增的只管"州/邮编格式与地址结构"）。实施前切 High，本轮只记录不扩后端。 |
+| A11 | ~~**SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED**~~ → **🟡 2026-09-30 已实现并上线（commit `f00139c`，商务站 code-only 发版）；等店主验收，未标记 OWNER VERIFIED** | P1 | **Agent** | 结算地址的服务端结构化校验已实现。**插入点**：`POST /store/carts` 与 `POST /store/carts/:id` 两个 cart 写路由上的 storefront-profile 专属 middleware（`_commerce/src/api/middlewares.ts` 的 `cartAddressValidation` → `_commerce/src/lib/address-structure.cjs` 的 `validateCartShippingAddress`）。这是前台存地址的唯一入口，因而**天然位于 shipping method 选择 / payment collection / PayPal hand-off 之上游**；不带地址的更新（email、shipping method）原样放行。**规则**：① 全国家必填 `first_name`/`last_name`/`address_1`/`city`/`country_code`/`province`/`postal_code`；② 仅 US 加结构校验——`province` 必须是 50 州+DC+territories（AS/GU/MP/PR/VI）两字母码，`postal_code` 必须是 `ZIP` 或 `ZIP+4`（`^\d{5}(-\d{4})?$`）；③ 非 US 只做必填完整性，**不发明任何国家级格式**。**Region 权威未动**：middleware 只用 `country_code` 选择套哪套结构规则，**从不拒绝国家**——国家是否可配送仍由 Medusa Region 裁决（实测非 region 国家 CA 通过本 middleware 后由 Medusa 以 `Country with code ca is not within region United States` 拒绝，无本模块的 `code` 字段）。**未改**：PayPal provider / authorize/capture/refund/webhook、Region/Service Zone/shipping option 数据模型、checkout UI 结构。失败返回 400 `{"type":"invalid_data","code":"cart_shipping_address_invalid","errors":[{field,code,message}]}`。19 条新测试；commerce 194/194、types、security、storefront 44/44 全绿。细节见 §0 本轮段。 |
 
 **已结项（2026-09-18，全部有实跑证据）**：
 
