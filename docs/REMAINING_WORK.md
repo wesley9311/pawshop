@@ -1,6 +1,6 @@
 # PawShop 未完成清单与操作顺序
 
-更新：2026-09-30（**CHECKOUT COUNTRY / ADDRESS UX = OWNER VERIFIED ✅**：店主已按 Owner 验收路径复测通过——United States→NY→无效 ZIP 时页面有反应、自动 focus/scroll 到 invalid 字段、ZIP 红框+明确错误提示、按钮恢复可操作；修正为合法地址后正常进入 PayPal。**A11 仍保持独立缺口**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`，本轮只验收前端 UX，未把 server-side validation 标记为完成。展示站现行 `81e45f6`）
+更新：2026-09-30（**红框视觉缺陷已修 + PayPal 回跳 UX 已发版，两项均待店主验收**：① `ADDRESS INVALID-FIELD RED BORDER` 根因有二——`assets/tailwind.css` 从未包含 `.border-red-400`；且即使包含，编译产物把 `.border-slate-200` 排在 `.border-red-400` **之后**，`border-slate-200 border-red-400` 仍解析为灰色。改为「错误态只保留单一边框色类」（`fieldClass` 用替换而非追加），并让 State/Country 控件也走 `fieldClass`；重建 CSS（hash `a39414b8…`）。② `PAYPAL RETURN SUCCESS/CANCEL UX`（commit `dae62b9`）随本次发版上线。展示站现行 `48b44d6`；**未标记 OWNER VERIFIED**。前一轮 `CHECKOUT COUNTRY / ADDRESS UX = OWNER VERIFIED ✅` 不变；**A11 仍独立缺口**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`）
 
 前一轮：2026-09-29（**ORDER SUCCESS UX = OWNER VERIFIED ✅**：店主已按验收清单 A–F 复测通过。本轮结项，不再扩展——成功页 note 已去掉未上线邮件承诺、CTA 已改「确认并支付」、详情三层、无自动闪现 lookup。展示站现行 `ef2767c`）
 配套阅读：`docs/OWNER_ACTIONS_ZH.md`（**需要店主本人出面的项：链接、点击步骤、交付方式**）、`PRODUCTION_HANDOFF_ZH.md`（路径与排错总索引）、`docs/RUNBOOK.md`（可执行命令）、`docs/ADVERSARIAL_REVIEW.md`（对抗审查发现）。
@@ -12,7 +12,19 @@
 
 ## 0. 当前没有阻塞项；关键路径交回店主
 
-**2026-09-30 Checkout Country / Address UX Owner 验收（本轮）**：店主按验收路径复测通过，前端关单。本轮只收口前端 UX，不扩功能、不改 Payment/Region/Service Zone。
+**2026-09-30 红框视觉修复 + PayPal 回跳 UX 发版（本轮，待店主验收）**：两件事——修已确认的 Tailwind 红框视觉缺陷、发版 PayPal return success/cancel UX。范围只这两项，不碰 A11、不升级 Tailwind、不改 provider/capture/refund/Medusa/address validation。
+
+- **修复 `ADDRESS INVALID-FIELD RED BORDER`（commit `48b44d6`）**：出问题的不是一处而是三处——(a) 提交在库的 `assets/tailwind.css` 里**根本没有 `.border-red-400`**（前两个 commit 只改了 `PawShop.html`，重建的 CSS 从未提交/部署）；(b) **即便类存在也仍是灰框**：编译产物把 `.border-slate-200`（偏移 9838）排在 `.border-red-400`（9646）**之后**，两者同特异度、后者在前，所以灰色赢；`fieldClass` 现改为**用错误色替换中性色**（不并列两个边框色类）；(c) **State / Country 控件从没走 `fieldClass`**（州下拉与国别 select 是硬编码 class），错误时永远不会有红框，现均已绑定。用 pinned `tailwindcss 3.4.17` 重建（未升级）。
+- **CSS 校验**：`assets/tailwind.css` sha256 = `a39414b8ecd65fdd709654e69d6ce2c7e025201f9463ffa41cdb2bf8cd684a9c`，**本地 = 生产 release = 公网 HTTPS 三者一致**（`https://pawlivora.com/assets/tailwind.css` 拉取同 hash，size 18140）；含 `.border-red-400` / `.bg-amber-100` / `.text-red-600`。
+- **发版**：展示站 `deploy-static.sh` 原子发版 → `48b44d6b3266432f3238bc64f439034b32008428`，`readlink -f /srv/pawshop/current` 确认，`nginx -t` OK。
+- **生产实测（真实 Chrome 打生产站）**：无效 ZIP → ZIP 边框 `rgb(248,113,113)` + inline 错误红字 + State 保持灰；空 State → State 边框红 + ZIP 回灰；`?token=…`（无 PayerID）→ "Payment not completed" + Try again / Back to cart，**绝不进成功态**；`?token=…&PayerID=…` 且后端 lookup 返回订单 → "Payment confirmed" + "Your order has been created successfully" + 订单号 + "Continue shopping"，无 raw lifecycle 词。
+- **成功仍以后端为准**：`renderOrderSuccess` 只在该 cartId+email 的 `lookupOrder` 真的返回订单后调用（PayerID 只用于区分「继续轮询」与「取消」，从不单独判定成功）。
+- **⚠️ 本轮不自行标记 OWNER VERIFIED**：`ADDRESS INVALID-FIELD RED BORDER` 与 `PAYPAL RETURN SUCCESS/CANCEL UX` 均等店主复看。
+- **⚠️ A11 仍独立缺口（不因本轮而关闭）**：`SERVER-SIDE ADDRESS STRUCTURE VALIDATION = NOT YET IMPLEMENTED`。当前 backend 只验证 Region/country，不验证 US State/ZIP。**前端 UX 通过 ≠ server-side validation 完成**。
+
+---
+
+**2026-09-30 Checkout Country / Address UX Owner 验收（前一轮，已关单）**：店主按验收路径复测通过，前端关单。只收口前端 UX，不扩功能、不改 Payment/Region/Service Zone。
 
 - **验收路径（全部通过）**：
   1. 无效 ZIP（US→NY→"INVALID"）→ Confirm and pay：页面**不**表现为"按钮没反应"——自动 focus/scroll 到第一个 invalid 字段（ZIP），ZIP 红框 + 明确错误提示 "Enter a valid ZIP code (12345 or 12345-6789)."，按钮恢复可操作（未 disabled、未 stuck loading）。
