@@ -2,6 +2,15 @@ import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http'
 import { refetchEntities } from '@medusajs/framework/http'
 import { getOrderDetailWorkflow } from '@medusajs/core-flows'
 import { commerceIsOpen } from '../../../../lib/production-modes.cjs'
+import {
+  LOOKUP_FULFILLMENT_FIELDS,
+  LOOKUP_NOT_FOUND_BODY,
+  LOOKUP_NOT_FOUND_STATUS,
+  buildPublicOrderNumber,
+  isLookupEmail,
+  mapFulfillments,
+  parseOrderNumberInput,
+} from '../../../../lib/order-lookup.cjs'
 
 // Guest order lookup: order number + email → verified order summary.
 //
@@ -17,46 +26,10 @@ import { commerceIsOpen } from '../../../../lib/production-modes.cjs'
 //
 // This route is only served while the storefront profile is open; when the
 // store is closed it 404s like every other customer-facing route.
-
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-// Public order number format: PS-YYYYMMDD-NNNN, where YYYYMMDD is the order's
-// creation date and NNNN is the real Medusa display_id zero-padded to 4 digits.
-// It is always derived from real order data on the server — never assembled by
-// the client — and is stable for any historical order. It is a cosmetic alias
-// for the display_id, not a replacement of the Medusa primary key.
-const PUBLIC_PREFIX = 'PS-'
-const PUBLIC_PATTERN = /^PS-(\d{8})-(\d+)$/
-
-function buildPublicOrderNumber(displayId: number, createdAt: string): string {
-  const d = new Date(createdAt)
-  const yyyy = String(d.getUTCFullYear())
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const dd = String(d.getUTCDate()).padStart(2, '0')
-  return `${PUBLIC_PREFIX}${yyyy}${mm}${dd}-${String(displayId).padStart(4, '0')}`
-}
-
-// Accept every human-typed form of an order number and reduce it to the raw
-// Medusa display_id used for the query: "6", "#6", "PS-20260929-0006" all
-// resolve to 6. Anything that cannot be reduced to a positive integer is
-// invalid and returns the same 404 as every other failure.
-function parseOrderNumberInput(raw: unknown): number | null {
-  if (typeof raw !== 'string') return null
-  const trimmed = raw.trim()
-  if (!trimmed) return null
-
-  // Public order number → extract the display_id portion (rightmost segment).
-  const pub = trimmed.match(PUBLIC_PATTERN)
-  if (pub) {
-    const n = Number(pub[2])
-    return Number.isInteger(n) && n > 0 ? n : null
-  }
-
-  // "#6" → strip a leading "#" and parse the digits.
-  const bare = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed
-  const n = Number(bare)
-  return Number.isInteger(n) && n > 0 ? n : null
-}
+//
+// All pure logic — order-number parsing, email validation, the fulfilment wire
+// shape — lives in `lib/order-lookup.cjs` so it can be unit-tested directly.
+// What remains here is I/O: resolve the order, then serialize.
 
 type LookupResponse = {
   order: {
@@ -88,18 +61,35 @@ type LookupResponse = {
       postal_code: string | null
       country_code: string | null
     } | null
+    // Every fulfillment that belongs to this order, as an array: an order can
+    // be fulfilled in several shipments, so the client must never assume one
+    // package or one tracking number. Timestamps are the real `fulfillment`
+    // columns; the client derives each package's state from them and shows
+    // nothing it was not given.
+    fulfillments: Array<{
+      id: string
+      created_at: string | null
+      packed_at: string | null
+      shipped_at: string | null
+      delivered_at: string | null
+      canceled_at: string | null
+      labels: Array<{
+        tracking_number: string | null
+        tracking_url: string | null
+      }>
+    }>
   }
 }
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   // Closed storefront → the whole customer namespace is unreachable.
   if (!commerceIsOpen(process.env.PAWSHOP_MODE)) {
-    return res.status(404).json({ type: 'not_found' })
+    return res.status(LOOKUP_NOT_FOUND_STATUS).json(LOOKUP_NOT_FOUND_BODY)
   }
 
   const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : ''
-  if (!EMAIL_PATTERN.test(email)) {
-    return res.status(404).json({ type: 'not_found' })
+  if (!isLookupEmail(email)) {
+    return res.status(LOOKUP_NOT_FOUND_STATUS).json(LOOKUP_NOT_FOUND_BODY)
   }
 
   // Two lookup modes, both gated by the same email:
@@ -117,7 +107,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   if (rawNumber !== undefined) {
     const orderNumber = parseOrderNumberInput(rawNumber)
     if (orderNumber === null) {
-      return res.status(404).json({ type: 'not_found' })
+      return res.status(LOOKUP_NOT_FOUND_STATUS).json(LOOKUP_NOT_FOUND_BODY)
     }
     const byNumber = await refetchEntities({
       entity: 'order',
@@ -135,11 +125,11 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     })
     orderId = (link.data?.[0] as { order_id?: string } | undefined)?.order_id ?? null
   } else {
-    return res.status(404).json({ type: 'not_found' })
+    return res.status(LOOKUP_NOT_FOUND_STATUS).json(LOOKUP_NOT_FOUND_BODY)
   }
 
   if (!orderId) {
-    return res.status(404).json({ type: 'not_found' })
+    return res.status(LOOKUP_NOT_FOUND_STATUS).json(LOOKUP_NOT_FOUND_BODY)
   }
 
   // Re-verify the email against the resolved order id. This is the second half
@@ -154,7 +144,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     fields: ['id'],
   })
   if (!emailGate.data?.[0]) {
-    return res.status(404).json({ type: 'not_found' })
+    return res.status(LOOKUP_NOT_FOUND_STATUS).json(LOOKUP_NOT_FOUND_BODY)
   }
 
   // Read the order through Medusa's official get-order-detail workflow. What
@@ -191,13 +181,21 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
         'shipping_address.province',
         'shipping_address.postal_code',
         'shipping_address.country_code',
+        // Fulfillment / shipment timeline (Phase 1 logistics). The whitelist is
+        // owned by `lib/order-lookup.cjs`: every entry is a real Medusa column
+        // on `fulfillment` / `fulfillment_label`, nothing derived or invented.
+        // `getOrderDetailWorkflow` already appends `fulfillments.*`, so these
+        // only add the nested `labels` relation that carries the tracking
+        // numbers. `labels.label_url` is absent by construction — it is the
+        // warehouse's shipping-label artifact, not buyer-visible data.
+        ...LOOKUP_FULFILLMENT_FIELDS,
       ],
     },
   })
 
   // No match (or email mismatch) → the identical 404 as any other failure.
   if (!orderDetail) {
-    return res.status(404).json({ type: 'not_found' })
+    return res.status(LOOKUP_NOT_FOUND_STATUS).json(LOOKUP_NOT_FOUND_BODY)
   }
 
   // Narrow the workflow's `OrderDetailDTO` down to the exact shape this route
@@ -232,10 +230,26 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       postal_code: string | null
       country_code: string | null
     } | null
+    fulfillments: Array<{
+      id: string
+      created_at: string | null
+      packed_at: string | null
+      shipped_at: string | null
+      delivered_at: string | null
+      canceled_at: string | null
+      labels: Array<{ tracking_number: string | null; tracking_url: string | null }> | null
+    }> | null
   }
 
   const shippingAddress = order.shipping_address ?? null
   const shippingMethod = (order.shipping_methods || [])[0] ?? null
+
+  // Fulfillments are ordered oldest-first so the client can list the packages
+  // in the order they were created. Only the real columns cross the wire: a
+  // fulfillment with no labels simply carries an empty `labels` array, and the
+  // client shows the timeline without a tracking number rather than inventing
+  // one. `label_url` never leaves the server.
+  const fulfillments = mapFulfillments(order.fulfillments)
 
   const payload: LookupResponse = {
     order: {
@@ -269,6 +283,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
             country_code: shippingAddress.country_code ?? null,
           }
         : null,
+      fulfillments,
     },
   }
 

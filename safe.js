@@ -45,6 +45,25 @@
     }
   }
 
+  // External links — a carrier's tracking page, for example. The value is
+  // entered by an operator and stored in the database, so it is treated as
+  // untrusted output: only an absolute http(s) URL is ever emitted, and the
+  // result is HTML-escaped. Any other scheme (javascript:, data:, vbscript:)
+  // is dropped, which is the real injection risk on an href. There is
+  // deliberately no host allowlist — carriers are many and change, and a link
+  // here is a top-level navigation the shopper chooses to follow, not a
+  // resource the page loads on its own.
+  function link(value) {
+    if (typeof value !== 'string' || !value.trim()) return '';
+    try {
+      const parsed = new URL(value.trim());
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
+      return html(parsed.href);
+    } catch (_) {
+      return '';
+    }
+  }
+
   function token(value) {
     const candidate = String(value || '');
     return /^[a-z0-9_-]+$/i.test(candidate) ? candidate : '';
@@ -78,5 +97,5 @@
     }));
   }
 
-  window.PawSafe = Object.freeze({ html, url, image, icon, token, id, quantity, catalog });
+  window.PawSafe = Object.freeze({ html, url, image, link, icon, token, id, quantity, catalog });
 })();

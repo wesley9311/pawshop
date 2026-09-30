@@ -761,6 +761,248 @@ test('submitting "#6" sends the canonical bare display_id to the lookup', async 
   assert.ok(!lookupCall.url.includes('%23'), 'the hash is never URL-encoded into the query');
 });
 
+// ===== Phase 1 logistics: real shipments and tracking =====
+// The guest lookup returns one entry per Medusa fulfillment, carrying that
+// fulfillment's real timestamps and the labels that hold tracking numbers.
+// The UI renders only what is there: it must never turn "packed" into
+// "shipped", never invent a carrier, and never invent an in-transit or
+// out-for-delivery step that Medusa has no data for.
+function fulfillment(overrides = {}) {
+  return {
+    id: 'ful_1',
+    created_at: '2026-09-29T10:00:00.000Z',
+    packed_at: null,
+    shipped_at: null,
+    delivered_at: null,
+    canceled_at: null,
+    labels: [],
+    ...overrides,
+  };
+}
+
+const TRACKING_URL = 'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223197428490';
+const trackingLabel = (overrides = {}) => ({
+  tracking_number: '9400111899223197428490',
+  tracking_url: TRACKING_URL,
+  ...overrides,
+});
+
+// Render an order detail straight from a payload and return the markup. The
+// detail view is the same function the lookup and "View order" both reach.
+async function detailFor(order) {
+  const app = bootPawShop({
+    routes: { 'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }) },
+  });
+  await app.settle();
+  app.run(`renderOrderDetail(${JSON.stringify(order)})`);
+  return app.nodes.get('orderBody').innerHTML;
+}
+
+test('an order with no fulfillment renders no shipment block at all', async () => {
+  const html = await detailFor(orderPayload().order);
+
+  assert.ok(!html.includes('Shipments'), 'no shipments heading');
+  assert.ok(!html.includes('Track shipment'), 'no track link');
+  assert.ok(!html.includes('Tracking number'), 'no tracking number row');
+});
+
+test('a packed-but-not-shipped fulfillment reads "Packed", never "Shipped"', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'fulfilled',
+    fulfillments: [fulfillment({ packed_at: '2026-09-29T10:00:00.000Z' })],
+  }).order);
+
+  assert.ok(html.includes('>Packed<'), 'the package shows its real packed state');
+  assert.ok(!html.includes('>Shipped<'), 'packed must never be presented as shipped');
+  assert.ok(!html.includes('Track shipment'), 'a package with no tracking number gets no link');
+  assert.ok(html.includes('Shipments'), 'the shipment block is present');
+});
+
+test('a shipped fulfillment shows the real tracking number and a track link', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'shipped',
+    fulfillments: [fulfillment({
+      packed_at: '2026-09-29T10:00:00.000Z',
+      shipped_at: '2026-09-30T08:00:00.000Z',
+      labels: [trackingLabel()],
+    })],
+  }).order);
+
+  assert.ok(html.includes('>Shipped<'), 'the package shows its real shipped state');
+  assert.ok(html.includes('9400111899223197428490'), 'the real tracking number is shown');
+  assert.ok(html.includes('Track shipment'), 'a track link is offered when a URL exists');
+  assert.ok(html.includes('tools.usps.com'), 'the real tracking URL is emitted');
+  assert.ok(html.includes('rel="noopener noreferrer"'), 'external links are opened safely');
+});
+
+test('a delivered fulfillment reads "Delivered"', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'delivered',
+    fulfillments: [fulfillment({
+      packed_at: '2026-09-29T10:00:00.000Z',
+      shipped_at: '2026-09-30T08:00:00.000Z',
+      delivered_at: '2026-10-02T14:00:00.000Z',
+      labels: [trackingLabel()],
+    })],
+  }).order);
+
+  assert.ok(html.includes('>Delivered<'), 'the package shows its real delivered state');
+  assert.ok(!html.includes('>Shipped<'), 'delivered is not also labelled shipped');
+});
+
+test('multiple fulfillments render one card each with every tracking number', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'shipped',
+    fulfillments: [
+      fulfillment({ id: 'ful_a', shipped_at: '2026-09-30T08:00:00.000Z', labels: [trackingLabel({ tracking_number: 'AAA111' })] }),
+      fulfillment({ id: 'ful_b', created_at: '2026-09-30T09:00:00.000Z', shipped_at: '2026-10-01T08:00:00.000Z', labels: [trackingLabel({ tracking_number: 'BBB222' })] }),
+    ],
+  }).order);
+
+  assert.ok(html.includes('Shipment #1'), 'first package is listed');
+  assert.ok(html.includes('Shipment #2'), 'second package is listed');
+  assert.ok(html.includes('AAA111'), 'first tracking number is shown');
+  assert.ok(html.includes('BBB222'), 'second tracking number is shown — one order can have many');
+});
+
+test('a partially shipped order shows the order-level status and each package state', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'partially_shipped',
+    fulfillments: [
+      fulfillment({ id: 'ful_a', shipped_at: '2026-09-30T08:00:00.000Z', labels: [trackingLabel({ tracking_number: 'AAA111' })] }),
+      fulfillment({ id: 'ful_b', created_at: '2026-09-30T09:00:00.000Z', packed_at: '2026-09-30T09:30:00.000Z' }),
+    ],
+  }).order);
+
+  assert.ok(html.includes('>Partially shipped<'), 'the order-level status is the real partial one');
+  assert.ok(html.includes('>Shipped<'), 'the shipped package reads shipped');
+  assert.ok(html.includes('>Packed<'), 'the other package reads packed');
+});
+
+test('a tracking number without a URL still renders, and offers no link', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'shipped',
+    fulfillments: [fulfillment({
+      shipped_at: '2026-09-30T08:00:00.000Z',
+      labels: [trackingLabel({ tracking_url: null })],
+    })],
+  }).order);
+
+  assert.ok(html.includes('9400111899223197428490'), 'the number is still shown');
+  assert.ok(!html.includes('Track shipment'), 'no link is fabricated when there is no URL');
+});
+
+test('a tracking URL that is not http(s) is never emitted', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'shipped',
+    fulfillments: [fulfillment({
+      shipped_at: '2026-09-30T08:00:00.000Z',
+      labels: [trackingLabel({ tracking_url: 'javascript:alert(1)' })],
+    })],
+  }).order);
+
+  assert.ok(!html.includes('javascript:'), 'a javascript: URL never reaches the page');
+  assert.ok(!html.includes('Track shipment'), 'an unusable URL yields no link');
+  assert.ok(html.includes('9400111899223197428490'), 'the real number is still shown');
+});
+
+test('labels.label_url is never rendered, even if the payload carries one', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'shipped',
+    fulfillments: [fulfillment({
+      shipped_at: '2026-09-30T08:00:00.000Z',
+      labels: [{ ...trackingLabel(), label_url: 'https://internal.example/label.pdf' }],
+    })],
+  }).order);
+
+  assert.ok(!html.includes('internal.example'), 'the shipping-label artifact stays out of the storefront');
+  assert.ok(!html.includes('label_url'), 'label_url is not surfaced');
+  assert.ok(html.includes('9400111899223197428490'), 'the tracking number is still shown');
+});
+
+test('a canceled fulfillment reads as a canceled fulfillment', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'canceled',
+    fulfillments: [fulfillment({ canceled_at: '2026-09-30T08:00:00.000Z' })],
+  }).order);
+
+  assert.ok(html.includes('>Fulfillment canceled<'), 'the real canceled state is named');
+});
+
+test('the storefront never invents an in-transit or out-for-delivery step', async () => {
+  const html = await detailFor(orderPayload({
+    fulfillment_status: 'shipped',
+    fulfillments: [fulfillment({ shipped_at: '2026-09-30T08:00:00.000Z', labels: [trackingLabel()] })],
+  }).order);
+
+  const lower = html.toLowerCase();
+  assert.ok(!lower.includes('in transit'), 'no in-transit step without a carrier event source');
+  assert.ok(!lower.includes('out for delivery'), 'no out-for-delivery step without a carrier event source');
+  assert.ok(!lower.includes('delivering'), 'no delivering step without a carrier event source');
+});
+
+// ===== Guest lookup: one indistinguishable failure state =====
+// Anti-enumeration is a property of the whole path, not just the server: the
+// lookup collapses *any* 404 — a nonexistent order, a mismatched email, a
+// malformed query — to the same null, and the UI renders one state from it.
+// These tests pin that the buyer cannot read a distinction out of the screen.
+const NOT_FOUND_LOOKUP = {
+  'GET /store/pawshop-orders/lookup': () => ({ status: 404, body: { type: 'not_found' } }),
+};
+
+// Fill the lookup form, submit it, and return the rendered order panel.
+async function submitLookup(number, email) {
+  const app = bootPawShop({ routes: NOT_FOUND_LOOKUP });
+  await app.settle();
+  app.run('renderOrderLookupForm()');
+  app.context.document.getElementById('lookupNumber').value = number;
+  app.context.document.getElementById('lookupEmail').value = email;
+  await app.context.submitOrderLookup();
+  return { html: app.nodes.get('orderBody').innerHTML, app };
+}
+
+test('a nonexistent order and a wrong email render the identical not-found state', async () => {
+  const nonexistent = await submitLookup('9999', 'buyer@example.com');
+  const wrongEmail = await submitLookup('6', 'someone.else@example.com');
+
+  assert.equal(
+    nonexistent.html,
+    wrongEmail.html,
+    'the screen must not reveal whether the order number or the email was wrong',
+  );
+  assert.ok(nonexistent.html.includes('We could not find an order with those details.'));
+  assert.ok(nonexistent.html.includes('Check again'), 'the buyer can retry');
+  // No distinction leaks as a different status word, error code or raw body.
+  for (const leak of ['not_found', '404', 'type']) {
+    assert.ok(!nonexistent.html.includes(leak), `the 404 body must not leak "${leak}"`);
+  }
+});
+
+test('the lookup never reaches the order detail view on a miss', async () => {
+  const { html, app } = await submitLookup('6', 'buyer@example.com');
+  // A miss must not render any part of the real order detail shell.
+  assert.ok(!html.includes('order_payment_status') && !html.includes('Payment status'));
+  assert.ok(!html.includes('Shipment'));
+  assert.deepEqual(app.paths().filter(p => p.includes('pawshop-orders')), ['GET /store/pawshop-orders/lookup']);
+});
+
+test('a lookup network outage is reported, never mistaken for "no such order"', async () => {
+  const app = bootPawShop({
+    routes: { 'GET /store/pawshop-orders/lookup': () => { throw new Error('offline'); } },
+  });
+  await app.settle();
+  app.run('renderOrderLookupForm()');
+  app.context.document.getElementById('lookupNumber').value = '6';
+  app.context.document.getElementById('lookupEmail').value = 'buyer@example.com';
+  await app.context.submitOrderLookup();
+
+  const html = app.nodes.get('orderBody').innerHTML;
+  assert.ok(
+    !html.includes('We could not find an order with those details.'),
+    'an outage is not the buyer\'s mistake and must not be shown as "order not found"',
+  );
+});
+
 // ===== Checkout Country / Address UX =====
 // A region whose shippable list is authoritative: the US only (the current
 // pilot). Tests override this to exercise multi-country and unsupported cases.

@@ -249,7 +249,7 @@
 // connected yet, and nothing here may pretend an order happened.
 // ============================================================
 const CONFIG = (typeof PAWSHOP_PUBLIC_CONFIG === 'object' && PAWSHOP_PUBLIC_CONFIG) ? PAWSHOP_PUBLIC_CONFIG : {};
-const { html: safeHtml, image: safeImage, token: safeToken } = PawSafe;
+const { html: safeHtml, image: safeImage, token: safeToken, link: safeLink } = PawSafe;
 const store = PawStore.createClient({
   baseUrl: CONFIG.storeApiBase || '/store',
   publishableKey: CONFIG.publishableKey || '',
@@ -383,13 +383,20 @@ const I18N = {
     pay_canceled: 'Canceled',
     pay_requires_action: 'Action required',
     ful_not_fulfilled: 'Not yet shipped',
-    ful_partially_fulfilled: 'Partially fulfilled',
-    ful_fulfilled: 'Fulfilled',
+    ful_partially_fulfilled: 'Partially packed',
+    ful_fulfilled: 'Packed',
     ful_partially_shipped: 'Partially shipped',
     ful_shipped: 'Shipped',
     ful_partially_delivered: 'Partially delivered',
     ful_delivered: 'Delivered',
-    ful_canceled: 'Canceled',
+    ful_canceled: 'Fulfillment canceled',
+    order_shipments: 'Shipments',
+    order_shipment: 'Shipment',
+    order_tracking_number: 'Tracking number',
+    order_track_shipment: 'Track shipment',
+    order_shipment_packed: 'Packed on',
+    order_shipment_shipped: 'Shipped on',
+    order_shipment_delivered: 'Delivered on',
     ost_pending: 'Processing',
     ost_completed: 'Completed',
     ost_draft: 'Draft',
@@ -519,13 +526,20 @@ const I18N = {
     pay_canceled: '已取消',
     pay_requires_action: '待处理',
     ful_not_fulfilled: '尚未发货',
-    ful_partially_fulfilled: '部分履行',
-    ful_fulfilled: '已履行',
-    ful_partially_shipped: '部分发货',
+    ful_partially_fulfilled: '部分已打包',
+    ful_fulfilled: '已打包',
+    ful_partially_shipped: '部分已发货',
     ful_shipped: '已发货',
-    ful_partially_delivered: '部分送达',
+    ful_partially_delivered: '部分已送达',
     ful_delivered: '已送达',
-    ful_canceled: '已取消',
+    ful_canceled: '履约已取消',
+    order_shipments: '包裹信息',
+    order_shipment: '包裹',
+    order_tracking_number: '物流单号',
+    order_track_shipment: '查询物流',
+    order_shipment_packed: '打包时间',
+    order_shipment_shipped: '发货时间',
+    order_shipment_delivered: '送达时间',
     ost_pending: '处理中',
     ost_completed: '已完成',
     ost_draft: '草稿',
@@ -1744,6 +1758,77 @@ function orderField(label, value) {
   </div>`;
 }
 
+// One fulfillment's own state, derived ONLY from the timestamps Medusa really
+// stored on it — the same precedence core-flows' getLastFulfillmentStatus uses
+// (canceled > delivered > shipped > packed). Nothing is inferred from elapsed
+// time: "packed" is never rendered as "shipped", and there is no in-transit or
+// out-for-delivery state because Medusa holds no carrier events to back one.
+function fulfillmentStateLabel(fulfillment) {
+  if (!fulfillment || typeof fulfillment !== 'object') return '—';
+  if (fulfillment.canceled_at) return t('ful_canceled');
+  if (fulfillment.delivered_at) return t('ful_delivered');
+  if (fulfillment.shipped_at) return t('ful_shipped');
+  if (fulfillment.packed_at) return t('ful_fulfilled');
+  return t('ful_not_fulfilled');
+}
+
+// Dates are rendered as a stable, locale-independent YYYY-MM-DD. An unparseable
+// value yields '' so the row is omitted instead of printing "Invalid Date".
+function orderDate(value) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+}
+
+// Phase 1 logistics block. It renders ONLY what the backend actually returned:
+// one card per fulfillment, in the order the server sent them (oldest first),
+// with the state derived from that fulfillment's own timestamps and the real
+// tracking numbers it carries. An order can ship in several packages, so this
+// is always a list — never a single assumed tracking number. When a fulfillment
+// has no tracking number the card still shows its timeline and simply omits the
+// number; no carrier is guessed from the URL and no "in transit"/"out for
+// delivery" line is ever invented.
+function renderShipments(fulfillments, sectionTitle) {
+  const list = Array.isArray(fulfillments) ? fulfillments : [];
+  if (!list.length) return '';
+
+  const cards = list.map((fulfillment, index) => {
+    const labels = Array.isArray(fulfillment.labels) ? fulfillment.labels : [];
+
+    const timeline = [
+      fulfillment.packed_at ? orderField(t('order_shipment_packed'), safeHtml(orderDate(fulfillment.packed_at))) : '',
+      fulfillment.shipped_at ? orderField(t('order_shipment_shipped'), safeHtml(orderDate(fulfillment.shipped_at))) : '',
+      fulfillment.delivered_at ? orderField(t('order_shipment_delivered'), safeHtml(orderDate(fulfillment.delivered_at))) : '',
+    ].join('');
+
+    const tracking = labels.map(label => {
+      const number = label && label.tracking_number ? String(label.tracking_number) : '';
+      const href = label && label.tracking_url ? safeLink(label.tracking_url) : '';
+      if (!number && !href) return '';
+      return `<div class="flex flex-wrap items-end gap-x-4 gap-y-2">
+        <div class="min-w-0">
+          <div class="text-xs text-slate-500 mb-1">${t('order_tracking_number')}</div>
+          <div class="text-sm text-slate-800 font-medium break-words">${number ? safeHtml(number) : '—'}</div>
+        </div>
+        ${href ? `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-sm font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900">${t('order_track_shipment')}</a>` : ''}
+      </div>`;
+    }).join('');
+
+    return `<div class="border border-slate-100 rounded-lg p-4">
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <span class="text-sm font-medium text-slate-800">${t('order_shipment')} #${index + 1}</span>
+        <span class="text-xs text-slate-500 whitespace-nowrap">${safeHtml(fulfillmentStateLabel(fulfillment))}</span>
+      </div>
+      <div class="space-y-3">${timeline}${tracking}</div>
+    </div>`;
+  }).join('');
+
+  return `<section class="mb-6">
+    ${sectionTitle(t('order_shipments'))}
+    <div class="space-y-3">${cards}</div>
+  </section>`;
+}
+
 // B. Order detail: the full view reached through View order / Guest Lookup. It
 //    is laid out in three layers — (1) items + order/fulfillment status + email,
 //    (2) the shipping address, (3) the final money summary — with clear section
@@ -1783,6 +1868,10 @@ function renderOrderDetail(order) {
           ${order.email ? orderField(t('order_email'), safeHtml(order.email)) : ''}
         </div>
       </section>
+
+      <!-- Layer 1b: real shipment data. Emits nothing at all when the order
+           has no fulfillment yet. -->
+      ${renderShipments(order.fulfillments, sectionTitle)}
 
       <!-- Layer 2: shipping address -->
       <section class="mb-6">
