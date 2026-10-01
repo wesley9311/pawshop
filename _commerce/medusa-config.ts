@@ -31,6 +31,10 @@ module.exports = defineConfig({
       ? productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage, googleAuth: projectConfig.googleAuth, paypal: projectConfig.paypal })
       : []),
     { resolve: './src/modules/pawshop-connector' },
+    // Customer transactional email idempotency ledger. Registered in EVERY
+    // profile so local acceptance exercises the same module graph the host
+    // runs. It owns a single table and never touches commerce data.
+    { resolve: './src/modules/pawshop-notification' },
   ],
   ...(productionMode
     ? {
