@@ -316,6 +316,181 @@ function formatMoney(amount, currency) {
   return `${currency} ${amount.toFixed(2)}`;
 }
 
+// Escape a value before it is interpolated into HTML. Every dynamic field in an
+// email is ultimately customer- or operator-entered, so it is treated as
+// untrusted text and escaped, never emitted as markup. This is a defense in
+// depth on top of the field-level validation already applied by normalizeOrder
+// and the tracking helpers: even a value that slipped through as plain text can
+// not become an element or attribute.
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// The shared page chrome for every notification's HTML. It is deliberately
+// small and self-contained: inline styles only (no external stylesheet), a
+// centred brand mark with a light divider, and a footer that is visually
+// de-emphasised. No marketing banner, background image, external logo, or
+// layout dependency that a typical mail client would strip or break.
+const BRAND_NAME = 'Pawlivora';
+
+function htmlPage({ title, subtitle, bodyHtml, supportEmail }) {
+  return [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<title>', escapeHtml(title), '</title>',
+    '</head>',
+    '<body style="margin:0;padding:0;background-color:#f7f7f7;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f7f7f7;">',
+    '<tr><td align="center" style="padding:24px 12px;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background-color:#ffffff;border-radius:8px;">',
+    '<tr><td style="padding:28px 24px 0 24px;">',
+    '<div style="text-align:center;font-size:20px;font-weight:700;color:#1a1a1a;letter-spacing:0.5px;">', escapeHtml(BRAND_NAME), '</div>',
+    '</td></tr>',
+    '<tr><td style="padding:16px 24px 0 24px;">',
+    '<div style="border-top:1px solid #ececec;"></div>',
+    '</td></tr>',
+    '<tr><td style="padding:24px 24px 0 24px;">',
+    '<div style="text-align:center;font-size:18px;font-weight:600;color:#1a1a1a;line-height:1.4;">', escapeHtml(title), '</div>',
+    subtitle ? `<div style="text-align:center;font-size:14px;color:#6b7280;line-height:1.5;margin-top:8px;">${escapeHtml(subtitle)}</div>` : '',
+    '</td></tr>',
+    '<tr><td style="padding:20px 24px 0 24px;">',
+    bodyHtml,
+    '</td></tr>',
+    '<tr><td style="padding:24px 24px 28px 24px;">',
+    '<div style="border-top:1px solid #ececec;margin-bottom:20px;"></div>',
+    '<div style="text-align:center;font-size:13px;color:#9ca3af;line-height:1.6;">',
+    '<div>Need help with your order?</div>',
+    '<div><a href="mailto:', escapeHtml(supportEmail), '" style="color:#6b7280;">', escapeHtml(supportEmail), '</a></div>',
+    '</div>',
+    '</td></tr>',
+    '</table>',
+    '</td></tr>',
+    '</table>',
+    '</body>',
+    '</html>',
+  ].join('');
+}
+
+// One detail row in the order summary. The label/value pair is left-aligned and
+// only rendered when a value is present, so a missing field never produces a
+// dangling "Order number:" line.
+function detailRow(label, value) {
+  if (value == null || value === '') return '';
+  return [
+    '<tr>',
+    '<td style="padding:4px 0;font-size:14px;color:#6b7280;white-space:nowrap;vertical-align:top;padding-right:16px;">', escapeHtml(label), '</td>',
+    '<td style="padding:4px 0;font-size:14px;color:#1a1a1a;">', escapeHtml(value), '</td>',
+    '</tr>',
+  ].join('');
+}
+
+// A detail row whose value is already HTML-safe (it has been escaped exactly
+// once by the caller). Used for the items list, whose cells join several fields
+// that were each escaped individually; passing the whole line through
+// escapeHtml again would double-escape the ampersands.
+function detailRowRaw(label, valueHtml) {
+  if (valueHtml == null || valueHtml === '') return '';
+  return [
+    '<tr>',
+    '<td style="padding:4px 0;font-size:14px;color:#6b7280;white-space:nowrap;vertical-align:top;padding-right:16px;">', escapeHtml(label), '</td>',
+    '<td style="padding:4px 0;font-size:14px;color:#1a1a1a;">', valueHtml, '</td>',
+    '</tr>',
+  ].join('');
+}
+
+// The order-detail table shared by all three notifications. Each row is left
+// aligned; tracking and the delivery address are only emitted for the messages
+// that carry them and only when a real value is present.
+function orderDetailsTable({ order, trackingLines, addressLines }) {
+  const rows = [
+    detailRow('Order number', order.publicOrderNumber),
+    '',
+  ];
+  const itemLines = order.items.map((item) => {
+    const total = formatMoney(item.total, order.currency);
+    return escapeHtml(`${item.title}  x${item.quantity}${total ? `  ${total}` : ''}`);
+  });
+  if (itemLines.length > 0) {
+    rows.push(detailRowRaw('Items', itemLines.join('; ')));
+  }
+  rows.push(detailRow('Total', order.total != null ? formatMoney(order.total, order.currency) : null));
+  rows.push(detailRow('Shipping method', order.shippingMethod));
+  for (const line of trackingLines) rows.push(line);
+  for (const line of addressLines) rows.push(line);
+
+  const body = rows.filter(Boolean).join('');
+  return [
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;">',
+    body,
+    '</table>',
+  ].join('');
+}
+
+// The per-type heading and subtitle. The status heading is centred; the subtitle
+// is a short, honest summary of what the event guarantees — never a promise of
+// a state that is not stored.
+const HTML_COPY = {
+  [NOTIFICATION_TYPES.ORDER_CONFIRMED]: {
+    title: 'Order confirmed',
+    subtitle: 'We have received your order and it is being processed.',
+  },
+  [NOTIFICATION_TYPES.ORDER_SHIPPED]: {
+    title: 'Order shipped',
+    subtitle: 'Your order is on its way.',
+  },
+  [NOTIFICATION_TYPES.ORDER_DELIVERED]: {
+    title: 'Order delivered',
+    subtitle: 'Your order has been delivered.',
+  },
+};
+
+// Build the HTML rendering for one notification. This mirrors the plain-text
+// body exactly: it re-validates tracking, flattens the address to the same safe
+// fields, and never renders a value the event does not guarantee. The returned
+// string is a complete HTML document; it is passed to buildMessage as the
+// multipart/alternative HTML part alongside the existing plain-text body.
+function buildOrderHtml(type, order, tracking, supportEmail) {
+  const copy = HTML_COPY[type];
+  if (!copy) return null;
+
+  const trackingNumber = safeTrackingNumber(tracking?.trackingNumber);
+  const trackingUrl = safeTrackingUrl(tracking?.trackingUrl);
+
+  const trackingLines = [];
+  if (trackingNumber) trackingLines.push(detailRow('Tracking number', trackingNumber));
+  if (trackingUrl) trackingLines.push(detailRow('Track your package', trackingUrl));
+
+  const addressLines = [];
+  const address = order.shippingAddress;
+  if (type === NOTIFICATION_TYPES.ORDER_DELIVERED && address && (address.name || address.address1 || address.city)) {
+    const lines = [];
+    if (address.name) lines.push(address.name);
+    if (address.address1) lines.push(address.address1);
+    const locality = [address.city, address.province].filter(Boolean).join(', ');
+    if (locality) lines.push(locality);
+    if (address.postalCode) lines.push(address.postalCode);
+    if (address.country) lines.push(address.country);
+    addressLines.push(detailRow('Delivered to', lines.join(', ')));
+  }
+
+  const bodyHtml = orderDetailsTable({ order, trackingLines, addressLines });
+
+  return htmlPage({
+    title: copy.title,
+    subtitle: copy.subtitle,
+    bodyHtml,
+    supportEmail,
+  });
+}
+
 // The support contact block every notification shares. It is a single, safe
 // address (validated on the way in); never the relay account or any credential.
 function supportContactLines(supportEmail) {
@@ -441,6 +616,11 @@ function buildOrderMessage({ type, order, tracking = {}, from, fromName = FROM_N
     return null;
   }
 
+  // The plain-text body is always produced; the HTML part is a richer
+  // alternative for capable clients. If HTML cannot be built (it always can for
+  // a valid type), the message still falls back to text/plain.
+  const html = buildOrderHtml(type, order, tracking, supportEmail);
+
   // Brand the display name without changing the envelope sender. The `fromName`
   // is already validated to contain no line break, so this is a safe header.
   const displayFrom = fromName && !/[\r\n]/.test(fromName) ? `${fromName} <${from}>` : from;
@@ -450,6 +630,7 @@ function buildOrderMessage({ type, order, tracking = {}, from, fromName = FROM_N
     to: order.email,
     subject: SUBJECTS[type],
     body,
+    html,
     messageId: `<${randomBytes(16).toString('hex')}@pawlivora.com>`,
     date: now.toUTCString(),
   });
@@ -509,10 +690,12 @@ module.exports = {
   FROM_NAME_DEFAULT,
   buildIdempotencyKey,
   buildOrderMessage,
+  buildOrderHtml,
   classifySmtpError,
   computeNextAttemptAt,
   decideClaim,
   deliverOrderEmail,
+  escapeHtml,
   formatMoney,
   isLeaseExpired,
   isRetryable,

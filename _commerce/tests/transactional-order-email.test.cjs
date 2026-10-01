@@ -22,10 +22,12 @@ const {
   FROM_NAME_DEFAULT,
   buildIdempotencyKey,
   buildOrderMessage,
+  buildOrderHtml,
   classifySmtpError,
   computeNextAttemptAt,
   decideClaim,
   deliverOrderEmail,
+  escapeHtml,
   formatMoney,
   isLeaseExpired,
   isRetryable,
@@ -92,8 +94,40 @@ const DELIVERED_ORDER = {
 };
 
 function decodeBase64Body(message) {
+  // A multipart/alternative message has a plain-text part followed by an HTML
+  // part; the plain-text body is the first part. A single-part message has no
+  // boundary and its payload follows the single blank line.
+  const boundaryMatch = /boundary="([^"]+)"/.exec(message);
+  if (boundaryMatch) {
+    const boundary = boundaryMatch[1];
+    const parts = message.split(`--${boundary}`);
+    for (const part of parts) {
+      if (/Content-Type: text\/plain/i.test(part)) {
+        const [, payload = ''] = part.split('\r\n\r\n');
+        return Buffer.from(payload.replace(/\r\n/g, ''), 'base64').toString('utf8');
+      }
+    }
+    return '';
+  }
   const [, payload = ''] = message.split('\r\n\r\n');
   return Buffer.from(payload.replace(/\r\n/g, ''), 'base64').toString('utf8');
+}
+
+// Extract the text/html part from a multipart/alternative message. The parts are
+// delimited by `--<boundary>`; this walks them and returns the base64-decoded
+// payload of the first part whose Content-Type is text/html.
+function decodeHtmlPart(message) {
+  const boundaryMatch = /boundary="([^"]+)"/.exec(message);
+  if (!boundaryMatch) return null;
+  const boundary = boundaryMatch[1];
+  const parts = message.split(`--${boundary}`);
+  for (const part of parts) {
+    if (/Content-Type: text\/html/i.test(part)) {
+      const [, payload = ''] = part.split('\r\n\r\n');
+      return Buffer.from(payload.replace(/\r\n/g, ''), 'base64').toString('utf8');
+    }
+  }
+  return null;
 }
 
 describe('idempotency keys', () => {
@@ -477,6 +511,156 @@ describe('support email configuration', () => {
     assert.match(confirmed, /contact us at support@pawlivora\.com/);
     assert.match(shipped, /contact us at support@pawlivora\.com/);
     assert.match(delivered, /contact us at support@pawlivora\.com/);
+  });
+});
+
+describe('HTML email rendering', () => {
+  it('produces a complete HTML document for each notification type', () => {
+    const confirmed = buildOrderHtml(NOTIFICATION_TYPES.ORDER_CONFIRMED, CONFIRMED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    const shipped = buildOrderHtml(NOTIFICATION_TYPES.ORDER_SHIPPED, SHIPPED_ORDER, { trackingNumber: 'AB123', trackingUrl: 'https://track.carrier.test/AB123' }, SUPPORT_EMAIL_DEFAULT);
+    const delivered = buildOrderHtml(NOTIFICATION_TYPES.ORDER_DELIVERED, DELIVERED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    for (const html of [confirmed, shipped, delivered]) {
+      assert.ok(html);
+      assert.match(html, /<!DOCTYPE html>/);
+      assert.match(html, /<html lang="en">/);
+      assert.match(html, /<\/html>/);
+    }
+  });
+
+  it('brands the top with Pawlivora and a light divider', () => {
+    const html = buildOrderHtml(NOTIFICATION_TYPES.ORDER_CONFIRMED, CONFIRMED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    assert.match(html, /Pawlivora/);
+    assert.match(html, /border-top:1px solid #ececec/);
+  });
+
+  it('centres the status heading and subtitle', () => {
+    const confirmed = buildOrderHtml(NOTIFICATION_TYPES.ORDER_CONFIRMED, CONFIRMED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    const shipped = buildOrderHtml(NOTIFICATION_TYPES.ORDER_SHIPPED, SHIPPED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    const delivered = buildOrderHtml(NOTIFICATION_TYPES.ORDER_DELIVERED, DELIVERED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    assert.match(confirmed, /Order confirmed/);
+    assert.match(shipped, /Order shipped/);
+    assert.match(delivered, /Order delivered/);
+    // Each heading is wrapped in a centred block.
+    assert.match(confirmed, /text-align:center/);
+  });
+
+  it('left-aligns the order details and shows the core fields', () => {
+    const html = buildOrderHtml(NOTIFICATION_TYPES.ORDER_CONFIRMED, CONFIRMED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    assert.match(html, /Order number/);
+    assert.match(html, /PS-20260929-0006/);
+    assert.match(html, /Corrugated Cat Lounger/);
+    assert.match(html, /USD 29\.90/);
+    assert.match(html, /Shipping method/);
+    assert.match(html, /Standard Shipping/);
+  });
+
+  it('shows tracking only when a real value is present', () => {
+    const withTracking = buildOrderHtml(NOTIFICATION_TYPES.ORDER_SHIPPED, SHIPPED_ORDER, { trackingNumber: 'AB123', trackingUrl: 'https://track.carrier.test/AB123' }, SUPPORT_EMAIL_DEFAULT);
+    assert.match(withTracking, /Tracking number/);
+    assert.match(withTracking, /AB123/);
+    assert.match(withTracking, /https:\/\/track\.carrier\.test\/AB123/);
+
+    const withoutTracking = buildOrderHtml(NOTIFICATION_TYPES.ORDER_SHIPPED, SHIPPED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    assert.doesNotMatch(withoutTracking, /Tracking number/);
+    assert.doesNotMatch(withoutTracking, /track\./);
+  });
+
+  it('never fabricates a tracking link from an invalid URL', () => {
+    const html = buildOrderHtml(NOTIFICATION_TYPES.ORDER_SHIPPED, SHIPPED_ORDER, { trackingNumber: 'AB123', trackingUrl: 'javascript:alert(1)' }, SUPPORT_EMAIL_DEFAULT);
+    assert.match(html, /Tracking number/);
+    assert.doesNotMatch(html, /javascript:/);
+    assert.doesNotMatch(html, /alert\(1\)/);
+  });
+
+  it('renders the delivery address only for the delivered email', () => {
+    const delivered = buildOrderHtml(NOTIFICATION_TYPES.ORDER_DELIVERED, DELIVERED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    assert.match(delivered, /Delivered to/);
+    assert.match(delivered, /Jane Buyer/);
+    assert.match(delivered, /123 Main St/);
+    assert.match(delivered, /New York, NY/);
+    assert.match(delivered, /10001/);
+
+    const confirmed = buildOrderHtml(NOTIFICATION_TYPES.ORDER_CONFIRMED, CONFIRMED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    assert.doesNotMatch(confirmed, /Delivered to/);
+  });
+
+  it('omits a missing address field without emitting undefined or null', () => {
+    const partialOrder = {
+      ...DELIVERED_ORDER,
+      shippingAddress: { name: 'Jane Buyer', address1: '123 Main St', city: null, province: null, postalCode: null, country: null },
+    };
+    const html = buildOrderHtml(NOTIFICATION_TYPES.ORDER_DELIVERED, partialOrder, {}, SUPPORT_EMAIL_DEFAULT);
+    assert.doesNotMatch(html, /undefined/);
+    assert.doesNotMatch(html, /\bnull\b/);
+    assert.match(html, /Jane Buyer/);
+    assert.match(html, /123 Main St/);
+  });
+
+  it('shows a de-emphasised support footer with the configured address', () => {
+    const html = buildOrderHtml(NOTIFICATION_TYPES.ORDER_CONFIRMED, CONFIRMED_ORDER, {}, 'support@pawlivora.com');
+    assert.match(html, /Need help with your order\?/);
+    assert.match(html, /support@pawlivora\.com/);
+    // The footer is visually de-emphasised (muted grey), not a bold call to action.
+    assert.match(html, /#9ca3af/);
+  });
+
+  it('escapes customer/operator text so it cannot become markup', () => {
+    const hostileOrder = {
+      ...CONFIRMED_ORDER,
+      items: [{ title: '<img src=x onerror=alert(1)>', quantity: 1, total: 10 }],
+    };
+    const html = buildOrderHtml(NOTIFICATION_TYPES.ORDER_CONFIRMED, hostileOrder, {}, SUPPORT_EMAIL_DEFAULT);
+    assert.doesNotMatch(html, /<img src=x/);
+    assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  });
+
+  it('escapes a plain value through the escapeHtml helper', () => {
+    assert.equal(escapeHtml('<a href="x">&</a>'), '&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;');
+    assert.equal(escapeHtml(null), '');
+    assert.equal(escapeHtml(undefined), '');
+  });
+
+  it('returns null for an unknown notification type', () => {
+    assert.equal(buildOrderHtml('not_a_type', CONFIRMED_ORDER, {}, SUPPORT_EMAIL_DEFAULT), null);
+  });
+});
+
+describe('multipart/alternative assembly', () => {
+  it('produces a multipart message carrying both plain-text and HTML parts', () => {
+    const message = buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_CONFIRMED, order: CONFIRMED_ORDER, from: CREDENTIALS.from });
+    assert.match(message, /Content-Type: multipart\/alternative; boundary="/);
+    assert.match(message, /Content-Type: text\/plain; charset="utf-8"/);
+    assert.match(message, /Content-Type: text\/html; charset="utf-8"/);
+    // The plain-text body survives alongside the HTML.
+    assert.match(decodeBase64Body(message), /Order number: PS-20260929-0006/);
+  });
+
+  it('renders the HTML part with the brand and status heading', () => {
+    const message = buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_CONFIRMED, order: CONFIRMED_ORDER, from: CREDENTIALS.from });
+    const html = decodeHtmlPart(message);
+    assert.ok(html);
+    assert.match(html, /Pawlivora/);
+    assert.match(html, /Order confirmed/);
+    assert.match(html, /PS-20260929-0006/);
+  });
+
+  it('keeps the plain-text fallback for clients without HTML', () => {
+    const message = buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_SHIPPED, order: SHIPPED_ORDER, tracking: {}, from: CREDENTIALS.from });
+    assert.match(message, /text\/plain/);
+    // The plain part still contains the plain-text shipped body.
+    const plainPart = message.split('--')[1] || '';
+    assert.ok(plainPart);
+  });
+
+  it('does not leak the SMTP credential into the HTML part', async () => {
+    let captured;
+    await deliverOrderEmail({
+      type: NOTIFICATION_TYPES.ORDER_CONFIRMED,
+      order: CONFIRMED_ORDER,
+      credentials: CREDENTIALS,
+      send: async (args) => { captured = args.message; },
+    });
+    assert.doesNotMatch(captured, /app-password-1234/);
   });
 });
 

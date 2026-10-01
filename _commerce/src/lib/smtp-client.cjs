@@ -16,6 +16,7 @@
 
 const net = require('node:net');
 const tls = require('node:tls');
+const { randomBytes } = require('node:crypto');
 
 const DEFAULT_TIMEOUT_MS = 20000;
 // A submission relay may greet slowly, but it may not hang the process. One
@@ -187,21 +188,55 @@ function foldBase64(encoded) {
   return encoded.replace(/(.{76})/g, '$1\r\n').replace(/\r\n$/, '');
 }
 
-function buildMessage({ from, to, subject, body, messageId, date }) {
-  const lines = [
+// A message is delivered as a single text/plain part by default (this is the
+// only shape the password-reset path needs). When an HTML part is supplied, the
+// message becomes multipart/alternative so a capable mail client can render the
+// HTML while a text-only client still gets the plain-text fallback. The two
+// parts are deliberately sent in plain-then-HTML order: the last alternative a
+// client understands wins, so the richer HTML is preferred without ever hiding
+// the plain-text fallback from a client that cannot render it.
+function buildMessage({ from, to, subject, body, html, messageId, date }) {
+  const plainPart = Buffer.from(body, 'utf8').toString('base64');
+
+  const headers = [
     `From: ${from}`,
     `To: ${to}`,
     `Subject: ${encodeHeaderValue(subject)}`,
     `Date: ${date}`,
     `Message-ID: ${messageId}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="utf-8"',
-    'Content-Transfer-Encoding: base64',
+  ];
+
+  if (html == null || html === '') {
+    headers.push(
+      'Content-Type: text/plain; charset="utf-8"',
+      'Content-Transfer-Encoding: base64',
+      'Auto-Submitted: auto-generated',
+      '',
+      foldBase64(plainPart),
+    );
+    return headers.join('\r\n');
+  }
+
+  const boundary = `pawshop-${randomBytes(16).toString('hex')}`;
+  const htmlPart = Buffer.from(html, 'utf8').toString('base64');
+  headers.push(
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
     'Auto-Submitted: auto-generated',
     '',
-    foldBase64(Buffer.from(body, 'utf8').toString('base64')),
-  ];
-  return lines.join('\r\n');
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="utf-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    foldBase64(plainPart),
+    `--${boundary}`,
+    'Content-Type: text/html; charset="utf-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    foldBase64(htmlPart),
+    `--${boundary}--`,
+  );
+  return headers.join('\r\n');
 }
 
 // `secure` selects implicit TLS (submission over 465). A relay that offers only
