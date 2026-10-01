@@ -18,6 +18,8 @@ const {
   SEND_STATES,
   MAX_ATTEMPTS,
   BACKOFF_MS,
+  SUPPORT_EMAIL_DEFAULT,
+  FROM_NAME_DEFAULT,
   buildIdempotencyKey,
   buildOrderMessage,
   classifySmtpError,
@@ -29,6 +31,8 @@ const {
   isRetryable,
   isUniqueViolation,
   normalizeOrder,
+  readFromName,
+  readSupportEmail,
   safeTrackingNumber,
   safeTrackingUrl,
   shouldSendNotification,
@@ -64,6 +68,27 @@ const SHIPPED_ORDER = {
     { title: 'Corrugated Cat Lounger', quantity: 2, total: 29.9 },
   ],
   shippingMethod: 'Standard Shipping',
+};
+
+const DELIVERED_ORDER = {
+  orderId: 'order_01ABC',
+  displayId: 6,
+  email: 'buyer@example.test',
+  publicOrderNumber: 'PS-20260929-0006',
+  currency: 'USD',
+  total: 29.9,
+  items: [
+    { title: 'Corrugated Cat Lounger', quantity: 2, total: 29.9 },
+  ],
+  shippingMethod: 'Standard Shipping',
+  shippingAddress: {
+    name: 'Jane Buyer',
+    address1: '123 Main St',
+    city: 'New York',
+    province: 'NY',
+    postalCode: '10001',
+    country: 'US',
+  },
 };
 
 function decodeBase64Body(message) {
@@ -150,6 +175,25 @@ describe('order normalisation', () => {
     assert.equal(order.items[0].quantity, 2);
   });
 
+  it('flattens the shipping address into the safe summary fields', () => {
+    const order = normalizeOrder({
+      id: 'order_1', display_id: 6, email: 'b@e.test', total: 1,
+      shipping_address: {
+        first_name: 'Jane', last_name: 'Buyer', address_1: '123 Main St',
+        address_2: 'Apt 4', city: 'New York', province: 'NY',
+        postal_code: '10001', country_code: 'us', phone: '555-1234', company: 'Acme',
+      },
+    });
+    assert.deepEqual(order.shippingAddress, {
+      name: 'Jane Buyer', address1: '123 Main St', city: 'New York',
+      province: 'NY', postalCode: '10001', country: 'US',
+    });
+    // phone / company / address_2 are deliberately dropped from the summary.
+    assert.equal('phone' in order.shippingAddress, false);
+    assert.equal('company' in order.shippingAddress, false);
+    assert.equal('address2' in order.shippingAddress, false);
+  });
+
   it('returns null for a non-object order', () => {
     assert.equal(normalizeOrder(null), null);
     assert.equal(normalizeOrder(undefined), null);
@@ -166,6 +210,12 @@ describe('confirmed message', () => {
     assert.match(body, /USD 29\.90/);
     assert.match(body, /Standard Shipping/);
     assert.match(message, /^To: buyer@example\.test$/m);
+  });
+
+  it('carries the support contact line', () => {
+    const message = buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_CONFIRMED, order: CONFIRMED_ORDER, from: CREDENTIALS.from });
+    const body = decodeBase64Body(message);
+    assert.match(body, new RegExp(`contact us at ${SUPPORT_EMAIL_DEFAULT}`));
   });
 
   it('never promises tracking or claims it shipped', () => {
@@ -188,6 +238,18 @@ describe('shipped message', () => {
     assert.match(body, /has shipped/);
     assert.match(body, /Tracking number: AB123/);
     assert.match(body, /https:\/\/track\.carrier\.test\/AB123/);
+  });
+
+  it('carries the shipping method and support contact', () => {
+    const message = buildOrderMessage({
+      type: NOTIFICATION_TYPES.ORDER_SHIPPED,
+      order: SHIPPED_ORDER,
+      tracking: {},
+      from: CREDENTIALS.from,
+    });
+    const body = decodeBase64Body(message);
+    assert.match(body, /Shipping method: Standard Shipping/);
+    assert.match(body, new RegExp(`contact us at ${SUPPORT_EMAIL_DEFAULT}`));
   });
 
   it('omits the tracking lines entirely when there is no tracking', () => {
@@ -221,7 +283,7 @@ describe('delivered message', () => {
   it('says delivered and never invents a carrier state', () => {
     const message = buildOrderMessage({
       type: NOTIFICATION_TYPES.ORDER_DELIVERED,
-      order: SHIPPED_ORDER,
+      order: DELIVERED_ORDER,
       tracking: {},
       from: CREDENTIALS.from,
     });
@@ -229,6 +291,35 @@ describe('delivered message', () => {
     assert.match(body, /has been delivered/);
     assert.match(body, /Order number: PS-20260929-0006/);
     assert.doesNotMatch(body, /in transit|out for delivery|carrier/i);
+  });
+
+  it('prints the shipping address summary without extra sensitive fields', () => {
+    const message = buildOrderMessage({
+      type: NOTIFICATION_TYPES.ORDER_DELIVERED,
+      order: DELIVERED_ORDER,
+      tracking: {},
+      from: CREDENTIALS.from,
+    });
+    const body = decodeBase64Body(message);
+    assert.match(body, /Delivered to:/);
+    assert.match(body, /Jane Buyer/);
+    assert.match(body, /123 Main St/);
+    assert.match(body, /New York, NY/);
+    assert.match(body, /10001/);
+    assert.match(body, /US/);
+    // The address summary never leaks a phone number or other contact detail.
+    assert.doesNotMatch(body, /phone|tel|555-|company/i);
+  });
+
+  it('carries the support contact line', () => {
+    const message = buildOrderMessage({
+      type: NOTIFICATION_TYPES.ORDER_DELIVERED,
+      order: DELIVERED_ORDER,
+      tracking: {},
+      from: CREDENTIALS.from,
+    });
+    const body = decodeBase64Body(message);
+    assert.match(body, new RegExp(`contact us at ${SUPPORT_EMAIL_DEFAULT}`));
   });
 });
 
@@ -322,6 +413,70 @@ describe('money formatting', () => {
   it('formats a fixed amount with its currency', () => {
     assert.equal(formatMoney(29.9, 'USD'), 'USD 29.90');
     assert.equal(formatMoney(NaN, 'USD'), null);
+  });
+});
+
+describe('from display name', () => {
+  it('brands the From header with the display name but keeps the envelope address', () => {
+    const message = buildOrderMessage({
+      type: NOTIFICATION_TYPES.ORDER_CONFIRMED,
+      order: CONFIRMED_ORDER,
+      from: CREDENTIALS.from,
+      fromName: 'Pawlivora',
+    });
+    // The From header carries the brand; the envelope sender is untouched (the
+    // caller passes the bare mailbox to send() separately).
+    assert.match(message, /^From: Pawlivora <shop@pawlivora\.com>$/m);
+  });
+
+  it('defaults to the brand name when fromName is omitted', () => {
+    const message = buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_CONFIRMED, order: CONFIRMED_ORDER, from: CREDENTIALS.from });
+    assert.match(message, new RegExp(`^From: ${FROM_NAME_DEFAULT} <shop@pawlivora\\.com>$`, 'm'));
+  });
+
+  it('never injects a line break through a crafted fromName', () => {
+    const message = buildOrderMessage({
+      type: NOTIFICATION_TYPES.ORDER_CONFIRMED,
+      order: CONFIRMED_ORDER,
+      from: CREDENTIALS.from,
+      fromName: 'Evil\r\nBcc: x@y.z',
+    });
+    assert.doesNotMatch(message, /Bcc:/);
+  });
+
+  it('reads the from name from the environment with a safe fallback', () => {
+    assert.equal(readFromName({}), FROM_NAME_DEFAULT);
+    assert.equal(readFromName({ PAWSHOP_EMAIL_FROM_NAME: 'Pawlivora' }), 'Pawlivora');
+    assert.equal(readFromName({ PAWSHOP_EMAIL_FROM_NAME: '  Shop Brand  ' }), 'Shop Brand');
+    // A line break is refused, falling back to the default.
+    assert.equal(readFromName({ PAWSHOP_EMAIL_FROM_NAME: 'x\r\ny' }), FROM_NAME_DEFAULT);
+  });
+});
+
+describe('support email configuration', () => {
+  it('defaults to the current support address', () => {
+    assert.equal(readSupportEmail({}), SUPPORT_EMAIL_DEFAULT);
+    assert.equal(SUPPORT_EMAIL_DEFAULT, '504533680@qq.com');
+  });
+
+  it('switches to a configured address without a code change', () => {
+    assert.equal(readSupportEmail({ PAWSHOP_SUPPORT_EMAIL: 'support@pawlivora.com' }), 'support@pawlivora.com');
+  });
+
+  it('rejects a malformed address and falls back', () => {
+    assert.equal(readSupportEmail({ PAWSHOP_SUPPORT_EMAIL: 'not-an-email' }), SUPPORT_EMAIL_DEFAULT);
+    assert.equal(readSupportEmail({ PAWSHOP_SUPPORT_EMAIL: 'x\r\nBcc: y' }), SUPPORT_EMAIL_DEFAULT);
+    assert.equal(readSupportEmail({}), SUPPORT_EMAIL_DEFAULT);
+  });
+
+  it('is used verbatim in every notification body', () => {
+    const custom = 'support@pawlivora.com';
+    const confirmed = decodeBase64Body(buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_CONFIRMED, order: CONFIRMED_ORDER, from: CREDENTIALS.from, supportEmail: custom }));
+    const shipped = decodeBase64Body(buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_SHIPPED, order: SHIPPED_ORDER, from: CREDENTIALS.from, supportEmail: custom }));
+    const delivered = decodeBase64Body(buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_DELIVERED, order: DELIVERED_ORDER, from: CREDENTIALS.from, supportEmail: custom }));
+    assert.match(confirmed, /contact us at support@pawlivora\.com/);
+    assert.match(shipped, /contact us at support@pawlivora\.com/);
+    assert.match(delivered, /contact us at support@pawlivora\.com/);
   });
 });
 

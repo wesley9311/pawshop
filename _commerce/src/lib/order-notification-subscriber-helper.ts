@@ -10,6 +10,8 @@ import {
   isRetryable,
   NOTIFICATION_TYPES,
   normalizeOrder,
+  readFromName,
+  readSupportEmail,
   safeTrackingNumber,
   safeTrackingUrl,
   shouldSendNotification,
@@ -45,6 +47,13 @@ const ORDER_FIELDS = [
   'items.quantity',
   'items.total',
   'shipping_methods.name',
+  'shipping_address.first_name',
+  'shipping_address.last_name',
+  'shipping_address.address_1',
+  'shipping_address.city',
+  'shipping_address.province',
+  'shipping_address.postal_code',
+  'shipping_address.country_code',
   'fulfillments.id',
   'fulfillments.labels.tracking_number',
   'fulfillments.labels.tracking_url',
@@ -59,6 +68,15 @@ type ResolvedOrder = {
   email: string
   items: Array<{ title: string; quantity: number; total: number | string }>
   shipping_methods: Array<{ name: string | null }> | null
+  shipping_address: {
+    first_name: string | null
+    last_name: string | null
+    address_1: string | null
+    city: string | null
+    province: string | null
+    postal_code: string | null
+    country_code: string | null
+  } | null
   fulfillments: Array<{
     id: string
     labels: Array<{ tracking_number: string | null; tracking_url: string | null }> | null
@@ -207,7 +225,14 @@ async function sendOnce(
     ? trackingForFulfillment(order, fulfillmentId)
     : { trackingNumber: null, trackingUrl: null }
 
-  const result = await deliverOrderEmail({ type, order: normalized, tracking, credentials })
+  const result = await deliverOrderEmail({
+    type,
+    order: normalized,
+    tracking,
+    credentials,
+    fromName: readFromName(process.env),
+    supportEmail: readSupportEmail(process.env),
+  })
 
   if (!result.sent) {
     const category = classifySmtpError(result.error)

@@ -18,6 +18,38 @@
 const { randomBytes } = require('node:crypto');
 const { SmtpError, buildMessage, sendMessage } = require('./smtp-client.cjs');
 
+// ---------------------------------------------------------------------------
+// Customer-facing configuration (env-overridable, with safe defaults).
+//
+// These are the two tunables a store operator may want to change without a code
+// deploy: the support address printed in every notification, and the display
+// name shown on the "From" line. Both read from the process environment with a
+// hard-coded fallback so the emails work even when the env is unset, and both
+// are validated so a malformed value cannot inject a header line or a broken
+// address into a customer email.
+//
+//   PAWSHOP_SUPPORT_EMAIL  →  the "contact us" address (default 504533680@qq.com,
+//                             switch to support@pawlivora.com without a deploy)
+//   PAWSHOP_EMAIL_FROM_NAME → the human-readable sender name (default Pawlivora)
+const SUPPORT_EMAIL_DEFAULT = '504533680@qq.com';
+const FROM_NAME_DEFAULT = 'Pawlivora';
+const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[a-z]{2,24}$/i;
+
+function readSupportEmail(environment = process.env) {
+  const value = environment && typeof environment.PAWSHOP_SUPPORT_EMAIL === 'string'
+    ? environment.PAWSHOP_SUPPORT_EMAIL.trim()
+    : '';
+  return EMAIL_ADDRESS_PATTERN.test(value) ? value : SUPPORT_EMAIL_DEFAULT;
+}
+
+function readFromName(environment = process.env) {
+  const value = environment && typeof environment.PAWSHOP_EMAIL_FROM_NAME === 'string'
+    ? environment.PAWSHOP_EMAIL_FROM_NAME.trim()
+    : '';
+  if (!value || /[\r\n]/.test(value)) return FROM_NAME_DEFAULT;
+  return value;
+}
+
 // Postgres unique-violation. Medusa can wrap the driver error, so the whole
 // cause chain is inspected rather than only the top-level error. Shared here so
 // the module service and its tests see the same detection logic.
@@ -246,6 +278,22 @@ function normalizeOrder(order) {
     ? order.shipping_methods[0].name
     : null;
 
+  // The shipping address is flattened into exactly the fields the delivered
+  // email needs. Phone/company/extra sensitive fields are deliberately NOT read:
+  // a delivery notice only needs to confirm *where* it went, not who or how to
+  // reach them.
+  const address = order.shipping_address && typeof order.shipping_address === 'object'
+    ? order.shipping_address
+    : null;
+  const shippingAddress = address ? {
+    name: [address.first_name, address.last_name].filter((part) => typeof part === 'string' && part.trim()).join(' ').trim() || null,
+    address1: typeof address.address_1 === 'string' && address.address_1.trim() ? address.address_1.trim() : null,
+    city: typeof address.city === 'string' && address.city.trim() ? address.city.trim() : null,
+    province: typeof address.province === 'string' && address.province.trim() ? address.province.trim() : null,
+    postalCode: typeof address.postal_code === 'string' && address.postal_code.trim() ? address.postal_code.trim() : null,
+    country: typeof address.country_code === 'string' && address.country_code.trim() ? address.country_code.trim().toUpperCase() : null,
+  } : null;
+
   return {
     orderId: typeof order.id === 'string' ? order.id : null,
     displayId: order.display_id != null ? Number(order.display_id) : null,
@@ -257,6 +305,7 @@ function normalizeOrder(order) {
     total: Number.isFinite(total) ? total : null,
     items,
     shippingMethod: typeof shippingMethod === 'string' && shippingMethod ? shippingMethod : null,
+    shippingAddress,
   };
 }
 
@@ -267,10 +316,19 @@ function formatMoney(amount, currency) {
   return `${currency} ${amount.toFixed(2)}`;
 }
 
+// The support contact block every notification shares. It is a single, safe
+// address (validated on the way in); never the relay account or any credential.
+function supportContactLines(supportEmail) {
+  return [
+    '',
+    'Questions? Reply to this email or contact us at ' + supportEmail + '.',
+  ];
+}
+
 // Build the plain-text body for each notification. The bodies are deliberately
 // small and only assert what the triggering event guarantees.
 
-function buildConfirmedBody(order) {
+function buildConfirmedBody(order, supportEmail) {
   const lines = [
     'Thank you for your order at PawShop!',
     '',
@@ -293,13 +351,14 @@ function buildConfirmedBody(order) {
     'We have received your order and it is being processed.',
     '',
     'You will receive another email once your order ships.',
+    ...supportContactLines(supportEmail),
     '',
     'Thank you for shopping with PawShop.',
   );
   return lines.join('\n');
 }
 
-function buildShippedBody(order, tracking) {
+function buildShippedBody(order, tracking, supportEmail) {
   // The tracking value is operator-entered and untrusted, so it is re-validated
   // here rather than trusted from the caller: a non-http(s) URL or a value with
   // a line break is dropped, never rendered into the body.
@@ -310,6 +369,9 @@ function buildShippedBody(order, tracking) {
     '',
     `Order number: ${order.publicOrderNumber}`,
   ];
+  if (order.shippingMethod) {
+    lines.push('', `Shipping method: ${order.shippingMethod}`);
+  }
   if (trackingNumber) {
     lines.push('', `Tracking number: ${trackingNumber}`);
   }
@@ -317,22 +379,39 @@ function buildShippedBody(order, tracking) {
     lines.push(`Track your package: ${trackingUrl}`);
   }
   lines.push(
+    ...supportContactLines(supportEmail),
     '',
     'Thank you for shopping with PawShop.',
   );
   return lines.join('\n');
 }
 
-function buildDeliveredBody(order) {
-  return [
+function buildDeliveredBody(order, supportEmail) {
+  const lines = [
     'Your PawShop order has been delivered.',
     '',
     `Order number: ${order.publicOrderNumber}`,
+  ];
+  // A delivery notice confirms *where* it went. Only the safe, non-sensitive
+  // address fields are printed — never a phone number or other contact detail.
+  const address = order.shippingAddress;
+  if (address && (address.name || address.address1 || address.city)) {
+    lines.push('', 'Delivered to:');
+    if (address.name) lines.push(address.name);
+    if (address.address1) lines.push(address.address1);
+    const locality = [address.city, address.province].filter(Boolean).join(', ');
+    if (locality) lines.push(locality);
+    if (address.postalCode) lines.push(address.postalCode);
+    if (address.country) lines.push(address.country);
+  }
+  lines.push(
     '',
     'We hope you and your pet enjoy it!',
+    ...supportContactLines(supportEmail),
     '',
     'Thank you for shopping with PawShop.',
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
 const SUBJECTS = {
@@ -343,22 +422,31 @@ const SUBJECTS = {
 
 // Assemble the full RFC 5322 message for one notification. Returns null when the
 // order lacks the minimum the message needs (an address and a public number).
-function buildOrderMessage({ type, order, tracking = {}, from, now = new Date() }) {
+//
+// `from` is the envelope/return address (the bare mailbox); `fromName` is the
+// human-readable display name put on the "From:" header. They are kept apart so
+// the operator can brand the sender ("Pawlivora") without ever touching the SMTP
+// account that actually authenticates and sends.
+function buildOrderMessage({ type, order, tracking = {}, from, fromName = FROM_NAME_DEFAULT, supportEmail = SUPPORT_EMAIL_DEFAULT, now = new Date() }) {
   if (!order || !order.email || !order.publicOrderNumber) return null;
 
   let body;
   if (type === NOTIFICATION_TYPES.ORDER_CONFIRMED) {
-    body = buildConfirmedBody(order);
+    body = buildConfirmedBody(order, supportEmail);
   } else if (type === NOTIFICATION_TYPES.ORDER_SHIPPED) {
-    body = buildShippedBody(order, tracking);
+    body = buildShippedBody(order, tracking, supportEmail);
   } else if (type === NOTIFICATION_TYPES.ORDER_DELIVERED) {
-    body = buildDeliveredBody(order);
+    body = buildDeliveredBody(order, supportEmail);
   } else {
     return null;
   }
 
+  // Brand the display name without changing the envelope sender. The `fromName`
+  // is already validated to contain no line break, so this is a safe header.
+  const displayFrom = fromName && !/[\r\n]/.test(fromName) ? `${fromName} <${from}>` : from;
+
   return buildMessage({
-    from,
+    from: displayFrom,
     to: order.email,
     subject: SUBJECTS[type],
     body,
@@ -377,13 +465,15 @@ async function deliverOrderEmail({
   order,
   tracking = {},
   credentials,
+  fromName = FROM_NAME_DEFAULT,
+  supportEmail = SUPPORT_EMAIL_DEFAULT,
   send = sendMessage,
   sendOptions = {},
 }) {
   if (!credentials) return { sent: false, reason: 'no email relay is configured' };
   if (!order || !order.email) return { sent: false, reason: 'order has no customer email' };
 
-  const message = buildOrderMessage({ type, order, tracking, from: credentials.from });
+  const message = buildOrderMessage({ type, order, tracking, from: credentials.from, fromName, supportEmail });
   if (!message) return { sent: false, reason: 'order cannot be rendered for email' };
 
   try {
@@ -415,6 +505,8 @@ module.exports = {
   SEND_STATES,
   MAX_ATTEMPTS,
   BACKOFF_MS,
+  SUPPORT_EMAIL_DEFAULT,
+  FROM_NAME_DEFAULT,
   buildIdempotencyKey,
   buildOrderMessage,
   classifySmtpError,
@@ -426,6 +518,8 @@ module.exports = {
   isRetryable,
   isUniqueViolation,
   normalizeOrder,
+  readFromName,
+  readSupportEmail,
   safeTrackingNumber,
   safeTrackingUrl,
   shouldSendNotification,
