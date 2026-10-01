@@ -350,6 +350,8 @@ const I18N = {
     order_items: 'Items',
     order_shipping_to: 'Shipping to',
     order_not_found: 'We could not find an order with those details.',
+    order_service_unavailable: 'Order lookup is temporarily unavailable. Please try again later.',
+    status_updating: 'Status updating',
     order_lookup_title: 'Look up an order',
     order_lookup_note: 'Enter your order number and the email you used at checkout.',
     order_lookup_email: 'Email',
@@ -496,6 +498,8 @@ const I18N = {
     order_items: '商品',
     order_shipping_to: '收货地',
     order_not_found: '未找到匹配的订单，请核对信息。',
+    order_service_unavailable: '订单查询暂时不可用，请稍后重试。',
+    status_updating: '状态更新中',
     order_lookup_title: '查询订单',
     order_lookup_note: '输入订单号和下单时使用的邮箱。',
     order_lookup_email: '邮箱',
@@ -1608,7 +1612,8 @@ let lastResolvedOrder = null;
 // customer language (the backend keeps Medusa/PayPal's original status). The
 // mapping is deliberately customer-first: an "authorized" payment is shown as
 // "confirmed" — never "not paid" — so a buyer is not misled into paying twice.
-// Unknown states fall back to the raw string so nothing is silently hidden.
+// Unknown states must never leak the raw backend enum: they fall back to a
+// single safe "Status updating" label instead of echoing a raw Medusa string.
 function paymentStatusLabel(raw) {
   const key = {
     not_paid: 'pay_not_paid',
@@ -1622,7 +1627,7 @@ function paymentStatusLabel(raw) {
     canceled: 'pay_canceled',
     requires_action: 'pay_requires_action',
   }[raw];
-  return key ? t(key) : (raw || '—');
+  return key ? t(key) : t('status_updating');
 }
 function fulfillmentStatusLabel(raw) {
   const key = {
@@ -1635,7 +1640,7 @@ function fulfillmentStatusLabel(raw) {
     delivered: 'ful_delivered',
     canceled: 'ful_canceled',
   }[raw];
-  return key ? t(key) : (raw || '—');
+  return key ? t(key) : t('status_updating');
 }
 function orderStatusLabel(raw) {
   const key = {
@@ -1646,7 +1651,15 @@ function orderStatusLabel(raw) {
     canceled: 'ost_canceled',
     requires_action: 'ost_requires_action',
   }[raw];
-  return key ? t(key) : (raw || '—');
+  return key ? t(key) : t('status_updating');
+}
+
+// Defensive quantity read: the order-detail wire always carries a numeric
+// `quantity`, but this helper guarantees the storefront never renders
+// `undefined` if a value is somehow missing — it falls back to `1`.
+function quantityOf(item) {
+  const n = item && Number(item.quantity);
+  return Number.isFinite(n) ? n : 1;
 }
 
 function closeOrder() {
@@ -1698,7 +1711,13 @@ async function submitOrderLookup() {
     if (order) renderOrderDetail(order);
     else renderOrderNotFound();
   } catch (e) {
-    showToast(e && e.kind === 'network' ? t('shop_unreachable') : t('order_not_found'));
+    // A network failure or a 5xx is "the lookup is temporarily broken", not
+    // "no such order" — show the distinct service-unavailable message.
+    if (e && (e.kind === 'network' || e.kind === 'service_unavailable')) {
+      renderOrderServiceUnavailable();
+    } else {
+      showToast(t('order_not_found'));
+    }
   }
 }
 
@@ -1844,7 +1863,7 @@ function renderOrderDetail(order) {
     <div class="flex items-center justify-between py-3 border-b border-slate-100 last:border-b-0">
       <div class="min-w-0">
         <div class="text-sm text-slate-800">${safeHtml(it.title)}</div>
-        <div class="text-xs text-slate-500 mt-0.5">${t('quantity')} × ${it.quantity}</div>
+        <div class="text-xs text-slate-500 mt-0.5">${t('quantity')} × ${quantityOf(it)}</div>
       </div>
       <span class="text-sm font-medium text-slate-800">${money(it.total)}</span>
     </div>`).join('');
@@ -1927,6 +1946,23 @@ function renderOrderNotFound() {
     </div>`;
 }
 
+// The "temporarily broken" state — a network failure or a backend 5xx — shown
+// instead of "order not found". This is deliberately a different message and
+// icon from the miss state: the buyer's order is not missing, the lookup just
+// cannot run right now. No backend error detail is ever surfaced.
+function renderOrderServiceUnavailable() {
+  const body = document.getElementById('orderBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="text-center py-6">
+      <div class="w-14 h-14 mx-auto bg-amber-100 rounded-full flex items-center justify-center mb-4">
+        <i class="fas fa-exclamation text-amber-600 text-xl"></i>
+      </div>
+      <p class="text-sm text-slate-500 mb-6">${t('order_service_unavailable')}</p>
+      <button onclick="renderOrderLookupForm()" class="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('order_retry')}</button>
+    </div>`;
+}
+
 // PayPal cancel (or a return that never carried a PayerID): the buyer did not
 // complete payment, so no order was created. This is NOT the success state — it
 // is explicit that payment is incomplete and offers to retry or go back to the
@@ -1961,7 +1997,11 @@ async function openOrderLookupFromSuccess() {
     if (order) renderOrderDetail(order);
     else renderOrderNotFound();
   } catch (e) {
-    showToast(e && e.kind === 'network' ? t('shop_unreachable') : t('order_not_found'));
+    if (e && (e.kind === 'network' || e.kind === 'service_unavailable')) {
+      renderOrderServiceUnavailable();
+    } else {
+      showToast(t('order_not_found'));
+    }
   }
 }
 

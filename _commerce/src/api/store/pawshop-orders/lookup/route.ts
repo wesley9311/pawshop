@@ -6,6 +6,8 @@ import {
   LOOKUP_FULFILLMENT_FIELDS,
   LOOKUP_NOT_FOUND_BODY,
   LOOKUP_NOT_FOUND_STATUS,
+  LOOKUP_SERVICE_UNAVAILABLE_BODY,
+  LOOKUP_SERVICE_UNAVAILABLE_STATUS,
   buildPublicOrderNumber,
   isLookupEmail,
   mapFulfillments,
@@ -65,9 +67,9 @@ type LookupResponse = {
     // be fulfilled in several shipments, so the client must never assume one
     // package or one tracking number. Timestamps are the real `fulfillment`
     // columns; the client derives each package's state from them and shows
-    // nothing it was not given.
+    // nothing it was not given. The internal `fulfillment.id` is intentionally
+    // absent — the storefront never uses it.
     fulfillments: Array<{
-      id: string
       created_at: string | null
       packed_at: string | null
       shipped_at: string | null
@@ -154,44 +156,57 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   // official workflow runs exactly that aggregation, so we reuse it instead of
   // re-deriving the status in this route (which would risk drifting from
   // Medusa's own semantics).
-  const { result: orderDetail } = await getOrderDetailWorkflow(req.scope).run({
-    input: {
-      order_id: orderId,
-      filters: { is_draft_order: false },
-      fields: [
-        'id',
-        'display_id',
-        'status',
-        'currency_code',
-        'total',
-        'created_at',
-        'email',
-        'items.title',
-        'items.quantity',
-        'items.unit_price',
-        'items.total',
-        'items.thumbnail',
-        'shipping_methods.name',
-        'shipping_methods.amount',
-        'shipping_address.first_name',
-        'shipping_address.last_name',
-        'shipping_address.address_1',
-        'shipping_address.address_2',
-        'shipping_address.city',
-        'shipping_address.province',
-        'shipping_address.postal_code',
-        'shipping_address.country_code',
-        // Fulfillment / shipment timeline (Phase 1 logistics). The whitelist is
-        // owned by `lib/order-lookup.cjs`: every entry is a real Medusa column
-        // on `fulfillment` / `fulfillment_label`, nothing derived or invented.
-        // `getOrderDetailWorkflow` already appends `fulfillments.*`, so these
-        // only add the nested `labels` relation that carries the tracking
-        // numbers. `labels.label_url` is absent by construction — it is the
-        // warehouse's shipping-label artifact, not buyer-visible data.
-        ...LOOKUP_FULFILLMENT_FIELDS,
-      ],
-    },
-  })
+  //
+  // A thrown error here is a *system* failure (a backend error, a database
+  // that did not answer, a 500/502/503 upstream) — not "no such order". It
+  // must therefore map to the distinct `service_unavailable` response, never
+  // to the 404, so the storefront can say "temporarily unavailable" instead
+  // of "order not found". The raw error is deliberately swallowed: nothing of
+  // it reaches the wire.
+  let orderDetail: unknown;
+  try {
+    const result = await getOrderDetailWorkflow(req.scope).run({
+      input: {
+        order_id: orderId,
+        filters: { is_draft_order: false },
+        fields: [
+          'id',
+          'display_id',
+          'status',
+          'currency_code',
+          'total',
+          'created_at',
+          'email',
+          'items.title',
+          'items.quantity',
+          'items.unit_price',
+          'items.total',
+          'items.thumbnail',
+          'shipping_methods.name',
+          'shipping_methods.amount',
+          'shipping_address.first_name',
+          'shipping_address.last_name',
+          'shipping_address.address_1',
+          'shipping_address.address_2',
+          'shipping_address.city',
+          'shipping_address.province',
+          'shipping_address.postal_code',
+          'shipping_address.country_code',
+          // Fulfillment / shipment timeline (Phase 1 logistics). The whitelist is
+          // owned by `lib/order-lookup.cjs`: every entry is a real Medusa column
+          // on `fulfillment` / `fulfillment_label`, nothing derived or invented.
+          // `getOrderDetailWorkflow` already appends `fulfillments.*`, so these
+          // only add the nested `labels` relation that carries the tracking
+          // numbers. `labels.label_url` is absent by construction — it is the
+          // warehouse's shipping-label artifact, not buyer-visible data.
+          ...LOOKUP_FULFILLMENT_FIELDS,
+        ],
+      },
+    });
+    orderDetail = result.result;
+  } catch (_error) {
+    return res.status(LOOKUP_SERVICE_UNAVAILABLE_STATUS).json(LOOKUP_SERVICE_UNAVAILABLE_BODY)
+  }
 
   // No match (or email mismatch) → the identical 404 as any other failure.
   if (!orderDetail) {
@@ -264,7 +279,10 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       email: order.email,
       items: (order.items || []).map((item) => ({
         title: item.title,
-        quantity: item.quantity,
+        // Defensive fallback: `quantity` is required on the wire. If the
+        // workflow ever returns a missing/NaN quantity we serialize `1` rather
+        // than `undefined`, so the storefront never renders "undefined × …".
+        quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 1,
         unit_price: Number(item.unit_price),
         total: Number(item.total),
         thumbnail: item.thumbnail ?? null,

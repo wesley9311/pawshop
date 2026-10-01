@@ -64,7 +64,6 @@ function isLookupEmail(raw) {
 // through a public, unauthenticated lookup. Nothing about the tracking number
 // requires it, so it never leaves the server.
 const LOOKUP_FULFILLMENT_FIELDS = [
-  'fulfillments.id',
   'fulfillments.created_at',
   'fulfillments.packed_at',
   'fulfillments.shipped_at',
@@ -87,15 +86,29 @@ const asIso = (value) => (value ? String(value) : null);
 const LOOKUP_NOT_FOUND_STATUS = 404;
 const LOOKUP_NOT_FOUND_BODY = Object.freeze({ type: 'not_found' });
 
+// The second — and only other — failure shape the lookup may produce. It is
+// reserved for *system* failures (a backend that errored, a database that did
+// not answer, a 500/502/503 upstream), never for "the order does not exist" or
+// "the email is wrong". Those are 404, indistinguishable by construction. This
+// lets the storefront tell "we could not find that order" apart from "the order
+// lookup is temporarily broken", without ever leaking the backend's raw error.
+// Like the 404 body it is a single frozen constant carrying only a `type`, so
+// no internal error detail can slip through.
+const LOOKUP_SERVICE_UNAVAILABLE_STATUS = 503;
+const LOOKUP_SERVICE_UNAVAILABLE_BODY = Object.freeze({ type: 'service_unavailable' });
+
 // Map raw fulfillments (as returned by the order-detail workflow) to the exact
 // wire shape the storefront consumes.
 //
 //   - Always an array. An order with no fulfillment yields [] and the client
 //     renders no logistics block at all.
 //   - Oldest-first, so packages list in the order they were created.
-//   - Only the real columns cross the wire. A fulfillment with no labels still
-//     carries `labels: []`; the client shows the timeline without inventing a
-//     tracking number.
+//   - Only the real, buyer-visible columns cross the wire. The internal
+//     `fulfillment.id` is deliberately NOT emitted: it is a Medusa primary key
+//     the storefront has no use for, and omitting it keeps an internal
+//     identifier out of an unauthenticated payload. A fulfillment with no
+//     labels still carries `labels: []`; the client shows the timeline without
+//     inventing a tracking number.
 //   - `label_url` is never read, even if a caller hands it over: it is not a
 //     whitelisted output field.
 function mapFulfillments(rawFulfillments) {
@@ -103,7 +116,6 @@ function mapFulfillments(rawFulfillments) {
   return rawFulfillments
     .filter((f) => f && typeof f === 'object')
     .map((fulfillment) => ({
-      id: String(fulfillment.id),
       created_at: asIso(fulfillment.created_at),
       packed_at: asIso(fulfillment.packed_at),
       shipped_at: asIso(fulfillment.shipped_at),
@@ -126,6 +138,8 @@ module.exports = {
   LOOKUP_FULFILLMENT_FIELDS,
   LOOKUP_NOT_FOUND_STATUS,
   LOOKUP_NOT_FOUND_BODY,
+  LOOKUP_SERVICE_UNAVAILABLE_STATUS,
+  LOOKUP_SERVICE_UNAVAILABLE_BODY,
   buildPublicOrderNumber,
   parseOrderNumberInput,
   isLookupEmail,

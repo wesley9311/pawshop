@@ -258,7 +258,11 @@
       try { payload = await response.json(); } catch (_) { payload = null; }
       if (!response.ok) {
         var failure = new Error((payload && payload.message) || ('The shop refused the request (' + response.status + ').'));
-        failure.kind = response.status === 404 ? 'not_found' : 'rejected';
+        // 404 → "not found" (an order/cart that does not exist); 5xx → the
+        // service is broken (a distinct, temporary state the caller shows as
+        // "temporarily unavailable", never "not found"); anything else → a
+        // generic rejection.
+        failure.kind = response.status === 404 ? 'not_found' : (response.status >= 500 ? 'service_unavailable' : 'rejected');
         failure.status = response.status;
         // Expose Medusa's error `type` (e.g. "invalid_data", "not_found",
         // "not_allowed") so callers can react to a completed/expired cart
@@ -459,10 +463,12 @@
 
       // Guest order lookup: order number + email → verified summary. A 404
       // means "no such order" and is indistinguishable from a wrong email, so
-      // the caller shows a single honest "not found" state. When only a cart
-      // id is known (right after PayPal approval, before the order number is
-      // shown), pass cartId instead of orderNumber to resolve through the
-      // order→cart link.
+      // the caller shows a single honest "not found" state. A 5xx / network
+      // failure is a *different* thing — the lookup is temporarily broken, not
+      // empty — so those are re-thrown (with their kind) for the caller to show
+      // "service unavailable" instead. When only a cart id is known (right
+      // after PayPal approval, before the order number is shown), pass cartId
+      // instead of orderNumber to resolve through the order→cart link.
       async lookupOrder(orderNumber, email, cartId) {
         try {
           var query = isNonEmptyString(orderNumber)

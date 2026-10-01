@@ -8,6 +8,8 @@ const {
   LOOKUP_FULFILLMENT_FIELDS,
   LOOKUP_NOT_FOUND_STATUS,
   LOOKUP_NOT_FOUND_BODY,
+  LOOKUP_SERVICE_UNAVAILABLE_STATUS,
+  LOOKUP_SERVICE_UNAVAILABLE_BODY,
   buildPublicOrderNumber,
   parseOrderNumberInput,
   isLookupEmail,
@@ -149,7 +151,11 @@ test('multiple fulfillments are returned oldest-first, all of them', () => {
     fulfillment({ id: 'ful_first', created_at: '2026-09-29T00:00:00.000Z', packed_at: '2026-09-29T01:00:00.000Z' }),
     fulfillment({ id: 'ful_mid', created_at: '2026-09-30T00:00:00.000Z', packed_at: '2026-09-30T01:00:00.000Z' }),
   ]);
-  assert.deepEqual(mapped.map((f) => f.id), ['ful_first', 'ful_mid', 'ful_late']);
+  assert.deepEqual(mapped.map((f) => f.created_at), [
+    '2026-09-29T00:00:00.000Z',
+    '2026-09-30T00:00:00.000Z',
+    '2026-10-02T00:00:00.000Z',
+  ]);
 });
 
 test('partially shipped orders keep each package own state', () => {
@@ -193,7 +199,7 @@ test('a canceled fulfillment reports canceled_at', () => {
 test('malformed fulfillment/label entries are dropped, not rendered as blanks', () => {
   const mapped = mapFulfillments([null, { id: 'ful_ok', created_at: '2026-09-29T00:00:00.000Z' }, undefined]);
   assert.equal(mapped.length, 1);
-  assert.equal(mapped[0].id, 'ful_ok');
+  assert.equal(mapped[0].created_at, '2026-09-29T00:00:00.000Z');
 
   const [withJunkLabels] = mapFulfillments([fulfillment({ labels: [null, 'x', { tracking_number: 'OK' }] })]);
   assert.equal(withJunkLabels.labels.length, 1);
@@ -209,7 +215,6 @@ test('date values are serialized as-is and never reformatted or localised', () =
 
 test('the fulfillment field whitelist is exactly the real, buyer-visible columns', () => {
   assert.deepEqual(LOOKUP_FULFILLMENT_FIELDS, [
-    'fulfillments.id',
     'fulfillments.created_at',
     'fulfillments.packed_at',
     'fulfillments.shipped_at',
@@ -219,9 +224,20 @@ test('the fulfillment field whitelist is exactly the real, buyer-visible columns
     'fulfillments.labels.tracking_url',
   ]);
   // The warehouse label artifact is not on the list, and there is no `carrier`
-  // column in Medusa to request in the first place.
+  // column in Medusa to request in the first place. The internal
+  // `fulfillments.id` is also gone — the storefront never uses it.
   assert.ok(LOOKUP_FULFILLMENT_FIELDS.every((f) => !f.includes('label_url')));
   assert.equal(LOOKUP_FULFILLMENT_FIELDS.some((f) => f.endsWith('carrier')), false);
+  assert.equal(LOOKUP_FULFILLMENT_FIELDS.some((f) => f.endsWith('.id')), false);
+});
+
+test('the internal fulfillment id never crosses the wire', () => {
+  const [mapped] = mapFulfillments([fulfillment({ id: 'ful_internal_123' })]);
+  assert.deepEqual(Object.keys(mapped).sort(), [
+    'canceled_at', 'created_at', 'delivered_at', 'labels', 'packed_at', 'shipped_at',
+  ]);
+  assert.equal('id' in mapped, false);
+  assert.equal(JSON.stringify(mapped).includes('ful_internal_123'), false);
 });
 
 // ---------- route contract ----------
@@ -245,21 +261,43 @@ test('every failure path in the route returns the identical 404 body', () => {
   for (const call of statuses) {
     const isSuccess = call === 'res.status(200)';
     const isNotFound = call === 'res.status(LOOKUP_NOT_FOUND_STATUS)';
-    assert.ok(isSuccess || isNotFound, `unexpected response status: ${call}`);
+    const isUnavailable = call === 'res.status(LOOKUP_SERVICE_UNAVAILABLE_STATUS)';
+    assert.ok(isSuccess || isNotFound || isUnavailable, `unexpected response status: ${call}`);
   }
-  // Exactly one success status; every other response is the shared 404.
+  // Exactly one success status, exactly one service-unavailable status, and
+  // every other response is the shared 404.
   assert.equal(statuses.filter((s) => s === 'res.status(200)').length, 1);
+  assert.equal(statuses.filter((s) => s === 'res.status(LOOKUP_SERVICE_UNAVAILABLE_STATUS)').length, 1);
   // The route never writes a bespoke error body: all failures go through the
-  // frozen constant, so the responses are byte-identical.
+  // frozen constants, so the responses are byte-identical.
   const jsonBodies = routeSource.match(/\.json\(\{[^}]*\}\)/g) || [];
   assert.deepEqual(jsonBodies, [], 'no inline error bodies are permitted');
   assert.match(routeSource, /\.json\(LOOKUP_NOT_FOUND_BODY\)/);
+  assert.match(routeSource, /\.json\(LOOKUP_SERVICE_UNAVAILABLE_BODY\)/);
 });
 
-test('the shared 404 is the frozen, single failure shape', () => {
+test('a workflow error maps to service-unavailable, never not-found', () => {
+  // The get-order-detail workflow call is wrapped in a try/catch whose catch
+  // returns the 503 constant. This is the only place a *system* failure is
+  // distinguishable from "no such order".
+  assert.match(routeSource, /catch\s*\(_error\)\s*\{\s*return res\.status\(LOOKUP_SERVICE_UNAVAILABLE_STATUS\)\.json\(LOOKUP_SERVICE_UNAVAILABLE_BODY\)/);
+});
+
+test('the shared 404 and 503 are the frozen, single failure shapes', () => {
   assert.equal(LOOKUP_NOT_FOUND_STATUS, 404);
   assert.deepEqual(LOOKUP_NOT_FOUND_BODY, { type: 'not_found' });
   assert.ok(Object.isFrozen(LOOKUP_NOT_FOUND_BODY));
   // It carries no field that could distinguish "no such order" from "wrong email".
   assert.deepEqual(Object.keys(LOOKUP_NOT_FOUND_BODY), ['type']);
+
+  assert.equal(LOOKUP_SERVICE_UNAVAILABLE_STATUS, 503);
+  assert.deepEqual(LOOKUP_SERVICE_UNAVAILABLE_BODY, { type: 'service_unavailable' });
+  assert.ok(Object.isFrozen(LOOKUP_SERVICE_UNAVAILABLE_BODY));
+  // No error detail, message, or stack ever reaches the wire.
+  assert.deepEqual(Object.keys(LOOKUP_SERVICE_UNAVAILABLE_BODY), ['type']);
+});
+
+test('item quantity is defensively serialized, never undefined', () => {
+  // The route's item mapper guards quantity with a finite-number fallback of 1.
+  assert.match(routeSource, /Number\.isFinite\(Number\(item\.quantity\)\)/);
 });
