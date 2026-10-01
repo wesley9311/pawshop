@@ -533,6 +533,38 @@ describe('HTML email rendering', () => {
     assert.match(html, /border-top:1px solid #ececec/);
   });
 
+  it('uses the Pawlivora brand in all three subject lines', () => {
+    const confirmed = buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_CONFIRMED, order: CONFIRMED_ORDER, from: CREDENTIALS.from });
+    const shipped = buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_SHIPPED, order: SHIPPED_ORDER, from: CREDENTIALS.from });
+    const delivered = buildOrderMessage({ type: NOTIFICATION_TYPES.ORDER_DELIVERED, order: DELIVERED_ORDER, from: CREDENTIALS.from });
+    // The subject header is base64-encoded; decode it and assert the brand.
+    for (const message of [confirmed, shipped, delivered]) {
+      const encoded = /^Subject: =\?UTF-8\?B\?(.+)\?=$/m.exec(message)[1];
+      const subject = Buffer.from(encoded, 'base64').toString('utf8');
+      assert.match(subject, /Pawlivora/);
+      assert.doesNotMatch(subject, /PawShop/);
+    }
+  });
+
+  it('stacks the items list and delivery address label above their value', () => {
+    const confirmed = buildOrderHtml(NOTIFICATION_TYPES.ORDER_CONFIRMED, CONFIRMED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    const delivered = buildOrderHtml(NOTIFICATION_TYPES.ORDER_DELIVERED, DELIVERED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
+    // The stacked variant puts the label on its own row and the value on the next,
+    // rather than a fixed side-by-side label/value pair. Assert the label cell has
+    // no sibling value cell in the same <tr> (label-only row), and the value cell
+    // carries the line-height used for wrapping.
+    for (const html of [confirmed, delivered]) {
+      assert.match(html, /line-height:1\.6/);
+    }
+    // Items uses the stacked layout (label cell, then a separate value cell).
+    assert.match(confirmed, />Items</);
+    // Delivered to uses the stacked layout.
+    assert.match(delivered, />Delivered to</);
+    // No fixed-width, nowrap two-column label remains for these long fields.
+    assert.doesNotMatch(confirmed, />Items<\/td><td/);
+    assert.doesNotMatch(delivered, />Delivered to<\/td><td/);
+  });
+
   it('centres the status heading and subtitle', () => {
     const confirmed = buildOrderHtml(NOTIFICATION_TYPES.ORDER_CONFIRMED, CONFIRMED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);
     const shipped = buildOrderHtml(NOTIFICATION_TYPES.ORDER_SHIPPED, SHIPPED_ORDER, {}, SUPPORT_EMAIL_DEFAULT);

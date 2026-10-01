@@ -354,12 +354,12 @@ function htmlPage({ title, subtitle, bodyHtml, supportEmail }) {
     '<tr><td style="padding:28px 24px 0 24px;">',
     '<div style="text-align:center;font-size:20px;font-weight:700;color:#1a1a1a;letter-spacing:0.5px;">', escapeHtml(BRAND_NAME), '</div>',
     '</td></tr>',
-    '<tr><td style="padding:16px 24px 0 24px;">',
+    '<tr><td style="padding:12px 24px 0 24px;">',
     '<div style="border-top:1px solid #ececec;"></div>',
     '</td></tr>',
-    '<tr><td style="padding:24px 24px 0 24px;">',
+    '<tr><td style="padding:18px 24px 0 24px;">',
     '<div style="text-align:center;font-size:18px;font-weight:600;color:#1a1a1a;line-height:1.4;">', escapeHtml(title), '</div>',
-    subtitle ? `<div style="text-align:center;font-size:14px;color:#6b7280;line-height:1.5;margin-top:8px;">${escapeHtml(subtitle)}</div>` : '',
+    subtitle ? `<div style="text-align:center;font-size:14px;color:#6b7280;line-height:1.5;margin-top:6px;">${escapeHtml(subtitle)}</div>` : '',
     '</td></tr>',
     '<tr><td style="padding:20px 24px 0 24px;">',
     bodyHtml,
@@ -381,27 +381,48 @@ function htmlPage({ title, subtitle, bodyHtml, supportEmail }) {
 
 // One detail row in the order summary. The label/value pair is left-aligned and
 // only rendered when a value is present, so a missing field never produces a
-// dangling "Order number:" line.
+// dangling "Order number:" line. A short label sits to the left of its value;
+// long, multi-line fields (the items list, a delivery address) instead use the
+// stacked variant below so they do not force a wide, cramped two-column layout
+// on a narrow mobile viewport.
 function detailRow(label, value) {
   if (value == null || value === '') return '';
   return [
     '<tr>',
-    '<td style="padding:4px 0;font-size:14px;color:#6b7280;white-space:nowrap;vertical-align:top;padding-right:16px;">', escapeHtml(label), '</td>',
-    '<td style="padding:4px 0;font-size:14px;color:#1a1a1a;">', escapeHtml(value), '</td>',
+    '<td style="padding:5px 0;font-size:14px;color:#6b7280;white-space:nowrap;vertical-align:top;padding-right:16px;">', escapeHtml(label), '</td>',
+    '<td style="padding:5px 0;font-size:14px;color:#1a1a1a;">', escapeHtml(value), '</td>',
     '</tr>',
   ].join('');
 }
 
-// A detail row whose value is already HTML-safe (it has been escaped exactly
-// once by the caller). Used for the items list, whose cells join several fields
-// that were each escaped individually; passing the whole line through
+// A detail row whose label is stacked above its value (label on its own line,
+// value on the next). Used for fields that may be long or contain several
+// segments — the items list and the delivery address — so the value wraps
+// naturally instead of being squeezed next to a fixed-width label on mobile.
+function detailRowStacked(label, value) {
+  if (value == null || value === '') return '';
+  return [
+    '<tr>',
+    '<td style="padding:7px 0 2px 0;font-size:14px;color:#6b7280;">', escapeHtml(label), '</td>',
+    '</tr>',
+    '<tr>',
+    '<td style="padding:0 0 7px 0;font-size:14px;color:#1a1a1a;line-height:1.6;">', escapeHtml(value), '</td>',
+    '</tr>',
+  ].join('');
+}
+
+// A stacked detail row whose value is already HTML-safe (it has been escaped
+// exactly once by the caller). Used for the items list, whose cells join several
+// fields that were each escaped individually; passing the whole line through
 // escapeHtml again would double-escape the ampersands.
-function detailRowRaw(label, valueHtml) {
+function detailRowStackedRaw(label, valueHtml) {
   if (valueHtml == null || valueHtml === '') return '';
   return [
     '<tr>',
-    '<td style="padding:4px 0;font-size:14px;color:#6b7280;white-space:nowrap;vertical-align:top;padding-right:16px;">', escapeHtml(label), '</td>',
-    '<td style="padding:4px 0;font-size:14px;color:#1a1a1a;">', valueHtml, '</td>',
+    '<td style="padding:7px 0 2px 0;font-size:14px;color:#6b7280;">', escapeHtml(label), '</td>',
+    '</tr>',
+    '<tr>',
+    '<td style="padding:0 0 7px 0;font-size:14px;color:#1a1a1a;line-height:1.6;">', valueHtml, '</td>',
     '</tr>',
   ].join('');
 }
@@ -419,7 +440,7 @@ function orderDetailsTable({ order, trackingLines, addressLines }) {
     return escapeHtml(`${item.title}  x${item.quantity}${total ? `  ${total}` : ''}`);
   });
   if (itemLines.length > 0) {
-    rows.push(detailRowRaw('Items', itemLines.join('; ')));
+    rows.push(detailRowStackedRaw('Items', itemLines.join('; ')));
   }
   rows.push(detailRow('Total', order.total != null ? formatMoney(order.total, order.currency) : null));
   rows.push(detailRow('Shipping method', order.shippingMethod));
@@ -478,7 +499,7 @@ function buildOrderHtml(type, order, tracking, supportEmail) {
     if (locality) lines.push(locality);
     if (address.postalCode) lines.push(address.postalCode);
     if (address.country) lines.push(address.country);
-    addressLines.push(detailRow('Delivered to', lines.join(', ')));
+    addressLines.push(detailRowStacked('Delivered to', lines.join(', ')));
   }
 
   const bodyHtml = orderDetailsTable({ order, trackingLines, addressLines });
@@ -590,9 +611,9 @@ function buildDeliveredBody(order, supportEmail) {
 }
 
 const SUBJECTS = {
-  [NOTIFICATION_TYPES.ORDER_CONFIRMED]: 'Your PawShop order is confirmed',
-  [NOTIFICATION_TYPES.ORDER_SHIPPED]: 'Your PawShop order has shipped',
-  [NOTIFICATION_TYPES.ORDER_DELIVERED]: 'Your PawShop order has been delivered',
+  [NOTIFICATION_TYPES.ORDER_CONFIRMED]: 'Your Pawlivora order is confirmed',
+  [NOTIFICATION_TYPES.ORDER_SHIPPED]: 'Your Pawlivora order has shipped',
+  [NOTIFICATION_TYPES.ORDER_DELIVERED]: 'Your Pawlivora order has been delivered',
 };
 
 // Assemble the full RFC 5322 message for one notification. Returns null when the
