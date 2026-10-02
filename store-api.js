@@ -14,18 +14,22 @@
 
   var CART_ID_KEY = 'pawshop_medusa_cart_id';
 
-  // Default product fields already include *images and *variants. Prices and
-  // inventory are extra fields and must be requested explicitly, and prices
-  // additionally need a price context (region_id, country_code or cart_id).
-  // `metadata` is NOT part of the default fields (it is an "extra" field), so
-  // it must be requested by name — the bare selector `metadata`, NOT `*metadata`
-  // (the `*`-prefixed form is ignored for metadata and falls back to defaults).
+  // Default product fields already include *images, *variants, title, subtitle,
+  // description, handle, etc. Prices and inventory are extra fields and must be
+  // requested explicitly, and prices additionally need a price context
+  // (region_id, country_code or cart_id).
+  //
+  // `metadata` is also an extra field (not in the defaults). It must be
+  // requested with a `+` prefix: in Medusa's field-parser, a bare field name
+  // with no modifier REPLACES the default field set, so a bare `metadata` would
+  // drop title/subtitle/description/images/variants entirely. `+metadata` means
+  // "add this to the defaults", which keeps the whole default surface intact.
   var PRODUCT_FIELDS = [
     '*variants.calculated_price',
     '*variants.inventory_quantity',
     '*variants.manage_inventory',
     '*variants.allow_backorder',
-    'metadata',
+    '+metadata',
   ].join(',');
 
   // Locale codes the storefront resolves product copy against. The shop's two

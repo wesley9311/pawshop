@@ -405,11 +405,28 @@ test('the product copy placeholder is itself bilingual', () => {
   assert.equal(zh.run("t('product_copy_pending')"), '详情即将上线');
 });
 
-test('the storefront requests the metadata field so i18n can resolve', async () => {
+test('PRODUCT_FIELDS uses +metadata (bare metadata would drop default product fields)', () => {
+  const app = bootPawShop();
+  const fields = app.run('PawStore.PRODUCT_FIELDS');
+  assert.ok(fields.includes('+metadata'), 'metadata must carry the + prefix');
+  // A bare `metadata` token (not preceded by +, and not part of +metadata) must
+  // not appear — Medusa would interpret it as "replace all defaults".
+  assert.ok(!/(^|,)(?!\+)metadata(,|$)/.test(fields), 'no bare metadata token in the field list');
+  assert.ok(fields.includes('*variants.calculated_price'), 'pricing fields preserved');
+});
+
+test('the storefront requests metadata with a + prefix so default fields survive', async () => {
   const app = bootPawShop({ routes: { 'GET /store/products': () => productsBody([ENGLISH_PRODUCT]) } });
   await app.settle();
   const call = app.calls.find(c => c.path === '/store/products');
   assert.ok(call, 'a products request was made');
-  assert.ok(call.url.includes('fields='), 'the request carries explicit fields');
-  assert.ok(decodeURIComponent(call.url).includes('metadata'), 'metadata is requested');
+  const decoded = decodeURIComponent(call.url);
+  assert.ok(decoded.includes('fields='), 'the request carries explicit fields');
+  // Regression: a BARE `metadata` field (no `+`) makes Medusa's field-parser
+  // REPLACE the default field set, dropping title/subtitle/description/images.
+  // The `+` prefix means "add to defaults", which keeps the whole surface.
+  assert.ok(decoded.includes('+metadata'), 'metadata must be requested with a + prefix, not bare');
+  assert.ok(!/,metadata\b/.test(decoded.replace(/\+metadata/g, '')), 'no bare metadata field is sent');
+  // And the title must actually be present in the response so copy can resolve.
+  assert.ok(decoded.includes('*variants.calculated_price'), 'pricing extra field is still requested');
 });
