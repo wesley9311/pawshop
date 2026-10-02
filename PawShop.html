@@ -37,7 +37,7 @@
 <!-- ===== Top Bar ===== -->
 <div class="bg-slate-900 text-white text-xs py-2 px-4">
   <div class="max-w-6xl mx-auto flex items-center justify-between">
-    <span data-i18n="topbar_note">Catalog and cart are live — payment is not connected yet</span>
+    <span data-i18n="topbar_note">Flat-rate shipping on all orders</span>
     <div class="flex items-center gap-3">
       <select id="langSelect" onchange="setLang(this.value)" class="bg-transparent text-white text-xs border-none cursor-pointer">
         <option value="en">English</option>
@@ -61,14 +61,14 @@
         <div class="hidden sm:block">
           <input type="text" id="searchInput" placeholder="Search products..." data-i18n-ph="search_ph" class="w-48 lg:w-64 px-4 py-2 bg-slate-50 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300" oninput="handleSearch()">
         </div>
-        <button onclick="openWaitlist()" aria-label="Launch information" title="Launch information" class="hover:opacity-70">
+        <button onclick="openWaitlist()" aria-label="Launch information" title="Launch information" data-i18n-a11y="a11y_launch" data-i18n-title="a11y_launch" class="hover:opacity-70">
           <i class="fas fa-headset text-slate-700 text-lg"></i>
         </button>
-        <button onclick="openCart()" class="relative" aria-label="Cart">
+        <button onclick="openCart()" class="relative" aria-label="Cart" data-i18n-a11y="a11y_cart">
           <i class="fas fa-shopping-bag text-slate-700"></i>
           <span id="cartCount" class="absolute -top-2 -right-2 w-4 h-4 bg-slate-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">0</span>
         </button>
-        <button onclick="toggleMobileMenu()" class="md:hidden" aria-label="Menu">
+        <button onclick="toggleMobileMenu()" class="md:hidden" aria-label="Menu" data-i18n-a11y="a11y_menu">
           <i class="fas fa-bars text-slate-700"></i>
         </button>
       </div>
@@ -136,13 +136,13 @@
           <li><a href="returns.html" class="hover:text-white" data-i18n="footer_returns">Returns &amp; refunds</a></li>
           <li><a href="faq.html" class="hover:text-white" data-i18n="footer_faq">FAQ</a></li>
           <li><a href="#" class="hover:text-white" onclick="openOrderLookup(); return false;" data-i18n="order_lookup_link">Track an order</a></li>
-          <li><a href="privacy.html" class="hover:text-white">Privacy</a></li>
-          <li><a href="terms.html" class="hover:text-white">Terms</a></li>
+          <li><a href="privacy.html" class="hover:text-white" data-i18n="footer_privacy">Privacy</a></li>
+          <li><a href="terms.html" class="hover:text-white" data-i18n="footer_terms">Terms</a></li>
         </ul>
       </div>
     </div>
     <div class="mt-8 pt-8 border-t border-slate-800 text-center text-sm text-slate-400">
-      &copy; 2026 PawShop. All rights reserved.
+      <span data-i18n="footer_copyright">&copy; 2026 PawShop. All rights reserved.</span>
     </div>
   </div>
 </footer>
@@ -151,7 +151,7 @@
 <div id="cartDrawer" class="drawer fixed top-0 right-0 bottom-0 w-full max-w-sm bg-white z-50 flex flex-col">
   <div class="p-4 border-b border-slate-100 flex items-center justify-between">
     <h3 class="font-bold"><span data-i18n="cart">Cart</span> <span id="cartItemCount" class="text-sm text-slate-400 font-normal">(0)</span></h3>
-    <button onclick="closeCart()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close cart">
+    <button onclick="closeCart()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close cart" data-i18n-a11y="a11y_close_cart">
       <i class="fas fa-times"></i>
     </button>
   </div>
@@ -179,7 +179,7 @@
   <div class="bg-white rounded-xl w-full max-w-[1440px] h-[94vh] max-h-[94vh] flex flex-col overflow-hidden" onclick="event.stopPropagation()">
     <div class="flex items-center justify-between px-5 sm:px-8 py-4 border-b border-slate-100 flex-shrink-0">
       <h3 class="font-bold text-base sm:text-lg" data-i18n="product_details">Product</h3>
-      <button onclick="closeProduct()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
+      <button onclick="closeProduct()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close" data-i18n-a11y="a11y_close">
         <i class="fas fa-times"></i>
       </button>
     </div>
@@ -192,7 +192,7 @@
   <div class="bg-white rounded-xl w-full max-w-lg max-h-[94vh] overflow-y-auto" onclick="event.stopPropagation()">
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
       <h3 class="font-bold" data-i18n="checkout">Checkout</h3>
-      <button onclick="closeCheckout()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
+      <button onclick="closeCheckout()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close" data-i18n-a11y="a11y_close">
         <i class="fas fa-times"></i>
       </button>
     </div>
@@ -207,7 +207,7 @@
   <div class="bg-white rounded-xl w-full max-w-lg max-h-[94vh] overflow-y-auto" onclick="event.stopPropagation()">
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
       <h3 class="font-bold" id="orderModalTitle" data-i18n="order_title">Your order</h3>
-      <button onclick="closeOrder()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close">
+      <button onclick="closeOrder()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close" data-i18n-a11y="a11y_close">
         <i class="fas fa-times"></i>
       </button>
     </div>
@@ -407,6 +407,16 @@ const I18N = {
     ost_requires_action: 'Action required',
     co_pay_redirect: 'Redirecting to secure payment…',
     co_pay_error: 'Payment could not be started. Please try again.',
+    // Accessibility labels, footer links, and input placeholders. These are
+    // customer-visible UI chrome, so they belong to the same bilingual table
+    // rather than being left as hardcoded English in the markup.
+    a11y_cart: 'Cart', a11y_menu: 'Menu', a11y_close: 'Close', a11y_close_cart: 'Close cart',
+    a11y_launch: 'Launch information',
+    a11y_decrease: 'Decrease quantity', a11y_increase: 'Increase quantity',
+    a11y_remove: 'Remove item',
+    footer_privacy: 'Privacy', footer_terms: 'Terms',
+    footer_copyright: '© 2026 Pawlivora. All rights reserved.',
+    lookup_number_ph: 'e.g. 1001', lookup_email_ph: 'you@example.com',
   },
   zh: {
     topbar_note: '所有订单统一运费',
@@ -552,6 +562,13 @@ const I18N = {
     ost_requires_action: '待处理',
     co_pay_redirect: '正在跳转到安全支付…',
     co_pay_error: '无法发起支付，请重试。',
+    a11y_cart: '购物车', a11y_menu: '菜单', a11y_close: '关闭', a11y_close_cart: '关闭购物车',
+    a11y_launch: '上线信息',
+    a11y_decrease: '减少数量', a11y_increase: '增加数量',
+    a11y_remove: '移除商品',
+    footer_privacy: '隐私政策', footer_terms: '服务条款',
+    footer_copyright: '© 2026 Pawlivora 版权所有。',
+    lookup_number_ph: '例如 1001', lookup_email_ph: 'you@example.com',
   },
 };
 
@@ -560,6 +577,11 @@ function t(key) { return (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll('[data-i18n-a11y]').forEach(el => { el.setAttribute('aria-label', t(el.dataset.i18nA11y)); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.setAttribute('title', t(el.dataset.i18nTitle)); });
+  // Keep the document's declared language in sync so screen readers and the
+  // browser announce the correct language for the rendered copy.
+  if (document.documentElement) document.documentElement.lang = lang;
 }
 function setLang(l) {
   lang = l;
@@ -569,6 +591,20 @@ function setLang(l) {
   renderProducts();
   renderProductModal();
   renderCart();
+  // Re-render any open modal whose content is built from t() at render time, so
+  // switching language never leaves a half-translated checkout or order panel.
+  if (document.getElementById('checkoutModal').classList.contains('open')) renderCheckout();
+  if (document.getElementById('orderModal').classList.contains('open')) {
+    switch (orderBodyKind) {
+      case 'success': renderOrderSuccess(lastResolvedOrder); break;
+      case 'detail': renderOrderDetail(lastResolvedOrder); break;
+      case 'not_found': renderOrderNotFound(); break;
+      case 'unavailable': renderOrderServiceUnavailable(); break;
+      case 'canceled': renderPayPalCanceled(); break;
+      case 'lookup':
+      default: renderOrderLookupForm(); break;
+    }
+  }
 }
 
 // ===== State =====
@@ -767,9 +803,9 @@ function renderProductModal() {
         <div class="flex items-center gap-3 mb-4">
           <label class="text-sm text-slate-600" for="modalQty">${t('quantity')}</label>
           <div class="flex items-center border border-slate-200 rounded-lg">
-            <button onclick="setModalQty(-1)" class="w-10 h-10 flex items-center justify-center text-slate-600 hover:bg-slate-50 rounded-l-lg" aria-label="Decrease quantity">−</button>
+            <button onclick="setModalQty(-1)" class="w-10 h-10 flex items-center justify-center text-slate-600 hover:bg-slate-50 rounded-l-lg" aria-label="${t('a11y_decrease')}">−</button>
             <span id="modalQtyValue" class="w-10 text-center text-sm">${modalQty}</span>
-            <button onclick="setModalQty(1)" class="w-10 h-10 flex items-center justify-center text-slate-600 hover:bg-slate-50 rounded-r-lg" aria-label="Increase quantity">+</button>
+            <button onclick="setModalQty(1)" class="w-10 h-10 flex items-center justify-center text-slate-600 hover:bg-slate-50 rounded-r-lg" aria-label="${t('a11y_increase')}">+</button>
           </div>
         </div>
         <button onclick="addToCart('${safeToken(product.id)}', true)" ${addable ? '' : 'disabled'} class="w-full py-3.5 ${addable ? 'bg-slate-900 hover:bg-slate-700' : 'bg-slate-300 cursor-not-allowed'} text-white text-base font-medium rounded-lg transition-colors">${t('add_to_cart')}</button>
@@ -1030,11 +1066,11 @@ function renderCart() {
         <div class="text-sm mb-2">${money(item.unitPrice)} <span class="text-xs text-slate-400">× ${item.quantity}</span>${item.lineTotal === null ? '' : ` <span class="text-xs text-slate-500">= ${money(item.lineTotal)}</span>`}</div>
         <div class="flex items-center justify-between">
           <div class="flex items-center border border-slate-200 rounded">
-            <button onclick="changeQty('${safeToken(item.id)}', -1)" class="w-6 h-6 flex items-center justify-center" aria-label="Decrease">-</button>
+            <button onclick="changeQty('${safeToken(item.id)}', -1)" class="w-6 h-6 flex items-center justify-center" aria-label="${t('a11y_decrease')}">-</button>
             <span class="w-8 text-center text-sm">${item.quantity}</span>
-            <button onclick="changeQty('${safeToken(item.id)}', 1)" class="w-6 h-6 flex items-center justify-center" aria-label="Increase">+</button>
+            <button onclick="changeQty('${safeToken(item.id)}', 1)" class="w-6 h-6 flex items-center justify-center" aria-label="${t('a11y_increase')}">+</button>
           </div>
-          <button onclick="removeLine('${safeToken(item.id)}')" class="text-slate-400 hover:text-red-500" aria-label="Remove">
+          <button onclick="removeLine('${safeToken(item.id)}')" class="text-slate-400 hover:text-red-500" aria-label="${t('a11y_remove')}">
             <i class="fas fa-trash text-xs"></i>
           </button>
         </div>
@@ -1606,6 +1642,10 @@ let orderLookupTimer = null;
 // button can re-open the guest lookup with the real order number + email
 // pre-filled (never a client-generated number).
 let lastResolvedOrder = null;
+// Which panel is currently showing in the order modal, so setLang() can re-render
+// the same view after a language switch instead of losing it. One of
+// 'lookup' | 'success' | 'detail' | 'not_found' | 'unavailable' | 'canceled' | ''.
+let orderBodyKind = '';
 
 // Map a raw Medusa status string to a short, customer-facing label. The raw
 // backend value is the source of truth; this layer only translates it into
@@ -1675,13 +1715,14 @@ function openOrderLookup() {
 function renderOrderLookupForm(prefillEmail, prefillNumber) {
   const body = document.getElementById('orderBody');
   if (!body) return;
+  orderBodyKind = 'lookup';
   body.innerHTML = `
     <div>
       <p class="text-sm text-slate-500 mb-4">${t('order_lookup_note')}</p>
       <label class="block text-sm font-medium mb-1" for="lookupNumber">${t('order_number')}</label>
-      <input type="text" id="lookupNumber" value="${safeHtml(prefillNumber || '')}" placeholder="1001" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <input type="text" id="lookupNumber" value="${safeHtml(prefillNumber || '')}" placeholder="${t('lookup_number_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
       <label class="block text-sm font-medium mb-1" for="lookupEmail">${t('order_lookup_email')}</label>
-      <input type="email" id="lookupEmail" value="${safeHtml(prefillEmail || '')}" placeholder="you@example.com" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-4 focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <input type="email" id="lookupEmail" value="${safeHtml(prefillEmail || '')}" placeholder="${t('lookup_email_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-4 focus:outline-none focus:ring-1 focus:ring-slate-300">
       <button onclick="submitOrderLookup()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_lookup_cta')}</button>
     </div>`;
 }
@@ -1744,6 +1785,7 @@ function renderOrderSuccess(order) {
   const body = document.getElementById('orderBody');
   if (!body) return;
   lastResolvedOrder = order;
+  orderBodyKind = 'success';
   const number = order.public_order_number || order.order_number;
   body.innerHTML = `
     <div class="text-center">
@@ -1858,6 +1900,7 @@ function renderOrderDetail(order) {
   const body = document.getElementById('orderBody');
   if (!body) return;
   lastResolvedOrder = order;
+  orderBodyKind = 'detail';
 
   const items = (order.items || []).map(it => `
     <div class="flex items-center justify-between py-3 border-b border-slate-100 last:border-b-0">
@@ -1936,6 +1979,7 @@ function renderOrderDetail(order) {
 function renderOrderNotFound() {
   const body = document.getElementById('orderBody');
   if (!body) return;
+  orderBodyKind = 'not_found';
   body.innerHTML = `
     <div class="text-center py-6">
       <div class="w-14 h-14 mx-auto bg-slate-100 rounded-full flex items-center justify-center mb-4">
@@ -1953,6 +1997,7 @@ function renderOrderNotFound() {
 function renderOrderServiceUnavailable() {
   const body = document.getElementById('orderBody');
   if (!body) return;
+  orderBodyKind = 'unavailable';
   body.innerHTML = `
     <div class="text-center py-6">
       <div class="w-14 h-14 mx-auto bg-amber-100 rounded-full flex items-center justify-center mb-4">
@@ -1971,6 +2016,7 @@ function renderOrderServiceUnavailable() {
 function renderPayPalCanceled() {
   const body = document.getElementById('orderBody');
   if (!body) return;
+  orderBodyKind = 'canceled';
   body.innerHTML = `
     <div class="text-center py-6">
       <div class="w-14 h-14 mx-auto bg-amber-100 rounded-full flex items-center justify-center mb-4">
