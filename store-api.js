@@ -17,12 +17,26 @@
   // Default product fields already include *images and *variants. Prices and
   // inventory are extra fields and must be requested explicitly, and prices
   // additionally need a price context (region_id, country_code or cart_id).
+  // `metadata` is NOT part of the default fields (it is an "extra" field), so
+  // it must be requested by name — the bare selector `metadata`, NOT `*metadata`
+  // (the `*`-prefixed form is ignored for metadata and falls back to defaults).
   var PRODUCT_FIELDS = [
     '*variants.calculated_price',
     '*variants.inventory_quantity',
     '*variants.manage_inventory',
     '*variants.allow_backorder',
+    'metadata',
   ].join(',');
+
+  // Locale codes the storefront resolves product copy against. The shop's two
+  // published products are currently single-language (one English, one Chinese),
+  // so `metadata.i18n` carries the non-default-language overrides only. These
+  // are the only two codes we resolve today.
+  var SUPPORTED_LOCALES = ['en-US', 'zh-CN'];
+
+  function containsCJK(value) {
+    return isNonEmptyString(value) && /[\u4e00-\u9fff]/.test(value);
+  }
 
   function isNonEmptyString(value) {
     return typeof value === 'string' && value.trim().length > 0;
@@ -86,6 +100,28 @@
     return out;
   }
 
+  // Resolve one piece of customer-facing product copy (title/subtitle/
+  // description) for a requested locale. The rules, in order:
+  //   1. `metadata.i18n.translations[lang][field]` when present and non-empty.
+  //   2. Otherwise the product's own field (the "default locale" source).
+  //   3. Safety net: when the requested locale is English and the fallback
+  //      field contains CJK (a Chinese-only product with no English override),
+  //      we must NOT leak Chinese into an English page — return '' instead so
+  //      the UI can show an honest "details coming soon" placeholder.
+  // A missing/null/empty `metadata` or `metadata.i18n` never throws — it simply
+  // falls back to the product's own field (and, in the CJK case, to '').
+  function localizedText(raw, lang, field) {
+    var i18n = raw && raw.metadata && typeof raw.metadata === 'object' ? raw.metadata.i18n : null;
+    var translations = i18n && i18n.translations && typeof i18n.translations === 'object' ? i18n.translations : null;
+    var override = translations && translations[lang] && isNonEmptyString(translations[lang][field])
+      ? translations[lang][field]
+      : '';
+    if (override) return override;
+    var fallback = isNonEmptyString(raw[field]) ? raw[field] : '';
+    if (lang === 'en-US' && containsCJK(fallback)) return '';
+    return fallback;
+  }
+
   function normalizeVariant(raw) {
     if (!raw || typeof raw !== 'object' || !isNonEmptyString(raw.id)) return null;
     return {
@@ -99,8 +135,12 @@
     };
   }
 
-  function normalizeProduct(raw) {
+  // `lang` is the requested locale ("en-US" | "zh-CN"); it only changes which
+  // customer-facing copy (title/subtitle/description) is returned — never the
+  // product id, SKU, price, inventory or handle, which stay single-source.
+  function normalizeProduct(raw, lang) {
     if (!raw || typeof raw !== 'object' || !isNonEmptyString(raw.id)) return null;
+    var locale = SUPPORTED_LOCALES.indexOf(lang) !== -1 ? lang : 'en-US';
     var images = uniqueImages([].concat(Array.isArray(raw.images) ? raw.images : [], [raw.thumbnail]));
     var variants = [];
     var list = Array.isArray(raw.variants) ? raw.variants : [];
@@ -116,11 +156,26 @@
     for (var k = 0; k < prices.length; k++) {
       if (distinct.indexOf(prices[k]) === -1) distinct.push(prices[k]);
     }
-    return {
-      id: raw.id,
+    // Expose only the i18n sub-key of metadata. The rest of `metadata` is
+    // internal (and today is null anyway); the storefront has no business with
+    // it, and surfacing the whole blob would leak whatever the admin later
+    // stores there. We forward `i18n` verbatim (default_locale + translations)
+    // so the UI can re-resolve copy on a live language switch without a refetch.
+    var rawI18n = raw.metadata && typeof raw.metadata === 'object' ? raw.metadata.i18n : null;
+    // Preserve the product's own (default-locale) copy so a live language
+    // switch can re-resolve another locale client-side without refetching the
+    // catalog. The resolved title/subtitle/description above are for the
+    // bootstrap locale only; `defaultCopy` is the untouched single source.
+    var defaultCopy = {
       title: isNonEmptyString(raw.title) ? raw.title : '',
       subtitle: isNonEmptyString(raw.subtitle) ? raw.subtitle : '',
       description: isNonEmptyString(raw.description) ? raw.description : '',
+    };
+    return {
+      id: raw.id,
+      title: localizedText(raw, locale, 'title'),
+      subtitle: localizedText(raw, locale, 'subtitle'),
+      description: localizedText(raw, locale, 'description'),
       thumbnail: images.length ? images[0] : '',
       images: images,
       group: (raw.collection && isNonEmptyString(raw.collection.title) && raw.collection.title) ||
@@ -131,6 +186,8 @@
       available: variants.some(function (variant) {
         return variant.availability === 'in_stock' || variant.availability === 'backorder';
       }),
+      i18n: rawI18n && typeof rawI18n === 'object' ? rawI18n : null,
+      defaultCopy: defaultCopy,
     };
   }
 
@@ -142,6 +199,7 @@
       id: raw.id,
       title: isNonEmptyString(raw.product_title) ? raw.product_title
         : (isNonEmptyString(raw.title) ? raw.title : ''),
+      variantId: isNonEmptyString(raw.variant_id) ? raw.variant_id : '',
       variantTitle: isNonEmptyString(raw.variant_title) ? raw.variant_title : '',
       sku: isNonEmptyString(raw.variant_sku) ? raw.variant_sku : '',
       thumbnail: imageUrl(raw.thumbnail),
@@ -310,14 +368,16 @@
       },
 
       // Prices are region-scoped, so the caller passes the region it sells in.
-      async products(regionId, limit) {
+      // `lang` selects the customer-facing copy locale; it is optional and
+      // defaults to en-US when absent (backward compatible with existing calls).
+      async products(regionId, limit, lang) {
         var query = '?limit=' + (limit || 50) + '&fields=' + encodeURIComponent(PRODUCT_FIELDS);
         if (isNonEmptyString(regionId)) query += '&region_id=' + encodeURIComponent(regionId);
         var payload = await request('/products' + query);
         var raw = (payload && Array.isArray(payload.products)) ? payload.products : [];
         var out = [];
         for (var i = 0; i < raw.length; i++) {
-          var product = normalizeProduct(raw[i]);
+          var product = normalizeProduct(raw[i], lang);
           if (product) out.push(product);
         }
         return { products: out, count: payload && typeof payload.count === 'number' ? payload.count : out.length };
@@ -503,8 +563,11 @@
   window.PawStore = Object.freeze({
     CART_ID_KEY: CART_ID_KEY,
     PRODUCT_FIELDS: PRODUCT_FIELDS,
+    SUPPORTED_LOCALES: SUPPORTED_LOCALES,
     createClient: createClient,
     normalizeProduct: normalizeProduct,
+    localizedText: localizedText,
+    containsCJK: containsCJK,
     normalizeVariant: normalizeVariant,
     normalizeCart: normalizeCart,
     normalizeCartItem: normalizeCartItem,

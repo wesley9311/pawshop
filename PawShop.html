@@ -258,7 +258,51 @@ const imgUrl = value => safeImage(value, CONFIG.imageHosts || []);
 const money = amount => PawStore.formatMoney(amount, CONFIG.displayCurrency);
 const LS_CART_ID = PawStore.CART_ID_KEY;
 
-// ===== i18n:界面双语(商品名/描述来自后台,保持原文) =====
+// ===== Product-content localization =====
+// A normalized product already carries its bootstrap-locale title/subtitle/
+// description, plus `defaultCopy` (the untouched default-locale fields) and
+// `i18n` (translations + default_locale). This resolver re-picks copy for the
+// *current* page language so switching language re-renders the catalog, modal
+// and cart without refetching. It mirrors PawStore.localizedText's rules: an
+// explicit translation wins, else the default-locale copy, and an English page
+// never receives CJK-only copy (it falls back to '' for an honest placeholder).
+// The page tracks language as the short codes "en"/"zh" (the <select> values);
+// the i18n metadata stores full locale codes, so we map between the two.
+const LOCALE_OF = { en: 'en-US', zh: 'zh-CN' };
+const CJK_RE = /[\u4e00-\u9fff]/;
+function currentLocale() { return LOCALE_OF[lang] || 'en-US'; }
+function localizedCopy(product, field) {
+  if (!product) return '';
+  const locale = currentLocale();
+  const translations = product.i18n && product.i18n.translations ? product.i18n.translations : null;
+  const override = translations && translations[locale] && (translations[locale][field] || '').trim();
+  if (override) return override;
+  const fallback = (product.defaultCopy && (product.defaultCopy[field] || '').trim()) || '';
+  if (locale === 'en-US' && CJK_RE.test(fallback)) return '';
+  return fallback;
+}
+// The visible product title for the current language. This ALWAYS routes
+// through `localizedCopy` so the CJK guard applies even when a product has no
+// i18n metadata at all (the current production state): an English page must
+// never fall back to a CJK-only default title.
+function localizedTitle(product) {
+  return localizedCopy(product, 'title');
+}
+// A cart line item's `product_title` is the raw (unlocalized) title from the
+// cart API. When the matching product is already loaded, re-resolve its copy
+// for the current language via its variant id; otherwise keep the server title.
+function localizedCartItemTitle(item) {
+  if (!item) return '';
+  const product = item.variantId
+    ? products.find(p => p.variants.some(v => v.id === item.variantId))
+    : null;
+  if (product) return localizedCopy(product, 'title') || item.title || '';
+  return item.title || '';
+}
+// Honest placeholder when a product has no copy in the current language.
+function localizedFallback() { return t('product_copy_pending'); }
+
+// ===== i18n:界面双语 =====
 const I18N = {
   en: {
     topbar_note: 'Flat-rate shipping on all orders',
@@ -417,6 +461,7 @@ const I18N = {
     footer_privacy: 'Privacy', footer_terms: 'Terms',
     footer_copyright: '© 2026 Pawlivora. All rights reserved.',
     lookup_number_ph: 'e.g. 1001', lookup_email_ph: 'you@example.com',
+    product_copy_pending: 'Details coming soon',
   },
   zh: {
     topbar_note: '所有订单统一运费',
@@ -569,6 +614,7 @@ const I18N = {
     footer_privacy: '隐私政策', footer_terms: '服务条款',
     footer_copyright: '© 2026 Pawlivora 版权所有。',
     lookup_number_ph: '例如 1001', lookup_email_ph: 'you@example.com',
+    product_copy_pending: '详情即将上线',
   },
 };
 
@@ -663,7 +709,7 @@ function renderCategoryBar() {
 function productVisual(product, iconClass, imgClass) {
   const first = imgUrl(product.thumbnail || (product.images && product.images[0]) || '');
   return first
-    ? `<img src="${first}" alt="${safeHtml(product.title)}" class="${imgClass}" loading="lazy">`
+    ? `<img src="${first}" alt="${safeHtml(localizedTitle(product))}" class="${imgClass}" loading="lazy">`
     : `<i class="fas fa-box ${iconClass}"></i>`;
 }
 
@@ -711,7 +757,7 @@ function renderProducts() {
   let filtered = currentCategory === 'all' ? [...products] : products.filter(p => p.group === currentCategory);
   if (searchQuery) {
     const needle = searchQuery.toLowerCase();
-    filtered = filtered.filter(p => p.title.toLowerCase().includes(needle));
+    filtered = filtered.filter(p => localizedTitle(p).toLowerCase().includes(needle));
   }
   switch (currentSort) {
     case 'price-low': filtered.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity)); break;
@@ -738,7 +784,7 @@ function renderProducts() {
         ${productVisual(p, 'text-5xl text-slate-300', 'absolute inset-0 w-full h-full object-cover')}
       </div>
       <div class="p-3">
-        <h3 class="text-sm font-medium mb-1 line-clamp-2">${safeHtml(p.title)}</h3>
+        <h3 class="text-sm font-medium mb-1 line-clamp-2">${safeHtml(localizedTitle(p) || localizedFallback())}</h3>
         <p class="text-xs text-slate-400 mb-2">${variant ? safeHtml(availabilityText(variant)) : ''}</p>
         ${variantPicker(p, `pickCardVariant('${safeToken(p.id)}', this.value)`)}
         <div class="flex items-center justify-between">
@@ -784,18 +830,21 @@ function renderProductModal() {
   modalImages = images;
   const addable = variant ? isAddable(variant) : false;
   const stockNote = stockHint(variant);
+  const title = localizedTitle(product) || localizedFallback();
+  const subtitle = localizedCopy(product, 'subtitle');
+  const description = localizedCopy(product, 'description');
   const body = document.getElementById('productModalBody');
   body.innerHTML = `
     <div class="grid gap-8 lg:grid-cols-2 lg:gap-12">
       <div class="min-w-0">
         ${images.length
-          ? `<div class="aspect-square bg-slate-50 rounded-xl overflow-hidden mb-4"><img id="modalMainImage" src="${images[0]}" alt="${safeHtml(product.title)}" class="w-full h-full object-contain"></div>
+          ? `<div class="aspect-square bg-slate-50 rounded-xl overflow-hidden mb-4"><img id="modalMainImage" src="${images[0]}" alt="${safeHtml(title)}" class="w-full h-full object-contain"></div>
              ${images.length > 1 ? `<div class="flex gap-2 sm:gap-3 overflow-x-auto pb-1">${images.map((u, i) => `<img src="${u}" data-thumb onclick="setModalImage(${i})" class="w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 object-cover rounded-lg cursor-pointer border-2 ${i === 0 ? 'border-slate-900' : 'border-transparent'} hover:border-slate-400">`).join('')}</div>` : ''}`
           : `<div class="aspect-square bg-slate-50 rounded-xl flex items-center justify-center"><i class="fas fa-box text-6xl text-slate-300"></i></div>`}
       </div>
       <div class="min-w-0">
-        <h2 class="text-2xl sm:text-3xl font-bold mb-2">${safeHtml(product.title)}</h2>
-        ${product.subtitle ? `<p class="text-sm sm:text-base text-slate-500 mb-3">${safeHtml(product.subtitle)}</p>` : ''}
+        <h2 class="text-2xl sm:text-3xl font-bold mb-2">${safeHtml(title)}</h2>
+        ${subtitle ? `<p class="text-sm sm:text-base text-slate-500 mb-3">${safeHtml(subtitle)}</p>` : ''}
         <div class="flex items-center gap-3 mb-3">${priceHtml(product)}</div>
         <p class="text-sm ${addable ? 'text-emerald-600' : 'text-red-500'} mb-1">${variant ? safeHtml(availabilityText(variant)) : ''}${stockNote ? ` <span class="text-amber-600">· ${stockNote}</span>` : ''}</p>
         ${variant && variant.sku ? `<p class="text-xs text-slate-400 mb-4">${t('sku')}: ${safeHtml(variant.sku)}</p>` : ''}
@@ -817,10 +866,10 @@ function renderProductModal() {
         </details>
       </div>
     </div>
-    ${product.description ? `
+    ${description ? `
     <div class="mt-10 pt-6 border-t border-slate-100">
       <h3 class="font-bold mb-3">${t('desc_heading')}</h3>
-      <p class="text-sm sm:text-base text-slate-600 leading-relaxed whitespace-pre-line max-w-4xl">${safeHtml(product.description)}</p>
+      <p class="text-sm sm:text-base text-slate-600 leading-relaxed whitespace-pre-line max-w-4xl">${safeHtml(description)}</p>
     </div>` : ''}`;
 }
 
@@ -1054,13 +1103,14 @@ function renderCart() {
   }
   container.innerHTML = items.map(item => {
     const thumb = imgUrl(item.thumbnail);
+    const title = localizedCartItemTitle(item) || localizedFallback();
     return `
     <div class="flex gap-3 py-3 border-b border-slate-100 fade-in">
       <div class="w-16 h-16 bg-slate-50 rounded flex-shrink-0 flex items-center justify-center overflow-hidden">
-        ${thumb ? `<img src="${thumb}" alt="${safeHtml(item.title)}" class="w-full h-full object-cover" loading="lazy">` : `<i class="fas fa-box text-2xl text-slate-300"></i>`}
+        ${thumb ? `<img src="${thumb}" alt="${safeHtml(title)}" class="w-full h-full object-cover" loading="lazy">` : `<i class="fas fa-box text-2xl text-slate-300"></i>`}
       </div>
       <div class="flex-1 min-w-0">
-        <h4 class="text-sm font-medium mb-0.5 truncate">${safeHtml(item.title)}</h4>
+        <h4 class="text-sm font-medium mb-0.5 truncate">${safeHtml(title)}</h4>
         ${item.variantTitle ? `<p class="text-xs text-slate-500 mb-0.5">${t('variant')}: ${safeHtml(item.variantTitle)}</p>` : ''}
         ${item.sku ? `<p class="text-xs text-slate-400 mb-0.5">${t('sku')}: ${safeHtml(item.sku)}</p>` : ''}
         <div class="text-sm mb-2">${money(item.unitPrice)} <span class="text-xs text-slate-400">× ${item.quantity}</span>${item.lineTotal === null ? '' : ` <span class="text-xs text-slate-500">= ${money(item.lineTotal)}</span>`}</div>
@@ -2166,7 +2216,7 @@ async function bootstrap() {
   renderProducts();
   try { await ensureRegion(); } catch (_) { regionId = ''; }
   try {
-    const result = await store.products(regionId, 50);
+    const result = await store.products(regionId, 50, currentLocale());
     products = result.products;
     catalogState = 'ready';
   } catch (_) {
