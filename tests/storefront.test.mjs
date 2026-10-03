@@ -15,11 +15,14 @@ const EMPTY_CATALOG = { products: [], count: 0, offset: 0, limit: 50 };
 
 function makeNode() {
   const classes = new Set();
+  const attrs = new Map();
   return {
     innerHTML: '', textContent: '', value: '', style: {}, placeholder: '',
-    focused: false,
+    dataset: {}, focused: false,
     focus() { this.focused = true; },
     scrollIntoView() {},
+    setAttribute(k, v) { attrs.set(k, String(v)); },
+    getAttribute(k) { return attrs.has(k) ? attrs.get(k) : null; },
     classList: {
       add: name => classes.add(name),
       remove: name => classes.delete(name),

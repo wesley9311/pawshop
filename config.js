@@ -27,6 +27,13 @@ const PAWSHOP_PUBLIC_CONFIG = Object.freeze({
   // sales channel. Admin keys and secrets must never appear here.
   publishableKey: 'pk_f123c6182403217335137418b5094114d8add70aca3991f07f951c9c2c0b908e',
 
+  // Customer-support inbox the storefront links to ("Contact us" and the order
+  // "Need help?" entry). This is the SAME mailbox the transactional emails use
+  // (server-side PAWSHOP_SUPPORT_EMAIL, default 504533680@qq.com) — it is not a
+  // second support channel. It is a public address by design (it appears in a
+  // mailto: link), never a credential.
+  supportEmail: '504533680@qq.com',
+
   // Hostnames allowed to serve product images: the object-storage bucket the
   // admin uploads to. safe.js drops every other host.
   imageHosts: ['pawlivora-products-us-west-1.oss-us-west-1.aliyuncs.com', 'media.pawlivora.com'],

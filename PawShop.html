@@ -136,6 +136,7 @@
           <li><a href="returns.html" class="hover:text-white" data-i18n="footer_returns">Returns &amp; refunds</a></li>
           <li><a href="faq.html" class="hover:text-white" data-i18n="footer_faq">FAQ</a></li>
           <li><a href="#" class="hover:text-white" onclick="openOrderLookup(); return false;" data-i18n="order_lookup_link">Track an order</a></li>
+          <li><a href="#" id="footerContactLink" class="hover:text-white" data-i18n="footer_contact">Contact us</a></li>
           <li><a href="privacy.html" class="hover:text-white" data-i18n="footer_privacy">Privacy</a></li>
           <li><a href="terms.html" class="hover:text-white" data-i18n="footer_terms">Terms</a></li>
         </ul>
@@ -258,6 +259,34 @@ const imgUrl = value => safeImage(value, CONFIG.imageHosts || []);
 const money = amount => PawStore.formatMoney(amount, CONFIG.displayCurrency);
 const LS_CART_ID = PawStore.CART_ID_KEY;
 
+// ===== Customer support =====
+// The single support inbox, reused from the transactional-email channel (see
+// config.js). It is a public address, surfaced only as a mailto: target.
+const supportEmail = (typeof CONFIG.supportEmail === 'string' && CONFIG.supportEmail.trim()) ? CONFIG.supportEmail.trim() : '';
+
+// Build a safe mailto: href. The order context is limited to the *public* order
+// number (PS-YYYYMMDD-NNNN) — never the internal Medusa id — and the body is a
+// fixed template with only the order number substituted. No customer PII (name,
+// email, address) is ever auto-filled; the buyer's own mail client adds that.
+// `encodeURIComponent` keeps subject/body from breaking the href, and the whole
+// thing is HTML-escaped on the way out by the caller via safeHtml.
+function contactMailtoHref(publicOrderNumber) {
+  const address = supportEmail;
+  if (!address) return '';
+  const subject = publicOrderNumber
+    ? t('contact_subject').replace('{order}', publicOrderNumber)
+    : t('footer_contact');
+  const intro = publicOrderNumber
+    ? t('contact_body_intro').replace('{order}', publicOrderNumber) + '\n' + t('contact_body_blank')
+    : '';
+  let href = 'mailto:' + address;
+  const params = [];
+  if (subject) params.push('subject=' + encodeURIComponent(subject));
+  if (intro) params.push('body=' + encodeURIComponent(intro));
+  if (params.length) href += '?' + params.join('&');
+  return href;
+}
+
 // ===== Product-content localization =====
 // A normalized product already carries its bootstrap-locale title/subtitle/
 // description, plus `defaultCopy` (the untouched default-locale fields) and
@@ -332,6 +361,7 @@ const I18N = {
     returns_details: 'Our returns and refunds policy is published before checkout opens.',
     footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
     footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds', footer_faq: 'FAQ',
+    footer_contact: 'Contact us',
     cart: 'Cart', subtotal: 'Subtotal', shipping: 'Shipping', shipping_at_checkout: 'Calculated at checkout',
     taxes: 'Taxes', taxes_at_checkout: 'Calculated at checkout',
     checkout: 'Checkout', checkout_note: 'Checkout is not open yet — payment is not connected.',
@@ -403,6 +433,11 @@ const I18N = {
     order_lookup_link: 'Track an order',
     order_back: 'Back to shop',
     order_view: 'View order',
+    order_need_help: 'Need help with this order?',
+    order_contact_us: 'Contact us about this order',
+    contact_subject: 'Question about order {order}',
+    contact_body_intro: 'I have a question about order {order}.',
+    contact_body_blank: '(Describe your question here)',
     order_pending: 'Payment authorized, order being created…',
     order_canceled_title: 'Payment not completed',
     order_canceled_note: 'You did not complete payment, so no order was created.',
@@ -491,6 +526,7 @@ const I18N = {
     returns_details: '退换与退款政策将在结算开放前公布。',
     footer_tag: '精选犬猫好物。',
     footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款', footer_faq: '常见问题',
+    footer_contact: '联系我们',
     cart: '购物车', subtotal: '商品小计', shipping: '运费', shipping_at_checkout: '结算时计算',
     taxes: '税费', taxes_at_checkout: '结算时计算',
     checkout: '去结算', checkout_note: '结算尚未开放——支付通道还未接通。',
@@ -562,6 +598,11 @@ const I18N = {
     order_lookup_link: '追踪订单',
     order_back: '返回商店',
     order_view: '查看订单',
+    order_need_help: '此订单需要帮助？',
+    order_contact_us: '就此订单联系我们',
+    contact_subject: '关于订单 {order} 的咨询',
+    contact_body_intro: '我想咨询订单 {order} 的问题。',
+    contact_body_blank: '（请在此描述你的问题）',
     order_pending: '支付已授权，订单生成中…',
     order_canceled_title: '支付未完成',
     order_canceled_note: '你尚未完成支付，因此没有创建订单。',
@@ -625,6 +666,10 @@ function applyI18n() {
   document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   document.querySelectorAll('[data-i18n-a11y]').forEach(el => { el.setAttribute('aria-label', t(el.dataset.i18nA11y)); });
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.setAttribute('title', t(el.dataset.i18nTitle)); });
+  // The footer "Contact us" link is a plain mailto: with no order context; keep
+  // its href in step with the current language (subject wording localizes).
+  const contactLink = document.getElementById('footerContactLink');
+  if (contactLink && supportEmail) contactLink.setAttribute('href', contactMailtoHref(''));
   // Keep the document's declared language in sync so screen readers and the
   // browser announce the correct language for the rendered copy.
   if (document.documentElement) document.documentElement.lang = lang;
@@ -2020,6 +2065,18 @@ function renderOrderDetail(order) {
           </div>
         </div>
       </section>
+
+      <!-- Layer 4: customer support. Only the public order number is carried
+           into the mailto: subject/body — never the internal id, and never any
+           customer PII. The buyer's own mail client supplies their identity. -->
+      ${supportEmail ? `
+      <section class="mb-2 border border-slate-100 rounded-lg p-4">
+        <h4 class="text-sm font-semibold text-slate-800 mb-1">${t('order_need_help')}</h4>
+        <p class="text-xs text-slate-500 mb-3">${safeHtml(number)}</p>
+        <a href="${safeHtml(contactMailtoHref(number))}" class="inline-flex items-center gap-2 text-sm text-slate-900 underline hover:text-slate-500">
+          <i class="fas fa-envelope text-xs"></i>${t('order_contact_us')}
+        </a>
+      </section>` : ''}
 
       <button onclick="closeOrder()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('order_back')}</button>
     </div>`;
