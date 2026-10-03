@@ -1,6 +1,7 @@
-import { defineMiddlewares } from '@medusajs/framework/http'
+import { defineMiddlewares, authenticate } from '@medusajs/framework/http'
 import { commerceIsOpen } from '../lib/production-modes.cjs'
 import { validateCartShippingAddress } from '../lib/address-structure.cjs'
+import { verificationRateLimit } from '../lib/verification-rate-limit-middleware.cjs'
 
 const unavailable = (_req: any, res: any) => {
   res.status(503).json({ type: 'not_allowed', message: 'PawShop storefront APIs are not open.' })
@@ -56,6 +57,29 @@ export default defineMiddlewares({
           { matcher: '/auth/customer/*', middlewares: [unavailable] },
         ]),
     ...cartAddressValidation,
+    // Customer registration override (`src/api/store/customers/route.ts`) replaces
+    // the stock route handler with the guest-claim path. The stock middleware
+    // already authenticates the same way, but re-declaring it here makes the
+    // override self-contained and keeps the actorless-registration token accepted
+    // (allowUnregistered) while an already-authenticated customer is rejected by
+    // the route itself.
+    ...(commerceOpen
+      ? [
+          {
+            matcher: '/store/customers',
+            method: 'POST' as const,
+            middlewares: [authenticate('customer', ['session', 'bearer'], { allowUnregistered: true })],
+          },
+          // Verification-code request rate limiting (60s cooldown, 5/hour per
+          // email, 20/hour per IP). Only the request route; confirm is unlimited
+          // (a wrong code simply fails the confirm).
+          {
+            matcher: '/auth/verification/request',
+            method: 'POST' as const,
+            middlewares: [verificationRateLimit],
+          },
+        ]
+      : []),
     { matcher: '/connector/v1', ...connectorBodyParser },
     { matcher: '/connector/v1/*', ...connectorBodyParser },
   ],

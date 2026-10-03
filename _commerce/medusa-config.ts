@@ -35,6 +35,10 @@ module.exports = defineConfig({
     // profile so local acceptance exercises the same module graph the host
     // runs. It owns a single table and never touches commerce data.
     { resolve: './src/modules/pawshop-notification' },
+    // Customer-account claim audit ledger. Registered in EVERY profile so local
+    // acceptance exercises the same module graph the host runs. It owns a single
+    // table and never touches commerce data.
+    { resolve: './src/modules/pawshop-customer-auth' },
   ],
   ...(productionMode
     ? {

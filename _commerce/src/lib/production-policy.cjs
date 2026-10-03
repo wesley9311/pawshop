@@ -160,9 +160,14 @@ function validateProductionEnvironment(env) {
   // without credentials the auth module registers emailpass alone, so "google"
   // must not appear here either. This keeps both layers (registered providers and
   // allowed methods) identical to the current production shape when Google is absent.
+  //
+  // `customer` is explicitly emailpass-only: the customer actor must never see the
+  // Google provider, whose callback is hardwired to the admin `/app/login`. Without
+  // this explicit `customer` entry, the default (no allowlist = every registered
+  // provider allowed) would accidentally expose Google to the customer actor.
   const authMethodsPerActor = googleAuth
-    ? { user: ['emailpass', 'google'] }
-    : { user: ['emailpass'] };
+    ? { user: ['emailpass', 'google'], customer: ['emailpass'] }
+    : { user: ['emailpass'], customer: ['emailpass'] };
 
   // PayPal is OPTIONAL at this layer, exactly like Google OAuth: while the owner
   // has not provisioned PayPal developer credentials, all six values are absent
