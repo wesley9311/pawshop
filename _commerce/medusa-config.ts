@@ -28,7 +28,7 @@ module.exports = defineConfig({
   // to it rather than substituted for it.
   modules: [
     ...(productionMode
-      ? productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage, googleAuth: projectConfig.googleAuth, paypal: projectConfig.paypal })
+      ? productionModules({ redisUrl: projectConfig.redisUrl, fileStorage: projectConfig.fileStorage, googleAuth: projectConfig.googleAuth, paypal: projectConfig.paypal, jwtSecret: projectConfig.http.jwtSecret })
       : []),
     { resolve: './src/modules/pawshop-connector' },
     // Customer transactional email idempotency ledger. Registered in EVERY

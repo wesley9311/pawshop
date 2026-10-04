@@ -1,12 +1,15 @@
 'use strict';
 
-function productionModules({ redisUrl, fileStorage, googleAuth, paypal }) {
+function productionModules({ redisUrl, fileStorage, googleAuth, paypal, jwtSecret }) {
   if (typeof redisUrl !== 'string' || !redisUrl) {
     throw new Error('A validated Redis URL is required for production modules.');
   }
   if (!fileStorage?.file_url || !fileStorage?.access_key_id || !fileStorage?.secret_access_key ||
       !fileStorage?.region || !fileStorage?.bucket || !fileStorage?.endpoint) {
     throw new Error('Validated object storage is required for production modules.');
+  }
+  if (typeof jwtSecret !== 'string' || jwtSecret.length < 32) {
+    throw new Error('A validated JWT secret is required to derive the OTP verification HMAC key.');
   }
   // googleAuth is null while the owner has not provisioned the OAuth client; the
   // auth module then registers emailpass alone (current behaviour). When it is set
@@ -80,6 +83,20 @@ function productionModules({ redisUrl, fileStorage, googleAuth, paypal }) {
       resolve: '@medusajs/medusa/auth',
       options: {
         providers: authProviders,
+        // 6-digit numeric OTP verification provider (replaces the built-in
+        // `token` provider's base64url code, which the email relay used to strip
+        // to a pseudo-code that could never confirm). The HMAC secret is derived
+        // from the same validated JWT_SECRET, so no new environment key is
+        // introduced and the 20-key contract stays untouched.
+        verification: {
+          providers: [
+            {
+              resolve: './src/modules/pawshop-otp-verification',
+              id: 'otp',
+              options: { hmac_secret: jwtSecret },
+            },
+          ],
+        },
       },
     },
     // The payment module is declared only when PayPal credentials are present, so

@@ -3,6 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { productionModules } = require('../src/lib/production-modules.cjs');
 
+const JWT_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
 test('production uses Redis for cache, events, workflows, and locks', () => {
   const redisUrl = 'rediss://user:secret@redis.internal:6380/0';
   const fileStorage = {
@@ -10,7 +12,7 @@ test('production uses Redis for cache, events, workflows, and locks', () => {
     secret_access_key: 'fixture-secret-value', region: 'auto', bucket: 'pawshop-media',
     endpoint: 'https://s3.example.com', prefix: 'products/',
   };
-  const modules = productionModules({ redisUrl, fileStorage });
+  const modules = productionModules({ redisUrl, fileStorage, jwtSecret: JWT_SECRET });
   assert.deepEqual(modules.map(module => module.resolve), [
     '@medusajs/medusa/file',
     '@medusajs/medusa/caching',
@@ -27,8 +29,9 @@ test('production uses Redis for cache, events, workflows, and locks', () => {
   // Without Google credentials the auth module registers emailpass alone — the
   // exact provider set current production already has.
   assert.deepEqual(modules[5].options.providers.map(p => p.id), ['emailpass']);
-  assert.throws(() => productionModules({ redisUrl: '', fileStorage }), /validated Redis URL/);
-  assert.throws(() => productionModules({ redisUrl, fileStorage: {} }), /object storage/);
+  assert.throws(() => productionModules({ redisUrl: '', fileStorage, jwtSecret: JWT_SECRET }), /validated Redis URL/);
+  assert.throws(() => productionModules({ redisUrl, fileStorage: {}, jwtSecret: JWT_SECRET }), /object storage/);
+  assert.throws(() => productionModules({ redisUrl, fileStorage }), /JWT secret/);
 });
 
 test('the auth module adds google only when the full credential triple is present', () => {
@@ -38,7 +41,7 @@ test('the auth module adds google only when the full credential triple is presen
     secret_access_key: 'fixture-secret-value', region: 'auto', bucket: 'pawshop-media',
     endpoint: 'https://s3.example.com', prefix: 'products/',
   };
-  const auth = (googleAuth) => productionModules({ redisUrl, fileStorage, googleAuth })
+  const auth = (googleAuth) => productionModules({ redisUrl, fileStorage, googleAuth, jwtSecret: JWT_SECRET })
     .find(m => m.resolve === '@medusajs/medusa/auth');
 
   // Absent / null / empty triple -> emailpass only.
@@ -65,7 +68,7 @@ test('the payment module (and PayPal provider) is registered only when credentia
     secret_access_key: 'fixture-secret-value', region: 'auto', bucket: 'pawshop-media',
     endpoint: 'https://s3.example.com', prefix: 'products/',
   };
-  const payment = (paypal) => productionModules({ redisUrl, fileStorage, paypal })
+  const payment = (paypal) => productionModules({ redisUrl, fileStorage, paypal, jwtSecret: JWT_SECRET })
     .find(m => m.resolve === '@medusajs/medusa/payment');
 
   // Absent / null -> no payment module: the framework default (system provider
