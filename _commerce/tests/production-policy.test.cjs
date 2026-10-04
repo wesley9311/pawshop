@@ -2,7 +2,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { validateProductionEnvironment, CLI_WORKER_OVERRIDE, CLI_WORKER_OVERRIDE_COMMANDS } = require('../src/lib/production-policy.cjs');
-const { CAPTURE_DIR_ENV } = require('../src/lib/verification-email.cjs');
+const {
+  CAPTURE_DIR_ENV, LOOPBACK_ACCEPTANCE_ENV, CAPTURE_DIR_BASE, isLoopbackAcceptanceAllowed,
+} = require('../src/lib/verification-email.cjs');
 const { productionPort } = require('../scripts/production-runtime.cjs');
 const valid = () => ({
   NODE_ENV: 'production', PAWSHOP_MODE: 'production-admin-only',
@@ -205,18 +207,70 @@ test('PayPal is optional but a partial credential set fails closed', () => {
 });
 
 test('the test-only OTP capture transport is forbidden in production', () => {
-  // The capture directory is a loopback acceptance convenience that writes the
-  // 6-digit OTP to a file. A production process must never set it: any value
-  // (even an empty-but-present key) is a fail-closed violation, because writing
-  // customer OTP secrets to disk is exactly what the production path must refuse.
+  // A production process must never set the capture directory or the loopback
+  // acceptance marker — writing customer OTP secrets to disk is what the
+  // production path must refuse. A bare marker (without a fully-valid loopback
+  // acceptance environment) is likewise refused.
   assert.doesNotThrow(() => validateProductionEnvironment(valid()));
   for (const value of ['/tmp/capture', '', '0', 'false']) {
     assert.throws(
       () => validateProductionEnvironment({ ...valid(), [CAPTURE_DIR_ENV]: value }),
-      new RegExp(CAPTURE_DIR_ENV.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      /test-only/,
     );
   }
-  // The variable name is the actual subscriber/environment key, not a hardcoded
-  // string, so this test stays correct if the constant ever changes.
+  // production + loopback marker (no capture, no scratch DB) → reject
+  assert.throws(() => validateProductionEnvironment({ ...valid(), [LOOPBACK_ACCEPTANCE_ENV]: '1' }), /test-only/);
+  // The variable names are the actual subscriber/environment keys, not hardcoded
+  // strings, so this test stays correct if the constants ever change.
   assert.equal(CAPTURE_DIR_ENV, 'PAWSHOP_VERIFICATION_EMAIL_CAPTURE');
+  assert.equal(LOOPBACK_ACCEPTANCE_ENV, 'PAWSHOP_LOOPBACK_ACCEPTANCE');
+});
+
+test('the loopback acceptance contract admits only a fully-valid C3 scratch environment', () => {
+  const scratch = (over = {}) => ({
+    NODE_ENV: 'production',
+    PAWSHOP_MODE: 'production-storefront',
+    PAWSHOP_INFRA_TOPOLOGY: 'single-host-private',
+    DATABASE_URL: 'postgresql://pawshop:private@127.0.0.1:5432/pawshop_looptest?sslmode=disable',
+    REDIS_URL: 'redis://pawshop:private@127.0.0.1:6379/0',
+    JWT_SECRET: 'c'.repeat(64),
+    COOKIE_SECRET: 'd'.repeat(64),
+    STOREFRONT_ORIGIN: 'https://shop.example.com',
+    ADMIN_ORIGIN: 'http://127.0.0.1:9101',
+    S3_FILE_URL: 'https://media.example.com/pawshop',
+    S3_ACCESS_KEY_ID: 'fixture-access-key', S3_SECRET_ACCESS_KEY: 'fixture-secret-value',
+    S3_REGION: 'us-east-1', S3_BUCKET: 'pawshop-media', S3_ENDPOINT: 'https://s3.example.com',
+    S3_DISABLE_ACL: '1',
+    PORT: '9100',
+    [LOOPBACK_ACCEPTANCE_ENV]: '1',
+    [CAPTURE_DIR_ENV]: `${CAPTURE_DIR_BASE}/run`,
+    ...over,
+  });
+
+  // 合法 C3 scratch 环境 → allow
+  assert.equal(isLoopbackAcceptanceAllowed(scratch()), true);
+
+  // 1. production（生产 DB 名 pawshop）→ 非法
+  assert.equal(isLoopbackAcceptanceAllowed(scratch({ DATABASE_URL: 'postgresql://pawshop:private@127.0.0.1:5432/pawshop?sslmode=disable' })), false);
+  // 2. 缺 marker → 非法
+  assert.equal(isLoopbackAcceptanceAllowed(scratch({ [LOOPBACK_ACCEPTANCE_ENV]: '' })), false);
+  assert.equal(isLoopbackAcceptanceAllowed(scratch({ [LOOPBACK_ACCEPTANCE_ENV]: '0' })), false);
+  // 3. port 9000 → 非法
+  assert.equal(isLoopbackAcceptanceAllowed(scratch({ PORT: '9000' })), false);
+  // 4. capture 路径不在 C3 专用目录 → 非法
+  assert.equal(isLoopbackAcceptanceAllowed(scratch({ [CAPTURE_DIR_ENV]: '/tmp/elsewhere' })), false);
+  assert.equal(isLoopbackAcceptanceAllowed(scratch({ [CAPTURE_DIR_ENV]: '/tmp/pawshop-otp-capture-evil' })), false);
+  // 5. 缺 capture dir → 非法
+  assert.equal(isLoopbackAcceptanceAllowed(scratch({ [CAPTURE_DIR_ENV]: '' })), false);
+  // 6. 缺 DATABASE_URL → 非法
+  assert.equal(isLoopbackAcceptanceAllowed(scratch({ DATABASE_URL: '' })), false);
+
+  // validateProductionEnvironment：合法 C3 scratch 环境应通过（不会误伤 loopback 测试）
+  assert.doesNotThrow(() => validateProductionEnvironment(scratch()));
+
+  // 但 production DB + marker + capture 一起出现 → 启动门禁拒绝
+  assert.throws(
+    () => validateProductionEnvironment({ ...valid(), [LOOPBACK_ACCEPTANCE_ENV]: '1', [CAPTURE_DIR_ENV]: `${CAPTURE_DIR_BASE}/run` }),
+    /test-only/,
+  );
 });

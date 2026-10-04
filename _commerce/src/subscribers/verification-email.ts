@@ -1,6 +1,6 @@
 import type { SubscriberArgs, SubscriberConfig } from '@medusajs/framework'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
-import { deliverVerificationEmail, CAPTURE_DIR_ENV } from '../lib/verification-email.cjs'
+import { deliverVerificationEmail, isLoopbackAcceptanceAllowed } from '../lib/verification-email.cjs'
 import { readEmailCredentials } from '../lib/email-channel.cjs'
 
 // auth.verification_requested → deliver the code.
@@ -43,9 +43,12 @@ export default async function verificationEmailHandler({ event, container }: Sub
   }
 
   // Capture transport (loopback acceptance): no relay credentials are read, and
-  // the code goes to the capture directory instead. This path is only reachable
-  // when the environment variable is set, which production never does.
-  const captureEnabled = typeof process.env[CAPTURE_DIR_ENV] === 'string' && process.env[CAPTURE_DIR_ENV]!.trim() !== ''
+  // the code goes to the capture directory instead. This path is reachable ONLY
+  // under the strictly-scoped loopback acceptance contract (marker + non-production
+  // port + scratch DB + dedicated capture dir), which production can never satisfy.
+  // It runs BEFORE readEmailCredentials so real production email credentials are
+  // never read on this path.
+  const captureEnabled = isLoopbackAcceptanceAllowed(process.env)
   if (captureEnabled) {
     const result = await deliverVerificationEmail({ to, code, credentials: null })
     if (result.sent) {

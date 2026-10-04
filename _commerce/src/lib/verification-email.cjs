@@ -36,6 +36,63 @@ const CODE_TTL_MINUTES = 15; // must match the token provider's default TTL (900
 // this path runs, so an accidental misconfiguration is immediately visible.
 const CAPTURE_DIR_ENV = 'PAWSHOP_VERIFICATION_EMAIL_CAPTURE';
 
+// Strictly-scoped loopback acceptance marker. The capture transport is ONLY
+// allowed when this marker is present AND every other guard passes (see
+// `isLoopbackAcceptanceAllowed`). It is a non-secret test signal that exists only
+// in the isolated C3 diag.env; it is never part of the 20-key production contract
+// and the real `commerce.env` must never contain it.
+const LOOPBACK_ACCEPTANCE_ENV = 'PAWSHOP_LOOPBACK_ACCEPTANCE';
+
+// The C3 capture directory must live under this dedicated scratch prefix, so an
+// operator can never point the capture transport at an arbitrary (or production)
+// path and write customer OTP secrets there.
+const CAPTURE_DIR_BASE = '/tmp/pawshop-otp-capture';
+
+// Production database name. The scratch DB is always a different name.
+const PRODUCTION_DB_NAME = 'pawshop';
+
+// The production server port. The isolated loopback acceptance server must bind a
+// different port (127.0.0.1:9100).
+const PRODUCTION_PORT = '9000';
+
+// Parse the database name out of a `postgresql://…/dbname` URL, or '' when it is
+// absent / malformed.
+function extractDatabaseName(databaseUrl) {
+  if (typeof databaseUrl !== 'string' || !databaseUrl) return '';
+  try {
+    const url = new URL(databaseUrl);
+    const name = (url.pathname || '').replace(/^\/+/, '');
+    return name;
+  } catch {
+    return '';
+  }
+}
+
+// Decide whether the capture transport may run, under the Owner-mandated
+// strictly-scoped loopback acceptance contract. EVERY condition must hold; any
+// miss is a fail-closed refusal. `env` is injectable for tests.
+//
+//   1. PAWSHOP_LOOPBACK_ACCEPTANCE === '1'
+//   2. the server binds loopback only — guaranteed by run-production.mjs, which
+//      hard-codes `--host 127.0.0.1` for every production start; there is no env
+//      field that could widen the bind, so the marker + this hard-code together
+//      make a non-loopback bind impossible to reach the capture path.
+//   3. PORT !== '9000' (the production port)
+//   4. the DATABASE_URL database name is not the production `pawshop`
+//   5. the capture directory lives under the dedicated C3 scratch prefix
+//   6. the capture branch runs BEFORE readEmailCredentials (subscriber), so real
+//      production email credentials are never read on this path
+function isLoopbackAcceptanceAllowed(env) {
+  const e = env || process.env;
+  if (e[LOOPBACK_ACCEPTANCE_ENV] !== '1') return false;                 // (1)
+  if (e.PORT === PRODUCTION_PORT) return false;                         // (3)
+  const dbName = extractDatabaseName(e.DATABASE_URL);                   // (4)
+  if (!dbName || dbName === PRODUCTION_DB_NAME) return false;
+  const captureDir = typeof e[CAPTURE_DIR_ENV] === 'string' ? e[CAPTURE_DIR_ENV].trim() : ''; // (5)
+  if (!captureDir || !captureDir.startsWith(CAPTURE_DIR_BASE + '/')) return false;
+  return true;
+}
+
 function escapeHtml(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -100,8 +157,12 @@ function buildVerificationEmail({ to, code, from, fromName = 'Pawlivora', now = 
 // `confirm`. The code file is written with the same discipline as SMTP delivery —
 // only the code and recipient, never a log line.
 async function deliverVerificationEmail({ to, code, credentials, fromName = 'Pawlivora', send = sendMessage }) {
-  const captureDir = typeof process.env[CAPTURE_DIR_ENV] === 'string' ? process.env[CAPTURE_DIR_ENV].trim() : '';
-  if (captureDir) {
+  // The capture transport runs ONLY under the strictly-scoped loopback acceptance
+  // contract (marker + non-production port + scratch DB + dedicated capture dir).
+  // Any condition miss falls through to the normal relay path, where a missing
+  // relay is a refusal — never a code written to disk outside the contract.
+  if (isLoopbackAcceptanceAllowed(process.env)) {
+    const captureDir = String(process.env[CAPTURE_DIR_ENV]).trim();
     const message = buildVerificationEmail({ to, code, from: 'capture@loopback.test', fromName });
     if (!message) return { sent: false, reason: 'invalid recipient address or malformed code' };
     try {
@@ -138,6 +199,11 @@ async function deliverVerificationEmail({ to, code, credentials, fromName = 'Paw
 module.exports = {
   CODE_TTL_MINUTES,
   CAPTURE_DIR_ENV,
+  LOOPBACK_ACCEPTANCE_ENV,
+  CAPTURE_DIR_BASE,
+  PRODUCTION_DB_NAME,
+  PRODUCTION_PORT,
+  isLoopbackAcceptanceAllowed,
   buildVerificationEmail,
   deliverVerificationEmail,
   readEmailCredentials,

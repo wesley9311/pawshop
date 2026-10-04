@@ -1,7 +1,7 @@
 'use strict';
 
 const { commerceIsOpen, isProductionMode } = require('./production-modes.cjs');
-const { CAPTURE_DIR_ENV } = require('./verification-email.cjs');
+const { CAPTURE_DIR_ENV, LOOPBACK_ACCEPTANCE_ENV, isLoopbackAcceptanceAllowed } = require('./verification-email.cjs');
 
 // Medusa's own CLI commands force MEDUSA_WORKER_MODE=server before they load the
 // config, because a CLI invocation is never the long-running worker. That
@@ -93,16 +93,18 @@ function validateProductionEnvironment(env) {
   }
   if (env.JWT_SECRET === env.COOKIE_SECRET) throw new Error('JWT_SECRET and COOKIE_SECRET must be distinct.');
 
-  // Test-only capture transport is forbidden in production. When this key is
-  // present at all, the verification email subscriber writes the 6-digit OTP to a
-  // file on disk instead of handing it to the SMTP relay — that is a loopback
-  // acceptance convenience, and a production process that writes customer OTP
-  // secrets to disk (or ships them anywhere except the SMTP relay) is a
-  // fail-closed violation. The real 20-key `commerce.env` never contains it, but
-  // an accidental mis-set must stop startup rather than silently leak codes. The
-  // check is presence-based (not truthiness), so even an empty string is refused.
-  if (Object.prototype.hasOwnProperty.call(env, CAPTURE_DIR_ENV)) {
-    throw new Error(`${CAPTURE_DIR_ENV} is a test-only capture transport and must not be set in production.`);
+  // Test-only capture transport (and its loopback-acceptance marker) are forbidden
+  // in production EXCEPT under the strictly-scoped C3 loopback acceptance contract.
+  // The real `commerce.env` (20-key contract) never contains either key, and even
+  // if one leaked in, the database name is `pawshop` here so `isLoopbackAcceptanceAllowed`
+  // stays false and startup is refused. Any presence of the marker or the capture
+  // directory that is NOT a fully-valid loopback acceptance environment is a
+  // fail-closed violation — customer OTP secrets must never be written to disk
+  // outside the isolated scratch acceptance environment.
+  const capturePresent = Object.prototype.hasOwnProperty.call(env, CAPTURE_DIR_ENV);
+  const markerPresent = Object.prototype.hasOwnProperty.call(env, LOOPBACK_ACCEPTANCE_ENV);
+  if ((capturePresent || markerPresent) && !isLoopbackAcceptanceAllowed(env)) {
+    throw new Error(`${CAPTURE_DIR_ENV} / ${LOOPBACK_ACCEPTANCE_ENV} are test-only and must not be set outside the isolated loopback acceptance environment.`);
   }
 
   const storeCors = explicitOrigin(env, 'STOREFRONT_ORIGIN');

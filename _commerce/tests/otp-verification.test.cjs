@@ -13,7 +13,7 @@ const {
   normalizeCode,
   digestCode,
 } = require('../src/lib/otp-code.cjs');
-const { buildVerificationEmail, deliverVerificationEmail, CAPTURE_DIR_ENV } = require('../src/lib/verification-email.cjs');
+const { buildVerificationEmail, deliverVerificationEmail, CAPTURE_DIR_ENV, LOOPBACK_ACCEPTANCE_ENV, CAPTURE_DIR_BASE, isLoopbackAcceptanceAllowed } = require('../src/lib/verification-email.cjs');
 
 const PRODUCTION_MODULES_PATH = path.join(__dirname, '..', 'src', 'lib', 'production-modules.cjs');
 const productionModulesSource = fs.readFileSync(PRODUCTION_MODULES_PATH, 'utf8');
@@ -128,53 +128,109 @@ test('verification email REFUSES a 5-digit or 7-digit code', () => {
 
 // ---------- capture transport (loopback acceptance) ----------
 
-test('capture transport writes the real 6-digit code to a file when the env dir is set', async () => {
+// The capture transport now runs ONLY under the strictly-scoped loopback
+// acceptance contract. This helper sets up a fully-valid C3 scratch environment
+// (marker + non-production port + scratch DB + dedicated capture dir) around a
+// body, and restores every touched key afterwards.
+async function withLoopbackAcceptance(captureDir, fn) {
+  const saved = {};
+  const keys = [CAPTURE_DIR_ENV, LOOPBACK_ACCEPTANCE_ENV, 'PORT', 'DATABASE_URL'];
+  for (const k of keys) {
+    saved[k] = process.env[k];
+    if (k === 'DATABASE_URL' && process.env[k] === undefined) {
+      // fall through; only set below if needed
+    }
+  }
+  process.env[LOOPBACK_ACCEPTANCE_ENV] = '1';
+  process.env.PORT = '9100';
+  process.env.DATABASE_URL = 'postgresql://pawshop:private@127.0.0.1:5432/pawshop_looptest?sslmode=disable';
+  process.env[CAPTURE_DIR_ENV] = captureDir;
+  try {
+    return await fn();
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+  }
+}
+
+test('capture transport writes the real 6-digit code to a file under the loopback acceptance contract', async () => {
   const os = require('node:os');
   const fs2 = require('node:fs');
-  const dir = fs2.mkdtempSync(path.join(os.tmpdir(), 'otp-capture-'));
-  const prev = process.env[CAPTURE_DIR_ENV];
-  process.env[CAPTURE_DIR_ENV] = dir;
-  try {
+  // The capture dir must live under the dedicated C3 prefix (CAPTURE_DIR_BASE).
+  const base = fs2.mkdtempSync(path.join(os.tmpdir(), 'pawshop-otp-capture-'));
+  const dir = path.join(base, 'run');
+  fs2.mkdirSync(dir);
+  // CAPTURE_DIR_BASE is '/tmp/pawshop-otp-capture'; the contract requires the dir
+  // to start with that prefix + '/', so point the env at the real prefix by
+  // re-using the fixed base rather than the random suffix.
+  const contractBase = CAPTURE_DIR_BASE;
+  fs2.mkdirSync(path.join(contractBase, 'run'), { recursive: true });
+  const contractDir = path.join(contractBase, 'run');
+  await withLoopbackAcceptance(contractDir, async () => {
     const r = await deliverVerificationEmail({ to: 'buyer@example.com', code: '654321' });
     assert.equal(r.sent, true);
     assert.ok(r.capturedTo, 'capture path reports the file it wrote');
-    const files = fs2.readdirSync(dir).filter((f) => f.endsWith('.code'));
+    const files = fs2.readdirSync(contractDir).filter((f) => f.endsWith('.code'));
     assert.equal(files.length, 1);
-    const content = fs2.readFileSync(path.join(dir, files[0]), 'utf8');
+    const content = fs2.readFileSync(path.join(contractDir, files[0]), 'utf8');
     assert.ok(content.includes('buyer@example.com'), 'file carries the recipient');
     assert.ok(content.includes('654321'), 'file carries the actual 6-digit code');
-  } finally {
-    if (prev === undefined) delete process.env[CAPTURE_DIR_ENV]; else process.env[CAPTURE_DIR_ENV] = prev;
-    fs2.rmSync(dir, { recursive: true, force: true });
-  }
+  });
+  fs2.rmSync(path.join(contractBase, 'run'), { recursive: true, force: true });
+  fs2.rmSync(base, { recursive: true, force: true });
 });
 
 test('capture transport REFUSES a malformed code (never writes a pseudo-code)', async () => {
   const os = require('node:os');
   const fs2 = require('node:fs');
-  const dir = fs2.mkdtempSync(path.join(os.tmpdir(), 'otp-capture-'));
-  const prev = process.env[CAPTURE_DIR_ENV];
-  process.env[CAPTURE_DIR_ENV] = dir;
-  try {
+  const contractBase = CAPTURE_DIR_BASE;
+  fs2.mkdirSync(path.join(contractBase, 'run'), { recursive: true });
+  const dir = path.join(contractBase, 'run');
+  await withLoopbackAcceptance(dir, async () => {
     const r = await deliverVerificationEmail({ to: 'buyer@example.com', code: 'not-a-code' });
     assert.equal(r.sent, false);
     assert.equal(fs2.readdirSync(dir).length, 0, 'no file written for a malformed code');
-  } finally {
-    if (prev === undefined) delete process.env[CAPTURE_DIR_ENV]; else process.env[CAPTURE_DIR_ENV] = prev;
-    fs2.rmSync(dir, { recursive: true, force: true });
-  }
+  });
+  fs2.rmSync(path.join(contractBase, 'run'), { recursive: true, force: true });
 });
 
 test('capture transport is disabled by default (env dir unset → SMTP path)', async () => {
-  const prev = process.env[CAPTURE_DIR_ENV];
+  const saved = { [CAPTURE_DIR_ENV]: process.env[CAPTURE_DIR_ENV], [LOOPBACK_ACCEPTANCE_ENV]: process.env[LOOPBACK_ACCEPTANCE_ENV] };
   delete process.env[CAPTURE_DIR_ENV];
+  delete process.env[LOOPBACK_ACCEPTANCE_ENV];
   try {
     const r = await deliverVerificationEmail({ to: 'buyer@example.com', code: '123456', credentials: null });
-    // No capture dir and no credentials → "no relay", never a capture file.
+    // No capture contract and no credentials → "no relay", never a capture file.
     assert.equal(r.sent, false);
     assert.equal(r.reason, 'no email relay is configured');
   } finally {
-    if (prev !== undefined) process.env[CAPTURE_DIR_ENV] = prev;
+    for (const k of Object.keys(saved)) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+  }
+});
+
+test('capture transport is refused when only the env dir is set (no marker / scratch DB)', async () => {
+  // Regression guard for the strictly-scoped contract: a bare CAPTURE_DIR_ENV
+  // (the old behaviour) must NOT write a code file anymore.
+  const os = require('node:os');
+  const fs2 = require('node:fs');
+  const dir = fs2.mkdtempSync(path.join(os.tmpdir(), 'otp-capture-'));
+  const prev = process.env[CAPTURE_DIR_ENV];
+  const prevMarker = process.env[LOOPBACK_ACCEPTANCE_ENV];
+  process.env[CAPTURE_DIR_ENV] = dir;
+  delete process.env[LOOPBACK_ACCEPTANCE_ENV];
+  try {
+    assert.equal(isLoopbackAcceptanceAllowed(process.env), false);
+    const r = await deliverVerificationEmail({ to: 'buyer@example.com', code: '654321', credentials: null });
+    assert.equal(r.sent, false);
+    assert.equal(r.reason, 'no email relay is configured');
+    assert.equal(fs2.readdirSync(dir).length, 0, 'no code file when the contract is not satisfied');
+  } finally {
+    if (prev === undefined) delete process.env[CAPTURE_DIR_ENV]; else process.env[CAPTURE_DIR_ENV] = prev;
+    if (prevMarker === undefined) delete process.env[LOOPBACK_ACCEPTANCE_ENV]; else process.env[LOOPBACK_ACCEPTANCE_ENV] = prevMarker;
+    fs2.rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -198,11 +254,15 @@ test('the email subscriber delivers for both token and otp providers', () => {
     'subscriber accepts otp in addition to token');
 });
 
-test('the subscriber skips the relay and uses the capture transport when the env dir is set', () => {
-  assert.ok(/CAPTURE_DIR_ENV/.test(subscriberSource), 'subscriber reads the capture env var');
-  assert.ok(/captureEnabled/.test(subscriberSource), 'subscriber branches on capture being enabled');
+test('the subscriber skips the relay and uses the capture transport under the loopback acceptance contract', () => {
+  assert.ok(/isLoopbackAcceptanceAllowed/.test(subscriberSource), 'subscriber gates capture on the loopback acceptance contract');
   assert.ok(/deliverVerificationEmail\(\{ to, code, credentials: null \}\)/.test(subscriberSource),
     'capture path calls deliver with null credentials (no relay read)');
+  // The capture branch must come BEFORE readEmailCredentials so real production
+  // credentials are never read on the capture path.
+  const capIdx = subscriberSource.indexOf('isLoopbackAcceptanceAllowed');
+  const credIdx = subscriberSource.indexOf('readEmailCredentials');
+  assert.ok(capIdx >= 0 && credIdx > capIdx, 'capture gate runs before reading email credentials');
 });
 
 test('the provider enforces a numeric 6-digit code on confirm (never accepts a token)', () => {
