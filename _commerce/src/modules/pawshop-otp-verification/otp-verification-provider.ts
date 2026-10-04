@@ -4,6 +4,7 @@ import type {
   Context,
   Logger,
 } from '@medusajs/framework/types'
+import { AuthVerification } from '@medusajs/auth/dist/models'
 import {
   deriveHmacKey,
   generateOtpCode,
@@ -53,6 +54,14 @@ type InjectedDependencies = {
     create: (data: Record<string, unknown>, sharedContext?: Context) => Promise<Record<string, unknown>>
     update: (data: Record<string, unknown>, sharedContext?: Context) => Promise<Record<string, unknown>>
   }
+  // The auth module's MikroORM base repository, used to run the atomic
+  // conditional claim (UPDATE ... WHERE verified_at IS NULL) that closes the
+  // confirm check-then-update race the built-in token provider also has.
+  baseRepository?: {
+    getActiveManager: (context?: Context) => {
+      nativeUpdate: <E extends object>(entityName: E, where: Record<string, unknown>, data: Record<string, unknown>) => Promise<number>
+    }
+  }
 }
 
 type VerificationRow = {
@@ -66,6 +75,16 @@ type VerificationRow = {
   requested_at: Date
 }
 
+// Drop the internal `provider_metadata` (which holds the keyed HMAC `code_hash`
+// and the internal `requested_at` marker) from any object the provider returns.
+// The workflow only strips `code`/`expires_at` from the HTTP response, so without
+// this the digest would leak to the caller. The persisted row is never touched —
+// only the in-memory return value is sanitized.
+function stripProviderMetadata<T extends Record<string, unknown>>(row: T): Omit<T, 'provider_metadata'> {
+  const { provider_metadata: _omitted, ...rest } = row
+  return rest
+}
+
 class OtpVerificationProvider {
   static identifier = 'otp'
 
@@ -73,11 +92,13 @@ class OtpVerificationProvider {
   private readonly options_: Options
   private readonly hmacKey_: Buffer
   private readonly authVerificationService_: InjectedDependencies['authVerificationService']
+  private readonly baseRepository_: InjectedDependencies['baseRepository']
 
   constructor(container: InjectedDependencies, options: Options = {}) {
     this.logger_ = container.logger ?? (console as unknown as Logger)
     this.options_ = options
     this.authVerificationService_ = container.authVerificationService
+    this.baseRepository_ = container.baseRepository
 
     const secret = options.hmac_secret
     if (!secret || typeof secret !== 'string' || secret.length < 32) {
@@ -123,7 +144,9 @@ class OtpVerificationProvider {
 
     if (existing.length && existing[0].verified_at) {
       // Already verified — return the existing record without issuing a new code.
-      return existing[0] as AuthTypes.RequestAuthVerificationResponse
+      // `provider_metadata` (the keyed HMAC digest) is internal and must never
+      // reach the caller.
+      return stripProviderMetadata(existing[0]) as AuthTypes.RequestAuthVerificationResponse
     }
 
     const code = generateOtpCode()
@@ -159,7 +182,7 @@ class OtpVerificationProvider {
     }
 
     return {
-      ...(verification as unknown as AuthTypes.RequestAuthVerificationResponse),
+      ...(stripProviderMetadata(verification as unknown as AuthTypes.RequestAuthVerificationResponse)),
       code,
       expires_at: expiresAt,
     }
@@ -201,10 +224,36 @@ class OtpVerificationProvider {
       throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Verification code has expired')
     }
 
+    // Atomic one-time claim. The list→check→update sequence above is necessarily
+    // racy (the built-in token provider has the same check-then-update race), so
+    // the final write must be a single conditional UPDATE that only flips
+    // `verified_at` when it is still NULL. Two concurrent confirms of the same
+    // code therefore cannot both succeed: the second conditional update affects
+    // zero rows and is rejected as already-used.
+    const verifiedAt = new Date(Date.now())
+    if (this.baseRepository_) {
+      const manager = this.baseRepository_.getActiveManager(sharedContext)
+      const affected = await manager.nativeUpdate(
+        AuthVerification,
+        { id: verification.id, verified_at: null },
+        { verified_at: verifiedAt },
+      )
+      if (affected === 0) {
+        throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'Verification code is invalid or already used')
+      }
+      return {
+        ...(verification as unknown as AuthTypes.ConfirmAuthVerificationResponse),
+        verified_at: verifiedAt,
+      }
+    }
+
+    // Fallback for contexts where the ORM base repository is unavailable (the
+    // isolated unit harness injects only `authVerificationService`). It keeps the
+    // non-atomic behaviour but is never the production path.
     return await this.authVerificationService_.update(
       {
         id: verification.id,
-        verified_at: new Date(Date.now()),
+        verified_at: verifiedAt,
       },
       sharedContext,
     ) as unknown as AuthTypes.ConfirmAuthVerificationResponse

@@ -272,3 +272,32 @@ test('the provider enforces a numeric 6-digit code on confirm (never accepts a t
   assert.ok(/\[0-9\]\{6\}/.test(require('../src/lib/otp-code.cjs').toString?.() || '') ||
     /normalizeCode\(data\.code\)/.test(providerSource), '6-digit gate is enforced');
 });
+
+// ---------- atomic one-time claim (concurrent confirm) ----------
+
+test('the provider claims verified_at atomically via a conditional native update (no check-then-update race)', () => {
+  // The final write must be a single conditional UPDATE guarded by
+  // `verified_at IS NULL`, and it must check the affected-row count so a second
+  // concurrent confirm of the same code is rejected as already-used.
+  assert.ok(/nativeUpdate/.test(providerSource), 'provider uses nativeUpdate for the atomic claim');
+  assert.ok(/verified_at:\s*null/.test(providerSource), 'the claim is conditional on verified_at being NULL');
+  assert.ok(/affected\s*===?\s*0/.test(providerSource), 'a zero-row claim is rejected (already used)');
+  assert.ok(/getActiveManager/.test(providerSource), 'provider obtains the ORM manager for the conditional update');
+});
+
+test('the provider still guards expiry and code_provider BEFORE the atomic claim', () => {
+  // The expiry and provider-mismatch checks must remain before the atomic write,
+  // so a stale or cross-provider code never reaches the conditional update.
+  const expiredIdx = providerSource.indexOf('Verification code has expired');
+  const claimIdx = providerSource.indexOf('manager.nativeUpdate');
+  assert.ok(expiredIdx >= 0 && claimIdx > expiredIdx, 'expiry check precedes the atomic claim');
+});
+
+test('the provider strips provider_metadata (code_hash) from its request return value', () => {
+  // The workflow only strips code/expires_at from the HTTP response, so the
+  // provider itself must drop provider_metadata (the keyed HMAC digest) from what
+  // it returns, otherwise the digest leaks to the caller.
+  assert.ok(/stripProviderMetadata/.test(providerSource), 'provider sanitizes its return value');
+  assert.ok(/provider_metadata:\s*_omitted/.test(providerSource), 'provider_metadata is destructured away (never returned)');
+  assert.ok(/stripProviderMetadata\(existing\[0\]\)/.test(providerSource), 'already-verified path also strips provider_metadata');
+});
