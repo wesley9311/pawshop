@@ -55,6 +55,35 @@ server {
     proxy_set_header X-Forwarded-Proto https;
   }
 
+  # Customer auth reverse proxy (Rollout D, 2026-10-05). Only the two customer
+  # namespaces are opened, never the whole /auth/: registration/login
+  # (/auth/customer/emailpass{,/register}) and email verification
+  # (/auth/verification/request|confirm). /auth/user/* (admin login) and
+  # /auth/mfa/* stay covered only by the exact admin routes above; there is no
+  # customer entry into mfa. Medusa's own JWT + session + actor checks
+  # authenticate the shopper; this zone (pawshop_customer_login) only bounds
+  # enumeration and brute force at the edge.
+  location /auth/customer/ {
+    limit_req zone=pawshop_customer_login burst=5 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 30s;
+  }
+  location /auth/verification/ {
+    limit_req zone=pawshop_customer_login burst=5 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 30s;
+  }
+
   # Public Store API reverse proxy (P0-4, 2026-09-19). no Basic Auth on purpose:
   # this is the namespace a shopper's own browser calls, and its only credential
   # is the store's publishable key, which is public by design.
