@@ -60,6 +60,25 @@ class PawshopCustomerAuthService extends MedusaService({
     return rowCount > 0
   }
 
+  // Atomically upgrade a guest customer in place: flip `has_account` false→true.
+  // This is the one write that makes the guest→account transition. It uses the
+  // shared PG connection through the module container (the correct accessor), so
+  // the raw update is safe to run here. The WHERE guard `has_account = false`
+  // makes it concurrency-safe: a second concurrent claim for the same customer
+  // updates zero rows, and the caller treats that as already-claimed.
+  async claimGuestCustomer(customerId: string): Promise<boolean> {
+    const knex = this.knex_()
+    const result = await knex.raw(
+      'update "customer" set "has_account" = true, "updated_at" = now() ' +
+        'where "id" = ? and "deleted_at" is null and "has_account" = false',
+      [customerId],
+    )
+    const rowCount = typeof result?.rowCount === 'number'
+      ? result.rowCount
+      : (Array.isArray(result?.rows) ? result.rows.length : 0)
+    return rowCount > 0
+  }
+
   // Read an existing claim for an auth identity (null when none).
   async findClaimByAuthIdentity(authIdentityId: string): Promise<{
     customer_id: string

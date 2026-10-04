@@ -26,9 +26,24 @@ import { normalizeEmail, isClaimableEmail, decideClaim } from '../../../lib/cust
 // reads a customer_id from the request body or query. Claim only ever touches
 // `customer.has_account` + the auth identity's app_metadata; it never alters any
 // order or item snapshot.
+//
+// Verification gate: a claim (guest→account) is only allowed when Medusa's auth
+// module attests the email is verified (a `verification` row with non-null
+// `verified_at`). The route never trusts a client flag, the request email, or the
+// mere presence of a registration token.
 
 type CustomerRow = { id: string; has_account: boolean }
-type Knex = any
+
+type PawshopCustomerAuth = {
+  claimGuestCustomer: (customerId: string) => Promise<boolean>
+  recordClaim: (input: {
+    customerId: string
+    authIdentityId: string
+    email: string
+    claimKind: 'new' | 'guest_claim'
+    now: Date
+  }) => Promise<boolean>
+}
 
 export async function POST(req: MedusaStoreRequest, res: MedusaResponse) {
   if (!commerceIsOpen(process.env.PAWSHOP_MODE)) {
@@ -58,6 +73,8 @@ export async function POST(req: MedusaStoreRequest, res: MedusaResponse) {
   const customerService = req.scope.resolve(Modules.CUSTOMER) as {
     listCustomers: (filters: Record<string, unknown>, config: unknown) => Promise<CustomerRow[]>
   }
+  const pawshopCustomerAuth = (req.scope as any).resolve('pawshopCustomerAuth') as PawshopCustomerAuth
+
   const existing = await customerService.listCustomers({ email }, {})
 
   const decision = decideClaim(existing)
@@ -73,22 +90,40 @@ export async function POST(req: MedusaStoreRequest, res: MedusaResponse) {
   }
 
   if (decision.kind === 'already_claimed') {
-    // Idempotent: the account already exists for this email. The binding below
-    // re-affirms it (a no-op for the same value). No new audit row.
+    // Idempotent: the account already exists for this email. No new customer is
+    // created and no audit row is written. The binding below re-affirms the same
+    // value (a no-op).
     customerId = decision.customerId
     claimKind = 'guest_claim'
   } else if (decision.kind === 'claim') {
-    // CLAIM: upgrade the existing guest customer in place. `has_account` is not a
-    // typed updatable field, so flip it with a raw update against the shared PG
-    // connection (the same mechanism the notification module uses). This is the
-    // one atomic write that makes the guest→account transition.
+    // CLAIM: upgrade the existing guest customer in place. The atomic flip lives
+    // in the customer-auth service (correct PG access via the module container),
+    // not on the request scope. The WHERE guard `has_account = false` makes it
+    // concurrency-safe: a concurrent second claim updates zero rows.
+    //
+    // Verified-email gate: a guest→account claim may only proceed when Medusa's
+    // auth module attests the email is verified (a `verification` row for this
+    // identity + entity_id + entity_type with non-null `verified_at`). This is
+    // the authoritative server-side state — never a client flag, never the
+    // request email, never mere token presence.
+    const authService = req.scope.resolve(Modules.AUTH) as {
+      listAuthVerifications: (filters: Record<string, unknown>) => Promise<Array<{ verified_at?: Date | null }>>
+    }
+    const verifications = await authService.listAuthVerifications({
+      auth_identity_id: authIdentityId,
+      entity_id: email,
+      entity_type: 'customer',
+    })
+    const verified = verifications.some((v) => v.verified_at != null)
+    if (!verified) {
+      return res.status(403).json({
+        type: 'unverified',
+        message: 'Email must be verified before this account can be claimed.',
+      })
+    }
     customerId = decision.customerId
     claimKind = 'guest_claim'
-    const pg = (req.scope as any)[ContainerRegistrationKeys.PG_CONNECTION] as Knex
-    await pg.raw(
-      'update "customer" set "has_account" = true, "updated_at" = now() where "id" = ? and "deleted_at" is null',
-      [customerId],
-    )
+    await pawshopCustomerAuth.claimGuestCustomer(customerId)
     if (body.first_name || body.last_name) {
       await (customerService as any).updateCustomers({
         id: customerId,
@@ -98,7 +133,9 @@ export async function POST(req: MedusaStoreRequest, res: MedusaResponse) {
     }
   } else {
     // create: no existing customer. Run the stock account-creation workflow, which
-    // creates the customer with has_account=true and binds the auth identity.
+    // creates the customer with has_account=true AND binds the auth identity
+    // (setAuthAppMetadataStep inside). Do NOT bind again here — a second
+    // setAuthAppMetadataWorkflow throws "Key customer_id already exists".
     const { result } = await createCustomerAccountWorkflow(req.scope).run({
       input: {
         authIdentityId,
@@ -113,10 +150,11 @@ export async function POST(req: MedusaStoreRequest, res: MedusaResponse) {
     claimKind = 'new'
   }
 
-  // Bind the auth identity to the (possibly pre-existing) customer. For the
-  // `claim` and `already_claimed` paths this is the explicit binding the stock
-  // workflow only does on its own freshly-created customer.
-  try {
+  // Bind the auth identity to the customer ONLY for the claim / already_claimed
+  // paths (the create path was already bound by the stock workflow). The binding
+  // throws when the key already exists with a *different* value — which must not
+  // be silently overwritten.
+  if (claimKind === 'guest_claim') {
     await setAuthAppMetadataWorkflow(req.scope).run({
       input: {
         authIdentityId,
@@ -124,23 +162,9 @@ export async function POST(req: MedusaStoreRequest, res: MedusaResponse) {
         value: customerId,
       },
     })
-  } catch (error) {
-    // The binding step throws when the key already exists with a *different*
-    // value — that would mean this auth identity is already bound to another
-    // customer, which must not be silently overwritten.
-    throw error
   }
 
   // Record the claim in the append-only audit ledger. Idempotent on auth_identity_id.
-  const pawshopCustomerAuth = (req.scope as any).resolve('pawshopCustomerAuth') as {
-    recordClaim: (input: {
-      customerId: string
-      authIdentityId: string
-      email: string
-      claimKind: 'new' | 'guest_claim'
-      now: Date
-    }) => Promise<boolean>
-  }
   await pawshopCustomerAuth.recordClaim({
     customerId,
     authIdentityId,

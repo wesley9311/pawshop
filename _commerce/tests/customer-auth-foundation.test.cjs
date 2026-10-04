@@ -16,6 +16,12 @@ const { buildVerificationEmail } = require('../src/lib/verification-email.cjs');
 
 const ROUTE_PATH = path.join(__dirname, '..', 'src', 'api', 'store', 'customers', 'route.ts');
 const routeSource = fs.readFileSync(ROUTE_PATH, 'utf8');
+const SERVICE_PATH = path.join(__dirname, '..', 'src', 'modules', 'pawshop-customer-auth', 'service.ts');
+const serviceSource = fs.readFileSync(SERVICE_PATH, 'utf8');
+const MIDDLEWARE_PATH = path.join(__dirname, '..', 'src', 'api', 'middlewares.ts');
+const middlewareSource = fs.readFileSync(MIDDLEWARE_PATH, 'utf8');
+const NORMALIZE_PATH = path.join(__dirname, '..', 'src', 'lib', 'normalize-auth-email.cjs');
+const normalizeSource = fs.readFileSync(NORMALIZE_PATH, 'utf8');
 const MIGRATION_PATH = path.join(
   __dirname, '..', 'src', 'modules', 'pawshop-customer-auth', 'migrations', 'Migration20261004000000.ts',
 );
@@ -147,4 +153,37 @@ test('the migration is additive-only (create table / index, no alter/drop of com
   assert.ok(!/alter table/i.test(migrationSource), 'no ALTER TABLE');
   assert.ok(!/drop table\s+"(order|product|customer|cart|payment|fulfillment)"/i.test(migrationSource),
     'never drops a commerce table');
+});
+
+// ---------- C-FIX regression invariants (static) ----------
+
+test('create path does NOT double-bind: setAuthAppMetadataWorkflow only runs for guest_claim', () => {
+  // The binding must be gated on claimKind === 'guest_claim'. The create branch
+  // (createCustomerAccountWorkflow) already binds internally, so the route must
+  // not unconditionally call setAuthAppMetadataWorkflow after every branch.
+  assert.ok(/claimKind === 'guest_claim'/.test(routeSource),
+    'binding is gated on the guest_claim kind');
+  assert.ok(/if \(claimKind === 'guest_claim'\)[\s\S]*?setAuthAppMetadataWorkflow/.test(routeSource),
+    'setAuthAppMetadataWorkflow sits inside the guest_claim gate');
+});
+
+test('claim path delegates the has_account flip to the service (no req.scope PG access)', () => {
+  assert.ok(!/req\.scope\s*\[.*PG_CONNECTION|req\.scope\[ContainerRegistrationKeys\.PG_CONNECTION/.test(routeSource),
+    'route must not read PG_CONNECTION off the request scope');
+  assert.ok(/claimGuestCustomer/.test(routeSource), 'route calls the service claimGuestCustomer');
+  assert.ok(/claimGuestCustomer/.test(serviceSource), 'service exposes claimGuestCustomer');
+});
+
+test('claim path enforces verified email via the auth module (no client trust)', () => {
+  assert.ok(/listAuthVerifications/.test(routeSource), 'route reads Medusa verification state');
+  assert.ok(/verified_at/.test(routeSource), 'route checks the authoritative verified_at');
+  assert.ok(/Modules\.AUTH/.test(routeSource), 'route resolves the auth module');
+  assert.ok(/403/.test(routeSource), 'unverified claim is refused (403)');
+});
+
+test('email normalization middleware normalizes body.email and body.entity_id', () => {
+  assert.ok(/trim\(\)\.toLowerCase\(\)/.test(normalizeSource), 'normalizes via trim + lowercase');
+  assert.ok(/body\.email/.test(normalizeSource), 'normalizes body.email');
+  assert.ok(/body\.entity_id/.test(normalizeSource), 'normalizes body.entity_id');
+  assert.ok(/normalizeAuthEmail/.test(middlewareSource), 'middleware is wired');
 });

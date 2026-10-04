@@ -2,6 +2,7 @@ import { defineMiddlewares, authenticate } from '@medusajs/framework/http'
 import { commerceIsOpen } from '../lib/production-modes.cjs'
 import { validateCartShippingAddress } from '../lib/address-structure.cjs'
 import { verificationRateLimit } from '../lib/verification-rate-limit-middleware.cjs'
+import { normalizeAuthEmail } from '../lib/normalize-auth-email.cjs'
 
 const unavailable = (_req: any, res: any) => {
   res.status(503).json({ type: 'not_allowed', message: 'PawShop storefront APIs are not open.' })
@@ -70,13 +71,27 @@ export default defineMiddlewares({
             method: 'POST' as const,
             middlewares: [authenticate('customer', ['session', 'bearer'], { allowUnregistered: true })],
           },
+          // Canonicalize the email before it reaches emailpass register/login and
+          // before any lookup. This is the single choke point that keeps register /
+          // login / verification / lookup / claim on one address form.
+          {
+            matcher: '/auth/:actor_type/:auth_provider/register',
+            method: 'POST' as const,
+            middlewares: [normalizeAuthEmail],
+          },
+          {
+            matcher: '/auth/:actor_type/:auth_provider',
+            method: 'POST' as const,
+            middlewares: [normalizeAuthEmail],
+          },
           // Verification-code request rate limiting (60s cooldown, 5/hour per
           // email, 20/hour per IP). Only the request route; confirm is unlimited
-          // (a wrong code simply fails the confirm).
+          // (a wrong code simply fails the confirm). Normalization runs first so
+          // the rate-limit key and the delivered code agree on the same address.
           {
             matcher: '/auth/verification/request',
             method: 'POST' as const,
-            middlewares: [verificationRateLimit],
+            middlewares: [normalizeAuthEmail, verificationRateLimit],
           },
         ]
       : []),
