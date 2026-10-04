@@ -1,6 +1,7 @@
 'use strict';
 
 const { commerceIsOpen, isProductionMode } = require('./production-modes.cjs');
+const { CAPTURE_DIR_ENV } = require('./verification-email.cjs');
 
 // Medusa's own CLI commands force MEDUSA_WORKER_MODE=server before they load the
 // config, because a CLI invocation is never the long-running worker. That
@@ -91,6 +92,18 @@ function validateProductionEnvironment(env) {
     if (!/^[a-f0-9]{64}$/i.test(env[field] || '')) throw new Error(`${field} must be a generated 32-byte hex secret.`);
   }
   if (env.JWT_SECRET === env.COOKIE_SECRET) throw new Error('JWT_SECRET and COOKIE_SECRET must be distinct.');
+
+  // Test-only capture transport is forbidden in production. When this key is
+  // present at all, the verification email subscriber writes the 6-digit OTP to a
+  // file on disk instead of handing it to the SMTP relay — that is a loopback
+  // acceptance convenience, and a production process that writes customer OTP
+  // secrets to disk (or ships them anywhere except the SMTP relay) is a
+  // fail-closed violation. The real 20-key `commerce.env` never contains it, but
+  // an accidental mis-set must stop startup rather than silently leak codes. The
+  // check is presence-based (not truthiness), so even an empty string is refused.
+  if (Object.prototype.hasOwnProperty.call(env, CAPTURE_DIR_ENV)) {
+    throw new Error(`${CAPTURE_DIR_ENV} is a test-only capture transport and must not be set in production.`);
+  }
 
   const storeCors = explicitOrigin(env, 'STOREFRONT_ORIGIN');
   const adminCors = explicitOrigin(env, 'ADMIN_ORIGIN', { allowLoopbackHttp: topology === 'single-host-private' });

@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { validateProductionEnvironment, CLI_WORKER_OVERRIDE, CLI_WORKER_OVERRIDE_COMMANDS } = require('../src/lib/production-policy.cjs');
+const { CAPTURE_DIR_ENV } = require('../src/lib/verification-email.cjs');
 const { productionPort } = require('../scripts/production-runtime.cjs');
 const valid = () => ({
   NODE_ENV: 'production', PAWSHOP_MODE: 'production-admin-only',
@@ -201,4 +202,21 @@ test('PayPal is optional but a partial credential set fails closed', () => {
   assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_SANDBOX: 'yes' }), /PAYPAL_SANDBOX/);
   assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_RETURN_URL: 'http://insecure.example.com/x' }), /absolute https/);
   assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_RETURN_URL: 'https://evil.example.com/order/complete' }), /storefront origin/);
+});
+
+test('the test-only OTP capture transport is forbidden in production', () => {
+  // The capture directory is a loopback acceptance convenience that writes the
+  // 6-digit OTP to a file. A production process must never set it: any value
+  // (even an empty-but-present key) is a fail-closed violation, because writing
+  // customer OTP secrets to disk is exactly what the production path must refuse.
+  assert.doesNotThrow(() => validateProductionEnvironment(valid()));
+  for (const value of ['/tmp/capture', '', '0', 'false']) {
+    assert.throws(
+      () => validateProductionEnvironment({ ...valid(), [CAPTURE_DIR_ENV]: value }),
+      new RegExp(CAPTURE_DIR_ENV.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    );
+  }
+  // The variable name is the actual subscriber/environment key, not a hardcoded
+  // string, so this test stays correct if the constant ever changes.
+  assert.equal(CAPTURE_DIR_ENV, 'PAWSHOP_VERIFICATION_EMAIL_CAPTURE');
 });
