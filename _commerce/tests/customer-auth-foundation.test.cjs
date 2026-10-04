@@ -187,3 +187,13 @@ test('email normalization middleware normalizes body.email and body.entity_id', 
   assert.ok(/body\.entity_id/.test(normalizeSource), 'normalizes body.entity_id');
   assert.ok(/normalizeAuthEmail/.test(middlewareSource), 'middleware is wired');
 });
+
+test('verification rate limit evaluates PRIOR requests only (never counts the current one)', () => {
+  // The cooldown must compare against the previous request, not the row just
+  // inserted. If the current request were included, `sinceLast = 0` would reject
+  // even the first request, making verification impossible. The query must bound
+  // `requested_at < now` (strictly before the current request) in addition to the
+  // window lower bound.
+  assert.ok(/requested_at" >= \? and "requested_at" < \?/.test(serviceSource),
+    'the count query excludes the current request via requested_at < now');
+});

@@ -103,6 +103,12 @@ class PawshopCustomerAuthService extends MedusaService({
   //
   // Returns `{ allowed: boolean, retryAfterMs: number }`. The request row is
   // recorded regardless of the decision so the counter is honest.
+  //
+  // IMPORTANT: the decision is evaluated against the requests that arrived BEFORE
+  // this one (`requested_at < now`), never including the row just inserted. If the
+  // current request were counted against itself, the 60s cooldown would see
+  // `sinceLast = 0` and reject every request — including the very first one, which
+  // would make it impossible for any legitimate customer to ever request a code.
   async recordVerificationRequest(input: {
     scope: 'email' | 'ip'
     scopeKey: string
@@ -127,11 +133,15 @@ class PawshopCustomerAuthService extends MedusaService({
       [input.scope, input.scopeKey, cutoff],
     )
 
+    // Count only PRIOR requests strictly inside the window, excluding the row
+    // inserted above (`requested_at < now`). `evaluate` receives the prior
+    // history, so the cooldown compares against the previous request, not the
+    // current one.
     const result = await knex.raw(
       'select "requested_at" from "verification_rate" ' +
-        'where "scope" = ? and "scope_key" = ? and "requested_at" >= ? ' +
+        'where "scope" = ? and "scope_key" = ? and "requested_at" >= ? and "requested_at" < ? ' +
         'order by "requested_at" desc',
-      [input.scope, input.scopeKey, cutoff],
+      [input.scope, input.scopeKey, cutoff, nowIso],
     )
     const times = (Array.isArray(result?.rows) ? result.rows : []).map(
       (r: any) => new Date(r.requested_at).getTime(),
