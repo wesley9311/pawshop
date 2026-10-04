@@ -80,7 +80,7 @@ export async function POST(req: MedusaStoreRequest, res: MedusaResponse) {
   const decision = decideClaim(existing)
 
   let customerId: string
-  let claimKind: 'new' | 'guest_claim'
+  let claimKind: 'new' | 'guest_claim' | 'already_claimed'
 
   if (decision.kind === 'conflict') {
     return res.status(409).json({
@@ -90,11 +90,14 @@ export async function POST(req: MedusaStoreRequest, res: MedusaResponse) {
   }
 
   if (decision.kind === 'already_claimed') {
-    // Idempotent: the account already exists for this email. No new customer is
-    // created and no audit row is written. The binding below re-affirms the same
-    // value (a no-op).
+    // Idempotent: the account already exists for this email and the auth identity
+    // is already bound to it. No new customer is created, no binding is re-run
+    // (setAuthAppMetadataStep throws "Key customer_id already exists" when the key
+    // is already set), and no audit row is written (the original claim already
+    // recorded it). This path exists so a replayed registration token — a
+    // legitimate frontend retry after a timeout — answers idempotently instead of 500.
     customerId = decision.customerId
-    claimKind = 'guest_claim'
+    claimKind = 'already_claimed'
   } else if (decision.kind === 'claim') {
     // CLAIM: upgrade the existing guest customer in place. The atomic flip lives
     // in the customer-auth service (correct PG access via the module container),
@@ -165,13 +168,17 @@ export async function POST(req: MedusaStoreRequest, res: MedusaResponse) {
   }
 
   // Record the claim in the append-only audit ledger. Idempotent on auth_identity_id.
-  await pawshopCustomerAuth.recordClaim({
-    customerId,
-    authIdentityId,
-    email,
-    claimKind,
-    now: new Date(),
-  }).catch(() => undefined) // audit failure must not break registration
+  // The `already_claimed` path writes no audit row: the original claim already
+  // recorded the binding, and a replay is not a new claim.
+  if (claimKind !== 'already_claimed') {
+    await pawshopCustomerAuth.recordClaim({
+      customerId,
+      authIdentityId,
+      email,
+      claimKind,
+      now: new Date(),
+    }).catch(() => undefined) // audit failure must not break registration
+  }
 
   // Re-fetch the customer through the remote query to return the expected shape.
   const remoteQuery = req.scope.resolve(ContainerRegistrationKeys.REMOTE_QUERY) as (

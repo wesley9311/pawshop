@@ -181,6 +181,20 @@ test('claim path enforces verified email via the auth module (no client trust)',
   assert.ok(/403/.test(routeSource), 'unverified claim is refused (403)');
 });
 
+test('already_claimed path is idempotent and does NOT re-run the binding', () => {
+  // A replayed registration token (frontend retry) must answer idempotently, not
+  // 500. The already_claimed branch must be a DISTINCT kind from guest_claim, so
+  // it never re-runs setAuthAppMetadataWorkflow (which throws "Key customer_id
+  // already exists" when the identity is already bound) and never writes a second
+  // audit row.
+  assert.ok(/claimKind\s*[:=]\s*'already_claimed'/.test(routeSource),
+    'already_claimed is a distinct claimKind');
+  assert.ok(/claimKind !== 'already_claimed'/.test(routeSource),
+    'audit is skipped for the already_claimed kind');
+  assert.ok(/'new' \| 'guest_claim' \| 'already_claimed'/.test(routeSource),
+    'the claimKind union includes already_claimed');
+});
+
 test('email normalization middleware normalizes body.email and body.entity_id', () => {
   assert.ok(/trim\(\)\.toLowerCase\(\)/.test(normalizeSource), 'normalizes via trim + lowercase');
   assert.ok(/body\.email/.test(normalizeSource), 'normalizes body.email');
