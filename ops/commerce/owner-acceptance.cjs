@@ -29,10 +29,10 @@ const EMAIL = (process.argv[2] || '376692953@qq.com').trim().toLowerCase();
 
 // ---- interactive prompt (masked for password) ----
 function ask(question, { hidden = false } = {}) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     if (hidden) {
       const stdin = process.stdin;
+      let entered = '';
       const onData = (c) => {
         const k = c.toString();
         if (k === '\n' || k === '\r' || k === '\u0004') {
@@ -46,13 +46,13 @@ function ask(question, { hidden = false } = {}) {
           entered += k;
         }
       };
-      let entered = '';
+      process.stdout.write(question);
       stdin.setRawMode(true);
       stdin.resume();
       stdin.setEncoding('utf8');
-      process.stdout.write(question);
       stdin.on('data', onData);
     } else {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       rl.question(question, (answer) => {
         rl.close();
         resolve(answer.trim());
