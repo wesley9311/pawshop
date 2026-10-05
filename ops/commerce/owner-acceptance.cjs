@@ -153,9 +153,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('');
   console.log(' You will be asked for:');
   console.log('   1. a test password (choose any strong password)');
-  console.log('   2. the 6-digit code from QQ email #2 (the RESEND email)');
-  console.log('   3. the 6-digit code from QQ email #1 (the FIRST email)');
+  console.log('   2. the 6-digit code from QQ email #1 (the FIRST email)');
+  console.log('   3. the 6-digit code from QQ email #2 (the SECOND/RESEND email)');
   console.log('');
+  console.log(' Emails arrive in order. Paste them in that same order when prompted.');
   console.log(' There is a ~61s cooldown wait between the two emails. Everything else is');
   console.log(' automatic. Let us begin.');
   console.log('');
@@ -181,7 +182,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const token = reg.body.token;
 
   // ---------------------------------------------------------------
-  // Step 2 — request OTP #1 (auto). First QQ email (code1).
+  // Step 2 — request OTP #1 (auto). First QQ email (code A).
   // ---------------------------------------------------------------
   console.log('');
   console.log('  → Requesting verification code #1 (check your QQ mailbox)...');
@@ -197,6 +198,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ---------------------------------------------------------------
   // Step 3 — wrong code (auto). Prove a wrong 6-digit code fails.
+  //   (This runs against the code issued in step 2; `000000` cannot match.)
   // ---------------------------------------------------------------
   console.log('');
   console.log('  → Auto-checking that a WRONG code is rejected...');
@@ -204,8 +206,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   record('wrong code → confirm rejected (>=400), never verified', wrong.status >= 400, `confirm=${wrong.status}`);
 
   // ---------------------------------------------------------------
-  // Step 4 — resend (auto + wait). Request OTP #2 invalidates code1.
-  //   The per-email cooldown is 60s; wait it out so the resend is 201.
+  // Step 4 — read code A (owner input, email #1). We HOLD it, do not
+  //   confirm yet, so the resend can invalidate it and prove the rule.
+  // ---------------------------------------------------------------
+  console.log('');
+  console.log('  ⚠️  From your QQ mailbox, open EMAIL #1 (the FIRST one) and copy its code.');
+  const codeA = await ask('  [2/3] Paste the 6-digit code from QQ EMAIL #1 (we will NOT confirm it yet): ');
+  if (!/^[0-9]{6}$/.test(codeA)) {
+    console.log('  ❌ ABORT: the code must be exactly 6 digits.');
+    process.exit(2);
+  }
+
+  // ---------------------------------------------------------------
+  // Step 5 — resend (auto + wait). Request OTP #2 invalidates code A.
   // ---------------------------------------------------------------
   console.log('');
   console.log('  → Waiting ~61s for the resend cooldown, then requesting code #2...');
@@ -226,20 +239,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   record('OTP request #2 (resend) returns 201', true, 'triggered QQ email #2');
 
   // ---------------------------------------------------------------
-  // Step 5 — confirm the REAL (new) code (owner input from email #2).
-  //   This ALSO proves "resend invalidates the old code": right after we
-  //   confirm the new code, the old code is asserted rejected in step 6.
+  // Step 6 — resend invalidates old code (auto). The code A the Owner
+  //   pasted is now stale; confirming it MUST be rejected.
   // ---------------------------------------------------------------
   console.log('');
-  console.log('  ⚠️  IMPORTANT: read the code from your QQ mailbox EMAIL #2 (the resend).');
-  const realCode = await ask('  [2/3] Paste the 6-digit code from your QQ mailbox EMAIL #2: ');
-  if (!/^[0-9]{6}$/.test(realCode)) {
+  console.log('  → Auto-checking that the resend invalidated EMAIL #1 code...');
+  const oldRejected = await confirmOtp(token, codeA);
+  record('resend invalidates old code (email #1 code rejected)', oldRejected.status >= 400, `old→${oldRejected.status}`);
+
+  // ---------------------------------------------------------------
+  // Step 7 — confirm the NEW code (owner input, email #2).
+  // ---------------------------------------------------------------
+  console.log('');
+  console.log('  ⚠️  From your QQ mailbox, open EMAIL #2 (the SECOND/resend one) and copy its code.');
+  const codeB = await ask('  [3/3] Paste the 6-digit code from QQ EMAIL #2 (the resend): ');
+  if (!/^[0-9]{6}$/.test(codeB)) {
     console.log('  ❌ ABORT: the code must be exactly 6 digits.');
     process.exit(2);
   }
   console.log('');
   console.log('  → Confirming the new code...');
-  const confirm = await confirmOtp(token, realCode);
+  const confirm = await confirmOtp(token, codeB);
   const verified = confirm.status === 200 && confirm.body && confirm.body.verified_at;
   record('new code → confirm 200 + verified_at set', verified, `confirm=${confirm.status}`);
 
@@ -249,25 +269,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
 
   // ---------------------------------------------------------------
-  // Step 6 — resend invalidates old code + one-time (auto).
-  //   The Owner pasted the NEW code; the OLD code (email #1) must now be
-  //   rejected, and the NEW code cannot be re-used.
+  // Step 8 — one-time (auto). Re-submit the NEW code → rejected.
   // ---------------------------------------------------------------
   console.log('');
-  console.log('  → Auto-checking resend-invalidates-old + one-time...');
-  const oldCode = await ask('  [3/3] Paste the 6-digit code from your QQ mailbox EMAIL #1 (the OLD code): ');
-  if (!/^[0-9]{6}$/.test(oldCode)) {
-    console.log('  ❌ ABORT: the old code must be exactly 6 digits.');
-    process.exit(2);
-  }
-  const oldRejected = await confirmOtp(token, oldCode);
-  record('resend invalidates old code (email #1 code rejected)', oldRejected.status >= 400, `old→${oldRejected.status}`);
-
-  const replayNew = await confirmOtp(token, realCode);
+  console.log('  → Auto-checking that the new code is one-time...');
+  const replayNew = await confirmOtp(token, codeB);
   record('new code one-time (re-submit rejected)', replayNew.status >= 400, `new→${replayNew.status}`);
 
   // ---------------------------------------------------------------
-  // Step 7 — claim (auto). Guest → account, no duplicate.
+  // Step 9 — claim (auto). Guest → account, no duplicate.
   // ---------------------------------------------------------------
   console.log('');
   console.log('  → Auto-checking claim (guest → account) + no duplicate customer...');
@@ -281,7 +291,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   record('claim replay → idempotent (still one customer)', replayOk, `claimReplay=${claimReplay.status}`);
 
   // ---------------------------------------------------------------
-  // Step 8 — login (auto, uses the same password).
+  // Step 10 — login (auto, uses the same password).
   // ---------------------------------------------------------------
   console.log('');
   console.log('  → Auto-checking login with the test password...');
@@ -291,7 +301,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     `login=${loginRes.status} verification_required=${!!(loginRes.body && loginRes.body.verification_required)}`);
 
   // ---------------------------------------------------------------
-  // Step 9 — authenticated session (auto). The login JWT is the credential.
+  // Step 11 — authenticated session (auto). The login JWT is the credential.
   // ---------------------------------------------------------------
   let meStatus = { status: 0 };
   if (loginRes.body && loginRes.body.token) {
@@ -301,7 +311,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     `me=${meStatus.status}${meStatus.body && meStatus.body.customer ? ' customer=' + meStatus.body.customer.email : ''}`);
 
   // ---------------------------------------------------------------
-  // Step 10 — logout (auto). Stateless JWT: logout = discard the token.
+  // Step 12 — logout (auto). Stateless JWT: logout = discard the token.
   //   Prove the token is the ONLY credential: without it, /me is 401.
   // ---------------------------------------------------------------
   console.log('');
