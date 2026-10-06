@@ -22,9 +22,11 @@
 //         (defaults to 504533680@qq.com)
 
 const https = require('node:https');
+const dns = require('node:dns');
 const readline = require('node:readline');
 
 const BASE = 'https://pawlivora.com';
+const HOST = 'pawlivora.com';
 const EMAIL = (process.argv[2] || '376692953@qq.com').trim().toLowerCase();
 
 // ---- interactive prompt (masked for password) ----
@@ -67,11 +69,24 @@ function ask(question, { hidden = false } = {}) {
 const PUB_KEY = 'pk_f123c6182403217335137418b5094114d8add70aca3991f07f951c9c2c0b908e';
 
 // ---- HTTP helper ----
-// Transport failures (DNS, TCP, TLS, timeout) are surfaced as a rich `error`
-// object instead of a silent `status=0`. Only safe fields are ever shown:
-// error.name / message / code / cause.code / host / phase. Never the password,
-// token, or OTP (none of those are part of a transport error string anyway).
+// Single reliable client for EVERY acceptance request. It mirrors the exact
+// path the owner's verified curl used: `curl -4 --noproxy '*'`. Concretely:
+//   1. Forced IPv4  — family:4 + a custom `lookup` that resolves A records only,
+//      overriding Node's getaddrinfo (which may prefer IPv6 / a proxy).
+//   2. No proxy env — https.request never reads HTTP(S)_PROXY, and we pass a
+//      bare Agent; no env var is consulted.
+//   3. Explicit SNI  — servername = pawlivora.com for correct TLS.
+// Transport failures are surfaced as a rich `error` object (never status=0 with
+// a swallowed cause). Only SAFE fields are printed; password/token/OTP are never
+// part of a transport error and are never logged.
 const REQUEST_TIMEOUT_MS = 15000;
+
+const lookupIPv4 = (hostname, _options, callback) => {
+  dns.lookup(hostname, { family: 4, all: false, verbatim: true }, (err, address) => {
+    if (err) return callback(err);
+    callback(null, address, 4);
+  });
+};
 
 function describeTransportError(e, phase, host) {
   return {
@@ -81,6 +96,10 @@ function describeTransportError(e, phase, host) {
     message: e?.message || String(e || ''),
     code: e?.code || undefined,
     causeCode: e?.cause?.code || undefined,
+    causeErrno: e?.cause?.errno || undefined,
+    causeSyscall: e?.cause?.syscall || undefined,
+    causeAddress: e?.cause?.address || undefined,
+    causePort: e?.cause?.port || undefined,
   };
 }
 
@@ -92,9 +111,13 @@ function request(method, path, { token, body, cookie, headers } = {}) {
     let phase = 'socket';
     const req = https.request({
       hostname: u.hostname,
+      servername: HOST,     // explicit TLS SNI
       port: 443,
       path: u.pathname + u.search,
       method,
+      family: 4,            // force IPv4
+      lookup: lookupIPv4,   // force A-record only, bypass proxy/IPv6
+      agent: new https.Agent({ keepAlive: false, maxSockets: 1 }),
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
@@ -134,6 +157,10 @@ function fmtError(err) {
   const parts = [`${err.name}: ${err.message}`];
   if (err.code) parts.push(`code=${err.code}`);
   if (err.causeCode) parts.push(`cause.code=${err.causeCode}`);
+  if (err.causeErrno) parts.push(`cause.errno=${err.causeErrno}`);
+  if (err.causeSyscall) parts.push(`cause.syscall=${err.causeSyscall}`);
+  if (err.causeAddress) parts.push(`cause.address=${err.causeAddress}`);
+  if (err.causePort) parts.push(`cause.port=${err.causePort}`);
   parts.push(`host=${err.host}`, `phase=${err.phase}`);
   return parts.join(' | ');
 }
@@ -198,12 +225,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('');
 
   // ---------------------------------------------------------------
-  // Step 0 — transport pre-check (read-only GET /health).
-  //   Fail fast with a diagnostic BEFORE asking for any password, so a broken
-  //   network path to pawlivora.com is reported instead of a silent status=0.
+  // Step 0 — transport pre-check (read-only GET /).
+  //   `/health` is a commerce-internal (port 9000) endpoint and is NOT routed
+  //   by public nginx (it returns 404 there). The public, side-effect-free,
+  //   deterministic endpoint is the storefront root `/` (200 HTML). Use that.
+  //   Fail fast with a diagnostic BEFORE asking for any password.
   // ---------------------------------------------------------------
-  console.log('  → Checking transport to pawlivora.com (GET /health)...');
-  const health = await request('GET', '/health');
+  console.log('  → Checking transport to pawlivora.com (GET /)...');
+  const health = await request('GET', '/');
   if (health.status !== 200) {
     console.log(`  ❌ TRANSPORT FAILURE — cannot reach ${BASE}:`);
     console.log(`     ${fmtError(health.error)}`);
@@ -215,10 +244,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     console.log('    - the site is down (check https://pawlivora.com in a browser)');
     console.log('');
     console.log('  Fix the network path, then re-run. This script only talks HTTPS to');
-    console.log('  pawlivora.com on port 443 and does NOT use any proxy env var.');
+    console.log('  pawlivora.com on port 443 over forced IPv4 and does NOT use any proxy.');
     process.exit(3);
   }
-  console.log('  ✅ Transport OK (health 200).');
+  console.log('  ✅ Transport OK (root 200).');
   console.log('');
 
   // ---------------------------------------------------------------
