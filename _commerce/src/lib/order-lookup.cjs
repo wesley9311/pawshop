@@ -75,6 +75,95 @@ const LOOKUP_FULFILLMENT_FIELDS = [
 
 const asIso = (value) => (value ? String(value) : null);
 
+// Serialize a raw `getOrderDetailWorkflow` result into the exact wire shape
+// both order endpoints return — the unauthenticated guest lookup
+// (`order_number` + `email`) and the authenticated account order detail
+// (`Bearer` JWT + order id). Keeping a single serializer guarantees the two
+// paths cannot drift apart: the account view is the same shape the guest
+// lookup already proved, just gated by customer identity instead of the
+// email/order-number pair.
+//
+// The input `detail` is the workflow's `OrderDetailDTO` as typed in the route.
+// Every field is a real Medusa column or an aggregation the workflow already
+// computed (`payment_status` / `fulfillment_status`); nothing here invents
+// data. `fulfillments` is narrowed through `mapFulfillments` so `label_url`
+// and the internal `fulfillment.id` never reach the wire.
+function serializeOrderDetail(detail) {
+  if (!detail || typeof detail !== 'object') return null;
+  const order = detail;
+  const shippingAddress = order.shipping_address ?? null;
+  const shippingMethod = (order.shipping_methods || [])[0] ?? null;
+
+  return {
+    order: {
+      order_number: Number.isFinite(Number(order.display_id)) ? Number(order.display_id) : null,
+      public_order_number: buildPublicOrderNumber(order.display_id, order.created_at),
+      status: typeof order.status === 'string' ? order.status : '',
+      payment_status: order.payment_status ?? null,
+      fulfillment_status: order.fulfillment_status ?? null,
+      currency_code: typeof order.currency_code === 'string' ? order.currency_code : '',
+      total: Number(order.total),
+      created_at: order.created_at ? String(order.created_at) : '',
+      email: typeof order.email === 'string' ? order.email : '',
+      items: (Array.isArray(order.items) ? order.items : []).map((item) => ({
+        title: item.title ?? '',
+        // Defensive fallback: `quantity` is required on the wire. A missing/NaN
+        // quantity serializes `1` rather than `undefined` so the storefront
+        // never renders "undefined × …".
+        quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 1,
+        unit_price: Number(item.unit_price),
+        total: Number(item.total),
+        thumbnail: item.thumbnail ?? null,
+      })),
+      shipping_method: shippingMethod?.name ?? null,
+      shipping_amount: shippingMethod?.amount != null ? Number(shippingMethod.amount) : null,
+      shipping_address: shippingAddress
+        ? {
+            first_name: shippingAddress.first_name ?? null,
+            last_name: shippingAddress.last_name ?? null,
+            address_1: shippingAddress.address_1 ?? null,
+            address_2: shippingAddress.address_2 ?? null,
+            city: shippingAddress.city ?? null,
+            province: shippingAddress.province ?? null,
+            postal_code: shippingAddress.postal_code ?? null,
+            country_code: shippingAddress.country_code ?? null,
+          }
+        : null,
+      fulfillments: mapFulfillments(order.fulfillments),
+    },
+  };
+}
+
+// The `fields` whitelist both order endpoints request from the workflow, so
+// `serializeOrderDetail` has everything it emits. Kept here (rather than split
+// across the two routes) so the shared serializer and the shared field list
+// cannot drift: `labels.label_url` is absent by construction.
+const ORDER_DETAIL_FIELDS = [
+  'id',
+  'display_id',
+  'status',
+  'currency_code',
+  'total',
+  'created_at',
+  'email',
+  'items.title',
+  'items.quantity',
+  'items.unit_price',
+  'items.total',
+  'items.thumbnail',
+  'shipping_methods.name',
+  'shipping_methods.amount',
+  'shipping_address.first_name',
+  'shipping_address.last_name',
+  'shipping_address.address_1',
+  'shipping_address.address_2',
+  'shipping_address.city',
+  'shipping_address.province',
+  'shipping_address.postal_code',
+  'shipping_address.country_code',
+  ...LOOKUP_FULFILLMENT_FIELDS,
+];
+
 // The one and only failure response this route is allowed to produce.
 //
 // Anti-enumeration is a structural property, not a habit: a caller must not be
@@ -136,6 +225,7 @@ module.exports = {
   PUBLIC_PREFIX,
   PUBLIC_PATTERN,
   LOOKUP_FULFILLMENT_FIELDS,
+  ORDER_DETAIL_FIELDS,
   LOOKUP_NOT_FOUND_STATUS,
   LOOKUP_NOT_FOUND_BODY,
   LOOKUP_SERVICE_UNAVAILABLE_STATUS,
@@ -144,4 +234,5 @@ module.exports = {
   parseOrderNumberInput,
   isLookupEmail,
   mapFulfillments,
+  serializeOrderDetail,
 };

@@ -3,15 +3,14 @@ import { refetchEntities } from '@medusajs/framework/http'
 import { getOrderDetailWorkflow } from '@medusajs/core-flows'
 import { commerceIsOpen } from '../../../../lib/production-modes.cjs'
 import {
-  LOOKUP_FULFILLMENT_FIELDS,
+  ORDER_DETAIL_FIELDS,
   LOOKUP_NOT_FOUND_BODY,
   LOOKUP_NOT_FOUND_STATUS,
   LOOKUP_SERVICE_UNAVAILABLE_BODY,
   LOOKUP_SERVICE_UNAVAILABLE_STATUS,
-  buildPublicOrderNumber,
   isLookupEmail,
-  mapFulfillments,
   parseOrderNumberInput,
+  serializeOrderDetail,
 } from '../../../../lib/order-lookup.cjs'
 
 // Guest order lookup: order number + email → verified order summary.
@@ -31,57 +30,9 @@ import {
 //
 // All pure logic — order-number parsing, email validation, the fulfilment wire
 // shape — lives in `lib/order-lookup.cjs` so it can be unit-tested directly.
-// What remains here is I/O: resolve the order, then serialize.
-
-type LookupResponse = {
-  order: {
-    order_number: number
-    public_order_number: string
-    status: string
-    payment_status: string | null
-    fulfillment_status: string | null
-    currency_code: string
-    total: number
-    created_at: string
-    email: string
-    items: Array<{
-      title: string
-      quantity: number
-      unit_price: number
-      total: number
-      thumbnail: string | null
-    }>
-    shipping_method: string | null
-    shipping_amount: number | null
-    shipping_address: {
-      first_name: string | null
-      last_name: string | null
-      address_1: string | null
-      address_2: string | null
-      city: string | null
-      province: string | null
-      postal_code: string | null
-      country_code: string | null
-    } | null
-    // Every fulfillment that belongs to this order, as an array: an order can
-    // be fulfilled in several shipments, so the client must never assume one
-    // package or one tracking number. Timestamps are the real `fulfillment`
-    // columns; the client derives each package's state from them and shows
-    // nothing it was not given. The internal `fulfillment.id` is intentionally
-    // absent — the storefront never uses it.
-    fulfillments: Array<{
-      created_at: string | null
-      packed_at: string | null
-      shipped_at: string | null
-      delivered_at: string | null
-      canceled_at: string | null
-      labels: Array<{
-        tracking_number: string | null
-        tracking_url: string | null
-      }>
-    }>
-  }
-}
+// What remains here is I/O: resolve the order, then serialize through
+// `serializeOrderDetail` (the shared wire shape used by both the guest lookup
+// and the authenticated account order detail).
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   // Closed storefront → the whole customer namespace is unreachable.
@@ -169,38 +120,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       input: {
         order_id: orderId,
         filters: { is_draft_order: false },
-        fields: [
-          'id',
-          'display_id',
-          'status',
-          'currency_code',
-          'total',
-          'created_at',
-          'email',
-          'items.title',
-          'items.quantity',
-          'items.unit_price',
-          'items.total',
-          'items.thumbnail',
-          'shipping_methods.name',
-          'shipping_methods.amount',
-          'shipping_address.first_name',
-          'shipping_address.last_name',
-          'shipping_address.address_1',
-          'shipping_address.address_2',
-          'shipping_address.city',
-          'shipping_address.province',
-          'shipping_address.postal_code',
-          'shipping_address.country_code',
-          // Fulfillment / shipment timeline (Phase 1 logistics). The whitelist is
-          // owned by `lib/order-lookup.cjs`: every entry is a real Medusa column
-          // on `fulfillment` / `fulfillment_label`, nothing derived or invented.
-          // `getOrderDetailWorkflow` already appends `fulfillments.*`, so these
-          // only add the nested `labels` relation that carries the tracking
-          // numbers. `labels.label_url` is absent by construction — it is the
-          // warehouse's shipping-label artifact, not buyer-visible data.
-          ...LOOKUP_FULFILLMENT_FIELDS,
-        ],
+        fields: ORDER_DETAIL_FIELDS,
       },
     });
     orderDetail = result.result;
@@ -213,96 +133,14 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     return res.status(LOOKUP_NOT_FOUND_STATUS).json(LOOKUP_NOT_FOUND_BODY)
   }
 
-  // Narrow the workflow's `OrderDetailDTO` down to the exact shape this route
-  // serializes. `payment_status` / `fulfillment_status` arrive as Medusa's own
-  // aggregated strings; the numeric/date fields arrive as JSON-serialized
-  // primitives from the query graph.
-  const order = orderDetail as unknown as {
-    id: string
-    display_id: number
-    status: string
-    payment_status: string
-    fulfillment_status: string
-    currency_code: string
-    total: number | string
-    created_at: string
-    email: string
-    items: Array<{
-      title: string
-      quantity: number
-      unit_price: number
-      total: number | string
-      thumbnail: string | null
-    }>
-    shipping_methods: Array<{ name: string | null; amount: number | null }> | null
-    shipping_address: {
-      first_name: string | null
-      last_name: string | null
-      address_1: string | null
-      address_2: string | null
-      city: string | null
-      province: string | null
-      postal_code: string | null
-      country_code: string | null
-    } | null
-    fulfillments: Array<{
-      id: string
-      created_at: string | null
-      packed_at: string | null
-      shipped_at: string | null
-      delivered_at: string | null
-      canceled_at: string | null
-      labels: Array<{ tracking_number: string | null; tracking_url: string | null }> | null
-    }> | null
-  }
-
-  const shippingAddress = order.shipping_address ?? null
-  const shippingMethod = (order.shipping_methods || [])[0] ?? null
-
-  // Fulfillments are ordered oldest-first so the client can list the packages
-  // in the order they were created. Only the real columns cross the wire: a
-  // fulfillment with no labels simply carries an empty `labels` array, and the
-  // client shows the timeline without a tracking number rather than inventing
-  // one. `label_url` never leaves the server.
-  const fulfillments = mapFulfillments(order.fulfillments)
-
-  const payload: LookupResponse = {
-    order: {
-      order_number: order.display_id,
-      public_order_number: buildPublicOrderNumber(order.display_id, order.created_at),
-      status: order.status,
-      payment_status: order.payment_status ?? null,
-      fulfillment_status: order.fulfillment_status ?? null,
-      currency_code: order.currency_code,
-      total: Number(order.total),
-      created_at: order.created_at,
-      email: order.email,
-      items: (order.items || []).map((item) => ({
-        title: item.title,
-        // Defensive fallback: `quantity` is required on the wire. If the
-        // workflow ever returns a missing/NaN quantity we serialize `1` rather
-        // than `undefined`, so the storefront never renders "undefined × …".
-        quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 1,
-        unit_price: Number(item.unit_price),
-        total: Number(item.total),
-        thumbnail: item.thumbnail ?? null,
-      })),
-      shipping_method: shippingMethod?.name ?? null,
-      shipping_amount: shippingMethod?.amount != null ? Number(shippingMethod.amount) : null,
-      shipping_address: shippingAddress
-        ? {
-            first_name: shippingAddress.first_name ?? null,
-            last_name: shippingAddress.last_name ?? null,
-            address_1: shippingAddress.address_1 ?? null,
-            address_2: shippingAddress.address_2 ?? null,
-            city: shippingAddress.city ?? null,
-            province: shippingAddress.province ?? null,
-            postal_code: shippingAddress.postal_code ?? null,
-            country_code: shippingAddress.country_code ?? null,
-          }
-        : null,
-      fulfillments,
-    },
+  // Serialize through the shared helper so the guest lookup and the
+  // authenticated account order detail emit the exact same wire shape (the
+  // `order` object the storefront renders). The helper narrows the workflow's
+  // `OrderDetailDTO` and maps fulfilments (dropping `label_url` and the
+  // internal `fulfillment.id`) — see `lib/order-lookup.cjs`.
+  const payload = serializeOrderDetail(orderDetail)
+  if (!payload) {
+    return res.status(LOOKUP_NOT_FOUND_STATUS).json(LOOKUP_NOT_FOUND_BODY)
   }
 
   return res.status(200).json(payload)

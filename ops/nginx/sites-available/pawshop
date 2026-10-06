@@ -83,6 +83,23 @@ server {
     proxy_set_header X-Forwarded-Proto https;
     proxy_read_timeout 30s;
   }
+  # Customer JWT refresh (Account Experience Phase 1, 2026-10-07). The signed-in
+  # storefront refreshes its short-lived JWT through POST /auth/token/refresh
+  # before it expires, so a shopper's session stays valid without re-entering
+  # their password. Same tenant as the other customer auth routes: only this one
+  # namespace is opened (never the whole /auth/), and it is bounded by the same
+  # customer-login rate limit zone. Medusa's authenticate middleware validates the
+  # presented token itself; this zone only bounds token-refresh at the edge.
+  location /auth/token/ {
+    limit_req zone=pawshop_customer_login burst=5 nodelay;
+    limit_req_status 429;
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 30s;
+  }
 
   # Public Store API reverse proxy (P0-4, 2026-09-19). no Basic Auth on purpose:
   # this is the namespace a shopper's own browser calls, and its only credential

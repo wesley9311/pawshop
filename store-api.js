@@ -304,6 +304,9 @@
       var headers = { accept: 'application/json' };
       if (publishableKey) headers['x-publishable-api-key'] = publishableKey;
       if (init && init.body) headers['content-type'] = 'application/json';
+      if (init && init.headers) {
+        for (var h in init.headers) if (Object.prototype.hasOwnProperty.call(init.headers, h)) headers[h] = init.headers[h];
+      }
       var response;
       try {
         response = await fetchImpl(baseUrl + path, {
@@ -316,15 +319,54 @@
         offline.kind = 'network';
         throw offline;
       }
+      return unwrapResponse(response);
+    }
+
+    // Auth endpoints live under `/auth/...` (NOT the `/store` baseUrl): customer
+    // login, JWT refresh and session logout. They carry a Bearer token instead of
+    // the publishable key. `requestAuth` is the same reliable client, just rooted
+    // at the origin and sending only the caller-supplied headers (never the
+    // publishable key, which would be meaningless on an auth route).
+    async function requestAuth(path, init) {
+      if (!fetchImpl) throw new Error('The storefront cannot reach the shop from this browser.');
+      var headers = { accept: 'application/json' };
+      if (init && init.body) headers['content-type'] = 'application/json';
+      if (init && init.headers) {
+        for (var h in init.headers) if (Object.prototype.hasOwnProperty.call(init.headers, h)) headers[h] = init.headers[h];
+      }
+      var response;
+      try {
+        response = await fetchImpl(path, {
+          method: (init && init.method) || 'GET',
+          headers: headers,
+          body: init && init.body ? JSON.stringify(init.body) : undefined,
+        });
+      } catch (cause) {
+        var offline = new Error('The shop could not be reached.');
+        offline.kind = 'network';
+        throw offline;
+      }
+      return unwrapResponse(response);
+    }
+
+    // Turn a raw fetch Response into a parsed JSON payload, or a thrown, typed
+    // failure. Shared by the store and auth clients so the same error contract
+    // (kind: network | not_found | service_unavailable | rejected | unauthorized,
+    // plus Medusa's `type`) reaches every caller.
+    async function unwrapResponse(response) {
       var payload = null;
       try { payload = await response.json(); } catch (_) { payload = null; }
       if (!response.ok) {
         var failure = new Error((payload && payload.message) || ('The shop refused the request (' + response.status + ').'));
-        // 404 → "not found" (an order/cart that does not exist); 5xx → the
+        // 404 → "not found" (an order/cart that does not exist); 401 → the token
+        // is missing/invalid/expired (the caller must re-authenticate); 5xx → the
         // service is broken (a distinct, temporary state the caller shows as
         // "temporarily unavailable", never "not found"); anything else → a
         // generic rejection.
-        failure.kind = response.status === 404 ? 'not_found' : (response.status >= 500 ? 'service_unavailable' : 'rejected');
+        if (response.status === 404) failure.kind = 'not_found';
+        else if (response.status === 401) failure.kind = 'unauthorized';
+        else if (response.status >= 500) failure.kind = 'service_unavailable';
+        else failure.kind = 'rejected';
         failure.status = response.status;
         // Expose Medusa's error `type` (e.g. "invalid_data", "not_found",
         // "not_allowed") so callers can react to a completed/expired cart
@@ -546,6 +588,121 @@
           throw error;
         }
       },
+
+      // ---- customer account (signed-in) ----
+      //
+      // These require the customer JWT returned by login(). The token is the
+      // ONLY credential; it is sent as a Bearer header and never persisted by
+      // this data layer (the caller owns storage). A 401 means the token is
+      // missing/invalid/expired and is surfaced as `kind: 'unauthorized'` so
+      // the caller can drop the token and return to the signed-out state.
+
+      // emailpass login for the customer actor. Resolves to the Medusa auth
+      // payload: `{ token }` on success, or `{ token, verification_required }`
+      // when the email still needs OTP verification before it can act.
+      async login(email, password) {
+        var payload = await requestAuth('/auth/customer/emailpass', {
+          method: 'POST',
+          body: { email: email, password: password },
+        });
+        return payload || null;
+      },
+
+      // Exchange a still-valid JWT for a fresh one before it expires. Keeps a
+      // signed-in session alive without re-entering the password.
+      async refreshToken(token) {
+        var payload = await requestAuth('/auth/token/refresh', {
+          method: 'POST',
+          headers: { authorization: 'Bearer ' + token },
+        });
+        return payload && payload.token ? payload.token : null;
+      },
+
+      // Discard the current session. Stateless JWT: logout simply means the
+      // caller drops the token; this call tells the server to invalidate any
+      // server-side session (cookie) too.
+      async logout(token) {
+        await requestAuth('/auth/session', {
+          method: 'DELETE',
+          headers: token ? { authorization: 'Bearer ' + token } : {},
+        });
+      },
+
+      // The signed-in customer's own profile (id, email, first/last name,
+      // has_account). Resolves to null when not authenticated.
+      async getCurrentCustomer(token) {
+        try {
+          var payload = await request('/customers/me', {
+            headers: { authorization: 'Bearer ' + token },
+          });
+          var customer = payload && payload.customer;
+          if (!customer || typeof customer !== 'object' || !isNonEmptyString(customer.id)) return null;
+          return {
+            id: customer.id,
+            email: isNonEmptyString(customer.email) ? customer.email : '',
+            firstName: isNonEmptyString(customer.first_name) ? customer.first_name : '',
+            lastName: isNonEmptyString(customer.last_name) ? customer.last_name : '',
+            hasAccount: customer.has_account === true,
+          };
+        } catch (error) {
+          if (error && (error.kind === 'unauthorized' || error.kind === 'not_found')) return null;
+          throw error;
+        }
+      },
+
+      // The signed-in customer's own orders, newest first. The server filters by
+      // `customer_id = actor_id`, so this can never return another customer's
+      // order. Resolves to `{ orders, count }`.
+      async listMyOrders(token) {
+        var query = '?fields=' + encodeURIComponent(
+          'id,display_id,email,currency_code,total,status,created_at,summary'
+        );
+        var payload = await request('/orders' + query, {
+          headers: { authorization: 'Bearer ' + token },
+        });
+        var raw = (payload && Array.isArray(payload.orders)) ? payload.orders : [];
+        var out = [];
+        for (var i = 0; i < raw.length; i++) {
+          var order = normalizeOrderSummary(raw[i]);
+          if (order) out.push(order);
+        }
+        out.sort(function (a, b) {
+          return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+        });
+        return { orders: out, count: payload && typeof payload.count === 'number' ? payload.count : out.length };
+      },
+
+      // The signed-in customer's own order detail. The server enforces ownership
+      // (customer_id === actor_id): another customer's order id, or a nonexistent
+      // id, resolves to null (indistinguishable 404). Resolves to the same shape
+      // as the guest lookupOrder, so one renderer serves both paths.
+      async getMyOrder(token, orderId) {
+        try {
+          var payload = await request('/pawshop-orders/' + encodeURIComponent(orderId), {
+            headers: { authorization: 'Bearer ' + token },
+          });
+          return payload && payload.order ? payload.order : null;
+        } catch (error) {
+          if (error && error.kind === 'not_found') return null;
+          throw error;
+        }
+      },
+    };
+  }
+
+  // Normalize a raw order row from GET /store/orders into the summary the
+  // account list renders. Only the fields the list explicitly requested are
+  // read; everything else is ignored.
+  function normalizeOrderSummary(raw) {
+    if (!raw || typeof raw !== 'object' || !isNonEmptyString(raw.id)) return null;
+    return {
+      id: raw.id,
+      orderNumber: typeof raw.display_id === 'number' ? raw.display_id : (Number.isFinite(Number(raw.display_id)) ? Number(raw.display_id) : null),
+      email: isNonEmptyString(raw.email) ? raw.email : '',
+      currencyCode: isNonEmptyString(raw.currency_code) ? raw.currency_code.toLowerCase() : '',
+      total: toAmount(raw.total),
+      status: isNonEmptyString(raw.status) ? raw.status : '',
+      createdAt: isNonEmptyString(raw.created_at) ? raw.created_at : '',
     };
   }
 
@@ -578,6 +735,7 @@
     normalizeShippingMethod: normalizeShippingMethod,
     normalizeShippingOption: normalizeShippingOption,
     normalizeAddress: normalizeAddress,
+    normalizeOrderSummary: normalizeOrderSummary,
     variantAvailability: variantAvailability,
     variantPrice: variantPrice,
     formatMoney: formatMoney,

@@ -7,8 +7,9 @@ import { readFileSync } from 'node:fs';
 // live Medusa catalog and a real guest cart instead of catalog.json. The page
 // scripts run in a minimal DOM with a routed fetch, so the tests can assert
 // exactly which requests the browser is allowed to make -- and, just as
-// importantly, which ones it must never make (no checkout, no payment, no
-// order, no customer account).
+// importantly, which ones it must never make (no checkout completion, no
+// payment, no admin secrets; a customer may sign in but that is their own
+// credential, never an admin/service token).
 const read = name => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
 
 const EMPTY_CATALOG = { products: [], count: 0, offset: 0, limit: 50 };
@@ -375,7 +376,7 @@ test('adding to a cart that got completed mid-session starts a fresh cart and re
   assert.equal(app.nodes.get('cartCount').textContent, 1);
 });
 
-test('checkout writes cart data but can never complete a cart or send customer credentials', async () => {
+test('checkout writes cart data but can never complete a cart or expose admin secrets', async () => {
   const app = bootPawShop({
     routes: {
       'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
@@ -395,11 +396,12 @@ test('checkout writes cart data but can never complete a cart or send customer c
 
   const surface = read('store-api.js') + read('PawShop.html');
   // The hard boundaries: the page may never complete a cart itself (the order
-  // is created only by the provider's webhook), and it may never send customer
-  // credentials (guest lookup needs no account).
+  // is created only by the provider's webhook), and it may never expose admin
+  // secrets. Customer *login* is now legitimate (Account Experience Phase 1:
+  // /auth/customer/emailpass), but that is the shopper's own credential, never
+  // an admin secret or a service token.
   assert.ok(!/\/complete\b/.test(surface), 'no cart completion endpoint');
   assert.ok(!/completeCart/i.test(surface), 'no completeCart reference');
-  assert.ok(!/emailpass|customer\/register/i.test(surface), 'no customer authentication');
   // The system provider must never leak into the storefront.
   assert.ok(!/pp_system/i.test(surface), 'no system payment provider');
 });

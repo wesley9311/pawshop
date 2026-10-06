@@ -34,7 +34,12 @@ const forbidden = [
   // webhook (authorized → complete-cart workflow), which is the guarantee that
   // the page cannot fabricate an order or mark a payment successful on its own.
   ['storefront completes a cart', /\/complete\b|completeCart/i],
-  ['storefront sends customer credentials', /emailpass|customer\/register|\/auth\/customer/i],
+  // Customer login (/auth/customer/emailpass) is now a legitimate storefront
+  // feature (Account Experience Phase 1): the shopper signs in with their OWN
+  // email + password to see their own orders. What must never appear on the
+  // storefront is the ADMIN login namespace (/auth/user/) or any admin/service
+  // credential — those are a completely different trust boundary.
+  ['storefront exposes admin auth', /\/auth\/user\//i],
   // The system provider takes money-less "authorized" payments and would let an
   // order complete without real payment. It must never be referenced on the
   // storefront (or exposed to a customer-facing region).

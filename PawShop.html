@@ -64,6 +64,10 @@
         <button onclick="openWaitlist()" aria-label="Launch information" title="Launch information" data-i18n-a11y="a11y_launch" data-i18n-title="a11y_launch" class="hover:opacity-70">
           <i class="fas fa-headset text-slate-700 text-lg"></i>
         </button>
+        <button onclick="openAccount()" class="relative" aria-label="Account" data-i18n-a11y="a11y_account" title="Account" data-i18n-title="a11y_account">
+          <i class="fas fa-user text-slate-700"></i>
+          <span id="accountDot" class="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full hidden"></span>
+        </button>
         <button onclick="openCart()" class="relative" aria-label="Cart" data-i18n-a11y="a11y_cart">
           <i class="fas fa-shopping-bag text-slate-700"></i>
           <span id="cartCount" class="absolute -top-2 -right-2 w-4 h-4 bg-slate-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">0</span>
@@ -214,6 +218,21 @@
     </div>
     <div class="p-5 space-y-5">
       <div id="orderBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Account Modal ===== -->
+<div id="accountModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-4" onclick="closeAccount()">
+  <div class="bg-white rounded-xl w-full max-w-lg max-h-[94vh] overflow-y-auto" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+      <h3 class="font-bold" id="accountModalTitle" data-i18n="account_title">My account</h3>
+      <button onclick="closeAccount()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close" data-i18n-a11y="a11y_close">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="p-5 space-y-5">
+      <div id="accountBody"></div>
     </div>
   </div>
 </div>
@@ -490,6 +509,7 @@ const I18N = {
     // customer-visible UI chrome, so they belong to the same bilingual table
     // rather than being left as hardcoded English in the markup.
     a11y_cart: 'Cart', a11y_menu: 'Menu', a11y_close: 'Close', a11y_close_cart: 'Close cart',
+    a11y_account: 'Account',
     a11y_launch: 'Launch information',
     a11y_decrease: 'Decrease quantity', a11y_increase: 'Increase quantity',
     a11y_remove: 'Remove item',
@@ -497,6 +517,30 @@ const I18N = {
     footer_copyright: '© 2026 Pawlivora. All rights reserved.',
     lookup_number_ph: 'e.g. 1001', lookup_email_ph: 'you@example.com',
     product_copy_pending: 'Details coming soon',
+    // My account (Account Experience Phase 1).
+    account_title: 'My account',
+    account_signin_note: 'Sign in to see your orders and account details.',
+    account_email: 'Email',
+    account_password: 'Password',
+    account_signin: 'Sign in',
+    account_signing_in: 'Signing in…',
+    account_signin_failed: 'Sign in failed. Check your email and password.',
+    account_password_required: 'Please enter your password.',
+    account_welcome: 'Welcome',
+    account_orders: 'My orders',
+    account_no_orders: 'You have no orders yet.',
+    account_orders_note: 'Your orders are shown below, most recent first.',
+    account_signout: 'Sign out',
+    account_order_id: 'Order',
+    account_order_total: 'Total',
+    account_order_date: 'Placed',
+    account_order_status: 'Status',
+    account_view_order: 'View',
+    account_back_to_orders: 'Back to my orders',
+    account_loading: 'Loading…',
+    account_unavailable: 'Your account could not be loaded. Please try again.',
+    account_token_expired: 'Your session has expired. Please sign in again.',
+    account_verify_note: 'This email still needs to be verified before you can sign in.',
   },
   zh: {
     topbar_note: '所有订单统一运费',
@@ -649,6 +693,7 @@ const I18N = {
     co_pay_redirect: '正在跳转到安全支付…',
     co_pay_error: '无法发起支付，请重试。',
     a11y_cart: '购物车', a11y_menu: '菜单', a11y_close: '关闭', a11y_close_cart: '关闭购物车',
+    a11y_account: '账户',
     a11y_launch: '上线信息',
     a11y_decrease: '减少数量', a11y_increase: '增加数量',
     a11y_remove: '移除商品',
@@ -656,6 +701,30 @@ const I18N = {
     footer_copyright: '© 2026 Pawlivora 版权所有。',
     lookup_number_ph: '例如 1001', lookup_email_ph: 'you@example.com',
     product_copy_pending: '详情即将上线',
+    // 我的账户（账户体验 Phase 1）。
+    account_title: '我的账户',
+    account_signin_note: '登录后可查看您的订单和账户信息。',
+    account_email: '邮箱',
+    account_password: '密码',
+    account_signin: '登录',
+    account_signing_in: '登录中…',
+    account_signin_failed: '登录失败，请检查邮箱和密码。',
+    account_password_required: '请输入密码。',
+    account_welcome: '欢迎',
+    account_orders: '我的订单',
+    account_no_orders: '暂无订单。',
+    account_orders_note: '以下是您的订单，按时间倒序排列。',
+    account_signout: '退出登录',
+    account_order_id: '订单',
+    account_order_total: '总额',
+    account_order_date: '下单时间',
+    account_order_status: '状态',
+    account_view_order: '查看',
+    account_back_to_orders: '返回我的订单',
+    account_loading: '加载中…',
+    account_unavailable: '账户信息加载失败，请重试。',
+    account_token_expired: '登录已过期，请重新登录。',
+    account_verify_note: '该邮箱需先完成验证后才能登录。',
   },
 };
 
@@ -2251,6 +2320,7 @@ document.addEventListener('keydown', function (e) {
     closeProduct();
     closeCheckout();
     closeOrder();
+    closeAccount();
     document.getElementById('waitlistModal').classList.remove('open');
   }
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
@@ -2289,12 +2359,371 @@ async function bootstrap() {
 
 function retryBootstrap() { bootstrap(); }
 
+// ===== My account (Account Experience Phase 1) =====
+// A signed-in customer can see their own profile and orders. The session is a
+// Bearer JWT returned by /auth/customer/emailpass; it is the ONLY credential and
+// is kept in localStorage so a refresh keeps the shopper signed in. The server
+// enforces ownership on every order read (customer_id === actor_id), so the
+// account view can only ever list this customer's own orders.
+const LS_CUSTOMER_TOKEN = 'pawshop_customer_token';
+let customerToken = null;
+let customerAccount = null;        // normalized customer profile (or null)
+let accountBodyKind = 'signed_out'; // signed_out | signed_in | order_detail
+let accountActiveOrder = null;     // the order currently shown in account detail
+let accountRefreshTimer = null;
+
+function readCustomerToken() {
+  try { return localStorage.getItem(LS_CUSTOMER_TOKEN) || null; } catch (_) { return null; }
+}
+function writeCustomerToken(token) {
+  try {
+    if (token) localStorage.setItem(LS_CUSTOMER_TOKEN, token);
+    else localStorage.removeItem(LS_CUSTOMER_TOKEN);
+  } catch (_) { /* storage unavailable — keep token in memory only */ }
+}
+
+function setCustomerSession(token) {
+  customerToken = token || null;
+  writeCustomerToken(token);
+  updateAccountDot();
+  scheduleTokenRefresh();
+}
+
+function updateAccountDot() {
+  const dot = document.getElementById('accountDot');
+  if (dot) dot.classList.toggle('hidden', !customerToken);
+}
+
+function openAccount() {
+  document.getElementById('accountModal').classList.add('open');
+  renderAccount();
+}
+function closeAccount() {
+  if (accountRefreshTimer) { clearTimeout(accountRefreshTimer); accountRefreshTimer = null; }
+  document.getElementById('accountModal').classList.remove('open');
+}
+
+// Render the account modal into its current state: signed-out login form, the
+// signed-in profile + order list, or a single order's detail.
+function renderAccount() {
+  if (customerToken) renderAccountSignedIn();
+  else renderAccountSignIn();
+}
+
+function renderAccountSignIn() {
+  const body = document.getElementById('accountBody');
+  if (!body) return;
+  accountBodyKind = 'signed_out';
+  body.innerHTML = `
+    <div>
+      <p class="text-sm text-slate-500 mb-4">${t('account_signin_note')}</p>
+      <label class="block text-sm font-medium mb-1" for="accountEmail">${t('account_email')}</label>
+      <input type="email" id="accountEmail" autocomplete="email" placeholder="${t('lookup_email_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <label class="block text-sm font-medium mb-1" for="accountPassword">${t('account_password')}</label>
+      <input type="password" id="accountPassword" autocomplete="current-password" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-4 focus:outline-none focus:ring-1 focus:ring-slate-300">
+      <button onclick="submitAccountSignIn()" id="accountSignInBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_signin')}</button>
+      <p id="accountSignInError" class="text-xs text-red-600 mt-3 hidden"></p>
+    </div>`;
+}
+
+async function submitAccountSignIn() {
+  const email = (document.getElementById('accountEmail').value || '').trim().toLowerCase();
+  const password = document.getElementById('accountPassword').value;
+  const errEl = document.getElementById('accountSignInError');
+  const btn = document.getElementById('accountSignInBtn');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast(t('co_email_required')); return; }
+  if (!password) { showToast(t('account_password_required')); return; }
+
+  btn.disabled = true;
+  btn.textContent = t('account_signing_in');
+  if (errEl) errEl.classList.add('hidden');
+
+  try {
+    const result = await store.login(email, password);
+    // Medusa signals a still-unverified email with `verification_required` and
+    // no usable token. It is not a wrong-password: it is "verify first".
+    if (result && result.token) {
+      setCustomerSession(result.token);
+      renderAccountSignedIn();
+    } else {
+      if (errEl) { errEl.textContent = t('account_verify_note'); errEl.classList.remove('hidden'); }
+      else showToast(t('account_verify_note'));
+    }
+  } catch (error) {
+    // A 401 (wrong credentials) and a network failure are both "cannot sign in"
+    // for the buyer — but we never surface the backend's raw message.
+    if (errEl) { errEl.textContent = t('account_signin_failed'); errEl.classList.remove('hidden'); }
+    else showToast(t('account_signin_failed'));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t('account_signin');
+  }
+}
+
+async function renderAccountSignedIn() {
+  const body = document.getElementById('accountBody');
+  if (!body) return;
+  accountBodyKind = 'signed_in';
+  body.innerHTML = `<div class="text-center py-2 text-sm text-slate-500">${t('account_loading')}</div>`;
+
+  // Refresh the profile (and, implicitly, validate the token). On 401 the
+  // token is dead: drop it and fall back to the sign-in form.
+  let account;
+  try {
+    account = await store.getCurrentCustomer(customerToken);
+  } catch (error) {
+    account = null;
+  }
+  if (!account) {
+    // The token no longer authenticates. Try a one-shot refresh; if that also
+    // fails, clear the session so the buyer is not stuck on a dead token.
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      account = await store.getCurrentCustomer(customerToken).catch(() => null);
+    }
+    if (!account) {
+      clearCustomerSession();
+      renderAccountSignIn();
+      showToast(t('account_token_expired'));
+      return;
+    }
+  }
+  customerAccount = account;
+  renderAccountOrderList(account);
+}
+
+function renderAccountOrderList(account) {
+  const body = document.getElementById('accountBody');
+  if (!body) return;
+  accountBodyKind = 'signed_in';
+  body.innerHTML = `
+    <div>
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <div class="text-xs text-slate-500">${t('account_welcome')}</div>
+          <div class="text-sm font-semibold text-slate-900">${safeHtml(account.email || '')}</div>
+        </div>
+        <button onclick="signOutAccount()" class="px-3 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('account_signout')}</button>
+      </div>
+      <h4 class="text-sm font-semibold text-slate-800 mb-2">${t('account_orders')}</h4>
+      <p class="text-xs text-slate-500 mb-4">${t('account_orders_note')}</p>
+      <div id="accountOrdersList" class="text-center py-3 text-sm text-slate-500">${t('account_loading')}</div>
+    </div>`;
+  loadAccountOrders();
+}
+
+async function loadAccountOrders() {
+  const listEl = document.getElementById('accountOrdersList');
+  if (!listEl) return;
+  let result;
+  try {
+    result = await store.listMyOrders(customerToken);
+  } catch (error) {
+    if (error && error.kind === 'unauthorized') {
+      clearCustomerSession();
+      renderAccountSignIn();
+      showToast(t('account_token_expired'));
+      return;
+    }
+    listEl.innerHTML = `<div class="text-sm text-slate-500 py-3">${t('account_unavailable')}</div>`;
+    return;
+  }
+  const orders = (result && result.orders) || [];
+  if (!orders.length) {
+    listEl.innerHTML = `<div class="text-sm text-slate-500 py-4">${t('account_no_orders')}</div>`;
+    return;
+  }
+  listEl.innerHTML = orders.map(order => `
+    <div class="flex items-center justify-between py-3 border-b border-slate-100 last:border-b-0">
+      <div class="min-w-0">
+        <div class="text-sm font-medium text-slate-800">#${order.orderNumber != null ? order.orderNumber : ''}</div>
+        <div class="text-xs text-slate-500 mt-0.5">${safeHtml(formatOrderDate(order.createdAt))} · ${safeHtml(orderStatusLabel(order.status))}</div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-sm font-semibold text-slate-800">${money(order.total)}</span>
+        <button onclick="openAccountOrder('${safeToken(order.id)}')" class="text-xs px-2.5 py-1.5 border border-slate-200 rounded hover:bg-slate-50">${t('account_view_order')}</button>
+      </div>
+    </div>`).join('');
+}
+
+async function openAccountOrder(orderId) {
+  const body = document.getElementById('accountBody');
+  if (!body) return;
+  accountBodyKind = 'order_detail';
+  body.innerHTML = `<div class="text-center py-2 text-sm text-slate-500">${t('account_loading')}</div>`;
+  let order;
+  try {
+    order = await store.getMyOrder(customerToken, orderId);
+  } catch (error) {
+    if (error && error.kind === 'unauthorized') {
+      clearCustomerSession();
+      renderAccountSignIn();
+      showToast(t('account_token_expired'));
+      return;
+    }
+    order = null;
+  }
+  if (!order) {
+    // Ownership mismatch or missing order → the same honest "not found". It is
+    // indistinguishable on purpose (the server returns 404 for both).
+    body.innerHTML = `
+      <div class="text-center py-6">
+        <p class="text-sm text-slate-500 mb-4">${t('order_not_found')}</p>
+        <button onclick="renderAccountSignedIn()" class="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('account_back_to_orders')}</button>
+      </div>`;
+    return;
+  }
+  accountActiveOrder = order;
+  body.innerHTML = accountOrderDetailHtml(order);
+}
+
+// Render an account order's detail reusing the SAME wire shape and helpers as
+// the guest lookup, but with an account-specific back action. The server only
+// ever returns the authenticated customer's own order here.
+function accountOrderDetailHtml(order) {
+  const items = (order.items || []).map(it => `
+    <div class="flex items-center justify-between py-3 border-b border-slate-100 last:border-b-0">
+      <div class="min-w-0">
+        <div class="text-sm text-slate-800">${safeHtml(it.title)}</div>
+        <div class="text-xs text-slate-500 mt-0.5">${t('quantity')} × ${quantityOf(it)}</div>
+      </div>
+      <span class="text-sm font-medium text-slate-800">${money(it.total)}</span>
+    </div>`).join('');
+  const number = order.public_order_number || order.order_number;
+  const addr = order.shipping_address || {};
+  const sectionTitle = (text) => `<h4 class="text-sm font-semibold text-slate-800 mb-3">${text}</h4>`;
+  return `
+    <div>
+      <div class="text-sm text-slate-500 mb-5">${t('order_number')}: ${safeHtml(number)}</div>
+      <section class="mb-6">
+        ${sectionTitle(t('order_items'))}
+        <div class="divide-y divide-slate-100 mb-4">${items}</div>
+        <div class="space-y-3">
+          ${orderField(t('order_status'), safeHtml(orderStatusLabel(order.status)))}
+          ${orderField(t('order_fulfillment_status'), safeHtml(fulfillmentStatusLabel(order.fulfillment_status)))}
+        </div>
+      </section>
+      ${renderShipments(order.fulfillments, sectionTitle)}
+      <section class="mb-6">
+        ${sectionTitle(t('order_shipping_address'))}
+        <div class="space-y-3">
+          ${orderField(t('co_first') + ' / ' + t('co_last'), safeHtml([addr.first_name, addr.last_name].filter(Boolean).join(' ') || '—'))}
+          ${orderField(t('co_address1'), safeHtml(addr.address_1 || '—'))}
+          ${addr.address_2 ? orderField(t('co_address2'), safeHtml(addr.address_2)) : ''}
+          ${orderField(t('co_city') + ' / ' + t('co_province'), safeHtml([addr.city, addr.province].filter(Boolean).join(', ') || '—'))}
+          ${orderField(t('co_postal'), safeHtml(addr.postal_code || '—'))}
+          ${orderField(t('co_country'), safeHtml(addr.country_code ? addr.country_code.toUpperCase() : '—'))}
+        </div>
+      </section>
+      <section class="mb-4">
+        ${sectionTitle(t('order_total'))}
+        <div class="border border-slate-100 rounded-lg divide-y divide-slate-100">
+          <div class="flex items-center justify-between px-4 py-3">
+            <span class="text-sm text-slate-500">${t('order_total')}</span>
+            <span class="text-sm font-semibold">${money(order.total)}</span>
+          </div>
+          ${order.shipping_amount != null ? `<div class="flex items-center justify-between px-4 py-3">
+            <span class="text-sm text-slate-500">${t('order_shipping_method')}</span>
+            <span class="text-sm font-medium">${safeHtml(order.shipping_method || '—')}</span>
+          </div>
+          <div class="flex items-center justify-between px-4 py-3">
+            <span class="text-sm text-slate-500">${t('shipping')}</span>
+            <span class="text-sm font-medium">${money(order.shipping_amount)}</span>
+          </div>` : ''}
+          <div class="flex items-center justify-between px-4 py-3">
+            <span class="text-sm text-slate-500">${t('order_payment_status')}</span>
+            <span class="text-sm font-medium">${safeHtml(paymentStatusLabel(order.payment_status))}</span>
+          </div>
+        </div>
+      </section>
+      <button onclick="renderAccountSignedIn()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_back_to_orders')}</button>
+    </div>`;
+}
+
+function formatOrderDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+async function signOutAccount() {
+  // Stateless JWT: signing out means discarding the token. We also tell the
+  // server to invalidate any server-side session, best-effort (a network
+  // failure here must not trap the buyer in a signed-in state).
+  const token = customerToken;
+  clearCustomerSession();
+  try { if (token) await store.logout(token); } catch (_) { /* best effort */ }
+  renderAccountSignIn();
+}
+
+function clearCustomerSession() {
+  customerToken = null;
+  customerAccount = null;
+  accountActiveOrder = null;
+  writeCustomerToken(null);
+  updateAccountDot();
+  if (accountRefreshTimer) { clearTimeout(accountRefreshTimer); accountRefreshTimer = null; }
+}
+
+// Keep a signed-in session alive: periodically exchange the still-valid JWT for
+// a fresh one before it expires (Medusa's default lifetime is 1d). On success
+// the new token replaces the old; on failure we simply retry later — an expired
+// token surfaces as 401 on the next real call and is handled there.
+function scheduleTokenRefresh() {
+  if (accountRefreshTimer) clearTimeout(accountRefreshTimer);
+  if (!customerToken) return;
+  const delayMs = 30 * 60 * 1000; // 30 minutes, well inside the 1d lifetime
+  accountRefreshTimer = setTimeout(async () => {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) scheduleTokenRefresh();
+  }, delayMs);
+}
+
+async function tryRefreshToken() {
+  if (!customerToken) return false;
+  try {
+    const fresh = await store.refreshToken(customerToken);
+    if (fresh) { customerToken = fresh; writeCustomerToken(fresh); updateAccountDot(); return true; }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+// On page load, restore a persisted session if one exists: validate it against
+// the account endpoint, and refresh it if it has lapsed but is still renewably
+// valid. A dead token is cleared so the account icon reflects the real state.
+async function restoreCustomerSession() {
+  const token = readCustomerToken();
+  if (!token) return;
+  customerToken = token;
+  updateAccountDot();
+  try {
+    const account = await store.getCurrentCustomer(customerToken);
+    if (account) {
+      customerAccount = account;
+      scheduleTokenRefresh();
+      return;
+    }
+  } catch (_) { /* fall through to refresh attempt */ }
+  const refreshed = await tryRefreshToken();
+  if (refreshed) {
+    try {
+      const account = await store.getCurrentCustomer(customerToken);
+      if (account) { customerAccount = account; scheduleTokenRefresh(); return; }
+    } catch (_) { /* fall through to clear */ }
+  }
+  clearCustomerSession();
+}
+
 document.getElementById('langSelect').value = lang;
 applyI18n();
 renderProducts();
 renderCart();
 bootstrap();
 handlePayPalReturn();
+restoreCustomerSession();
 </script>
 
 </body>
