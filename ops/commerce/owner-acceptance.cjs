@@ -67,11 +67,29 @@ function ask(question, { hidden = false } = {}) {
 const PUB_KEY = 'pk_f123c6182403217335137418b5094114d8add70aca3991f07f951c9c2c0b908e';
 
 // ---- HTTP helper ----
+// Transport failures (DNS, TCP, TLS, timeout) are surfaced as a rich `error`
+// object instead of a silent `status=0`. Only safe fields are ever shown:
+// error.name / message / code / cause.code / host / phase. Never the password,
+// token, or OTP (none of those are part of a transport error string anyway).
+const REQUEST_TIMEOUT_MS = 15000;
+
+function describeTransportError(e, phase, host) {
+  return {
+    phase,                 // 'socket' | 'timeout' | 'tls' | 'dns' | 'response'
+    host,                  // target hostname (no path/query, no secrets)
+    name: e?.name || 'Error',
+    message: e?.message || String(e || ''),
+    code: e?.code || undefined,
+    causeCode: e?.cause?.code || undefined,
+  };
+}
+
 function request(method, path, { token, body, cookie, headers } = {}) {
   return new Promise((resolve) => {
     const data = body == null ? null : JSON.stringify(body);
     const u = new URL(BASE + path);
     const isStore = path.startsWith('/store');
+    let phase = 'socket';
     const req = https.request({
       hostname: u.hostname,
       port: 443,
@@ -87,6 +105,7 @@ function request(method, path, { token, body, cookie, headers } = {}) {
         ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
       },
     }, (res) => {
+      phase = 'response';
       let raw = '';
       res.on('data', (c) => (raw += c));
       res.on('end', () => {
@@ -96,10 +115,27 @@ function request(method, path, { token, body, cookie, headers } = {}) {
         resolve({ status: res.statusCode, headers: res.headers, setCookies, body: json, raw });
       });
     });
-    req.on('error', (e) => resolve({ status: 0, error: String(e), body: null, raw: '' }));
+
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      phase = 'timeout';
+      req.destroy(Object.assign(new Error(`request timed out after ${REQUEST_TIMEOUT_MS}ms`), { code: 'ETIMEDOUT' }));
+    });
+    req.on('error', (e) => {
+      resolve({ status: 0, error: describeTransportError(e, phase, u.hostname), body: null, raw: '' });
+    });
     if (data) req.write(data);
     req.end();
   });
+}
+
+// Human-readable transport-error string, safe to print.
+function fmtError(err) {
+  if (!err) return 'unknown transport error';
+  const parts = [`${err.name}: ${err.message}`];
+  if (err.code) parts.push(`code=${err.code}`);
+  if (err.causeCode) parts.push(`cause.code=${err.causeCode}`);
+  parts.push(`host=${err.host}`, `phase=${err.phase}`);
+  return parts.join(' | ');
 }
 
 // ---- report ----
@@ -162,6 +198,30 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('');
 
   // ---------------------------------------------------------------
+  // Step 0 — transport pre-check (read-only GET /health).
+  //   Fail fast with a diagnostic BEFORE asking for any password, so a broken
+  //   network path to pawlivora.com is reported instead of a silent status=0.
+  // ---------------------------------------------------------------
+  console.log('  → Checking transport to pawlivora.com (GET /health)...');
+  const health = await request('GET', '/health');
+  if (health.status !== 200) {
+    console.log(`  ❌ TRANSPORT FAILURE — cannot reach ${BASE}:`);
+    console.log(`     ${fmtError(health.error)}`);
+    console.log('');
+    console.log('  The customer-auth backend was NOT contacted. Nothing was sent, and no');
+    console.log('  account was changed. Possible causes:');
+    console.log('    - pawlivora.com is unreachable from this network (VPN/proxy/DNS)');
+    console.log('    - a local proxy is intercepting HTTPS and returning an error');
+    console.log('    - the site is down (check https://pawlivora.com in a browser)');
+    console.log('');
+    console.log('  Fix the network path, then re-run. This script only talks HTTPS to');
+    console.log('  pawlivora.com on port 443 and does NOT use any proxy env var.');
+    process.exit(3);
+  }
+  console.log('  ✅ Transport OK (health 200).');
+  console.log('');
+
+  // ---------------------------------------------------------------
   // Step 1 — register (auto). Get the actorless token.
   // ---------------------------------------------------------------
   const password = await ask('  [1/3] Enter a test password (input is hidden): ', { hidden: true });
@@ -173,8 +233,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('  → Registering the account...');
   const reg = await register(password);
   if (reg.status !== 200 || !reg.body || !reg.body.token) {
-    record('register returns 200 + actorless token', false, `status=${reg.status} body=${JSON.stringify(reg.body).slice(0, 200)}`);
+    const errDetail = reg.status === 0
+      ? `transport error: ${fmtError(reg.error)}`
+      : `status=${reg.status} body=${JSON.stringify(reg.body).slice(0, 200)}`;
+    record('register returns 200 + actorless token', false, errDetail);
     console.log('  ❌ ABORT: registration failed; cannot continue.');
+    if (reg.status === 0) {
+      console.log(`     ${fmtError(reg.error)}`);
+    }
     process.exit(1);
   }
   const leak1 = responseLeaksCode(reg);
@@ -188,8 +254,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('  → Requesting verification code #1 (check your QQ mailbox)...');
   const reqOtp = await requestOtp(token);
   if (reqOtp.status !== 201) {
-    record('OTP request #1 returns 201', false, `status=${reqOtp.status} body=${JSON.stringify(reqOtp.body).slice(0, 200)}`);
+    const errDetail = reqOtp.status === 0
+      ? `transport error: ${fmtError(reqOtp.error)}`
+      : `status=${reqOtp.status} body=${JSON.stringify(reqOtp.body).slice(0, 200)}`;
+    record('OTP request #1 returns 201', false, errDetail);
     console.log('  ❌ ABORT: OTP request failed.');
+    if (reqOtp.status === 0) console.log(`     ${fmtError(reqOtp.error)}`);
     process.exit(1);
   }
   const leak2 = responseLeaksCode(reqOtp);
@@ -230,8 +300,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     reqOtp2 = await requestOtp(token);
   }
   if (reqOtp2.status !== 201) {
-    record('OTP request #2 (resend) returns 201', false, `status=${reqOtp2.status} body=${JSON.stringify(reqOtp2.body).slice(0, 200)}`);
+    const errDetail = reqOtp2.status === 0
+      ? `transport error: ${fmtError(reqOtp2.error)}`
+      : `status=${reqOtp2.status} body=${JSON.stringify(reqOtp2.body).slice(0, 200)}`;
+    record('OTP request #2 (resend) returns 201', false, errDetail);
     console.log('  ❌ ABORT: resend did not return 201; cannot test invalidation.');
+    if (reqOtp2.status === 0) console.log(`     ${fmtError(reqOtp2.error)}`);
     process.exit(1);
   }
   const leak3 = responseLeaksCode(reqOtp2);
