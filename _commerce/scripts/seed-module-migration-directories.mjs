@@ -51,6 +51,27 @@ for (const entry of readdirSync(modulesDirectory).sort()) {
   seeded.push(target.slice(root.length + 1));
 }
 
+// The project's own custom modules (`src/modules/*`) are compiled by tsc into
+// `.medusa/server/src/modules/*`. tsc only emits `.js` for `.ts` sources — it
+// never copies an empty `migrations/` directory (or a `.gitkeep`), so a custom
+// module that legitimately ships no migrations (e.g. the `otp-email` auth
+// provider, which reuses the framework's `auth_verification` table) ends up
+// without a compiled `migrations/` directory. The migrator still `ensureDir()`s
+// that path for every registered module, so the first `db:migrate` aborts with
+// EACCES on the sealed read-only release. Seed it here, after the build, while
+// the tree is still writable.
+const compiledModulesDirectory = join(root, '_commerce', '.medusa', 'server', 'src', 'modules');
+if (realDirectory(compiledModulesDirectory)) {
+  for (const entry of readdirSync(compiledModulesDirectory).sort()) {
+    const moduleDirectory = join(compiledModulesDirectory, entry);
+    if (!realDirectory(moduleDirectory)) continue;
+    const migrations = join(moduleDirectory, 'migrations');
+    if (realDirectory(migrations)) continue;
+    mkdirSync(migrations, { recursive: true, mode: 0o755 });
+    seeded.push(migrations.slice(root.length + 1));
+  }
+}
+
 console.log(
   `Seeded ${seeded.length} empty module migration directories and left ${kept.length} ` +
   'packages with their own migrations untouched.',
