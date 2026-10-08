@@ -226,7 +226,7 @@
 <div id="accountModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-4" onclick="closeAccount()">
   <div class="bg-white rounded-xl w-full max-w-lg max-h-[94vh] overflow-y-auto" onclick="event.stopPropagation()">
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
-      <h3 class="font-bold" id="accountModalTitle" data-i18n="account_title">My account</h3>
+      <h3 class="font-bold" id="accountModalTitle">My account</h3>
       <button onclick="closeAccount()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close" data-i18n-a11y="a11y_close">
         <i class="fas fa-times"></i>
       </button>
@@ -519,7 +519,13 @@ const I18N = {
     product_copy_pending: 'Details coming soon',
     // My account (Account Experience Phase 1).
     account_title: 'My account',
-    account_signin_note: 'Sign in to see your orders and account details.',
+    account_title_auth: 'Sign in / Register',
+    account_signin_note: 'Sign in with an email code. New accounts are created automatically.',
+    account_has_password: 'Have a password?',
+    account_use_password: 'Use password sign-in',
+    account_use_code: 'Use one-time code',
+    account_forgot_password: 'Forgot password?',
+    account_use_code_login: 'Use one-time code sign-in',
     account_email: 'Email',
     account_password: 'Password',
     account_signin: 'Sign in',
@@ -528,6 +534,9 @@ const I18N = {
     account_password_required: 'Please enter your password.',
     account_welcome: 'Welcome',
     account_orders: 'My orders',
+    account_profile: 'Account profile',
+    account_security: 'Account security',
+    account_security_soon: 'Coming soon',
     account_no_orders: 'You have no orders yet.',
     account_orders_note: 'Your orders are shown below, most recent first.',
     account_signout: 'Sign out',
@@ -723,7 +732,13 @@ const I18N = {
     product_copy_pending: '详情即将上线',
     // 我的账户（账户体验 Phase 1）。
     account_title: '我的账户',
-    account_signin_note: '登录后可查看您的订单和账户信息。',
+    account_title_auth: '登录 / 注册',
+    account_signin_note: '使用邮箱验证码即可登录，新用户验证后会自动创建账户。',
+    account_has_password: '已有密码？',
+    account_use_password: '使用密码登录',
+    account_use_code: '使用验证码登录',
+    account_forgot_password: '忘记密码？',
+    account_use_code_login: '使用验证码登录',
     account_email: '邮箱',
     account_password: '密码',
     account_signin: '登录',
@@ -732,6 +747,9 @@ const I18N = {
     account_password_required: '请输入密码。',
     account_welcome: '欢迎',
     account_orders: '我的订单',
+    account_profile: '账户资料',
+    account_security: '账户安全',
+    account_security_soon: '即将上线',
     account_no_orders: '暂无订单。',
     account_orders_note: '以下是您的订单，按时间倒序排列。',
     account_signout: '退出登录',
@@ -794,6 +812,9 @@ function setLang(l) {
   // Re-render any open modal whose content is built from t() at render time, so
   // switching language never leaves a half-translated checkout or order panel.
   if (document.getElementById('checkoutModal').classList.contains('open')) renderCheckout();
+  // Account modal: its title and body are built from t() at render time. Re-render
+  // it on language switch so the title (登录/注册 vs 我的账户) and form stay correct.
+  if (document.getElementById('accountModal').classList.contains('open')) renderAccount();
   if (document.getElementById('orderModal').classList.contains('open')) {
     switch (orderBodyKind) {
       case 'success': renderOrderSuccess(lastResolvedOrder); break;
@@ -2415,7 +2436,7 @@ let accountRefreshTimer = null;
 // Account Phase 2 OTP state. `otpRegToken` is the actorless registration token
 // that scopes the request/confirm steps; it is transient (never persisted) and
 // cleared whenever the sign-in form re-renders or the user switches tabs.
-let accountAuthTab = 'password';   // 'password' | 'otp'
+let accountAuthTab = 'otp';        // 'otp' (primary) | 'password' (secondary)
 let otpRegToken = null;            // actorless token from otpRegister()
 let otpResendTimer = null;         // 60s resend cooldown handle
 
@@ -2466,19 +2487,26 @@ function renderAccountSignIn() {
   // cancels the resend countdown; the buyer starts a fresh attempt.
   otpRegToken = null;
   if (otpResendTimer) { clearInterval(otpResendTimer); otpResendTimer = null; }
+  // The signed-out title is "Sign in / Register" (OTP is the primary path); the
+  // "My account" title only appears once signed in.
+  setAccountModalTitle(t('account_title_auth'));
   body.innerHTML = `
     <div>
       <p class="text-sm text-slate-500 mb-4">${t('account_signin_note')}</p>
-      <div class="flex gap-2 mb-4" role="tablist">
-        <button id="tabPassword" onclick="switchAccountTab('password')" class="flex-1 py-2 text-sm font-medium rounded-lg border ${accountAuthTab === 'password' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}">${t('account_tab_password')}</button>
-        <button id="tabOtp" onclick="switchAccountTab('otp')" class="flex-1 py-2 text-sm font-medium rounded-lg border ${accountAuthTab === 'otp' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}">${t('account_tab_code')}</button>
-      </div>
       <div id="accountAuthForm"></div>
     </div>`;
   renderAccountAuthForm();
 }
 
-// Render only the active tab's form (password or OTP) inside the shared shell.
+// Set the modal header title (signed-out vs signed-in wording).
+function setAccountModalTitle(text) {
+  const el = document.getElementById('accountModalTitle');
+  if (el) el.textContent = text;
+}
+
+// Render the active auth form. OTP is the visual primary path; password sign-in
+// is a lightweight secondary path reached via a subtle text link (no competing
+// giant CTAs). Only one form is shown at a time.
 function renderAccountAuthForm() {
   const form = document.getElementById('accountAuthForm');
   if (!form) return;
@@ -2496,7 +2524,11 @@ function renderAccountAuthForm() {
           <button onclick="resendOtp()" id="accountResendBtn" class="w-full py-2 text-sm text-slate-600 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed">${t('account_code_resend')}</button>
         </div>
         <button onclick="sendOtp()" id="accountSendBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_code_send')}</button>
-        <p id="accountSendError" class="text-xs text-red-600 mt-3 hidden"></p>
+        <p id="accountSendError" class="text-xs text-red-600 mt-2 hidden"></p>
+      </div>
+      <div class="mt-5 pt-4 border-t border-slate-100 space-y-2">
+        <button onclick="switchAccountTab('password')" class="block text-sm text-slate-500 hover:text-slate-900 underline underline-offset-2">${t('account_has_password')} ${t('account_use_password')}</button>
+        <button onclick="switchAccountTab('password')" class="block text-sm text-slate-500 hover:text-slate-900 underline underline-offset-2">${t('account_forgot_password')} ${t('account_use_code_login')}</button>
       </div>`;
     buildOtpInputs();
   } else {
@@ -2505,9 +2537,12 @@ function renderAccountAuthForm() {
         <label class="block text-sm font-medium mb-1" for="accountEmail">${t('account_email')}</label>
         <input type="email" id="accountEmail" autocomplete="email" placeholder="${t('lookup_email_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
         <label class="block text-sm font-medium mb-1" for="accountPassword">${t('account_password')}</label>
-        <input type="password" id="accountPassword" autocomplete="current-password" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-4 focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <input type="password" id="accountPassword" autocomplete="current-password" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
         <button onclick="submitAccountSignIn()" id="accountSignInBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_signin')}</button>
-        <p id="accountSignInError" class="text-xs text-red-600 mt-3 hidden"></p>
+        <p id="accountSignInError" class="text-xs text-red-600 mt-2 hidden"></p>
+      </div>
+      <div class="mt-5 pt-4 border-t border-slate-100">
+        <button onclick="switchAccountTab('otp')" class="block text-sm text-slate-500 hover:text-slate-900 underline underline-offset-2">${t('account_use_code')}</button>
       </div>`;
   }
 }
@@ -2775,6 +2810,9 @@ async function renderAccountSignedIn() {
   const body = document.getElementById('accountBody');
   if (!body) return;
   accountBodyKind = 'signed_in';
+  // Only now that the customer is signed in does the modal adopt the "My
+  // account" title.
+  setAccountModalTitle(t('account_title'));
   body.innerHTML = `<div class="text-center py-2 text-sm text-slate-500">${t('account_loading')}</div>`;
 
   // Refresh the profile (and, implicitly, validate the token). On 401 the
@@ -2809,18 +2847,64 @@ function renderAccountOrderList(account) {
   accountBodyKind = 'signed_in';
   body.innerHTML = `
     <div>
-      <div class="flex items-center justify-between mb-5">
+      <div class="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
         <div>
-          <div class="text-xs text-slate-500">${t('account_welcome')}</div>
+          <div class="text-xs text-slate-500 mb-0.5">${t('account_email')}</div>
           <div class="text-sm font-semibold text-slate-900">${safeHtml(account.email || '')}</div>
         </div>
-        <button onclick="signOutAccount()" class="px-3 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('account_signout')}</button>
+        <button onclick="signOutAccount()" class="px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">${t('account_signout')}</button>
       </div>
+      <nav class="flex flex-col gap-1 mb-5" aria-label="${t('account_orders')}">
+        <button onclick="renderAccountSignedIn()" class="flex items-center justify-between px-3 py-2.5 text-left text-sm text-slate-700 rounded-lg hover:bg-slate-50">
+          <span class="font-medium">${t('account_orders')}</span>
+          <i class="fas fa-chevron-right text-xs text-slate-400"></i>
+        </button>
+        <button onclick="showAccountProfile()" class="flex items-center justify-between px-3 py-2.5 text-left text-sm text-slate-700 rounded-lg hover:bg-slate-50">
+          <span class="font-medium">${t('account_profile')}</span>
+          <i class="fas fa-chevron-right text-xs text-slate-400"></i>
+        </button>
+        <button onclick="showAccountSecurity()" class="flex items-center justify-between px-3 py-2.5 text-left text-sm text-slate-700 rounded-lg hover:bg-slate-50">
+          <span class="font-medium">${t('account_security')}</span>
+          <span class="text-xs text-slate-400">${t('account_security_soon')}</span>
+        </button>
+      </nav>
       <h4 class="text-sm font-semibold text-slate-800 mb-2">${t('account_orders')}</h4>
       <p class="text-xs text-slate-500 mb-4">${t('account_orders_note')}</p>
       <div id="accountOrdersList" class="text-center py-3 text-sm text-slate-500">${t('account_loading')}</div>
     </div>`;
   loadAccountOrders();
+}
+
+// Account profile (read-only for now): show the signed-in email and a note that
+// password management arrives with Account Security.
+function showAccountProfile() {
+  const body = document.getElementById('accountBody');
+  if (!body || !customerAccount) return;
+  accountBodyKind = 'signed_in';
+  body.innerHTML = `
+    <div>
+      <div class="text-xs text-slate-500 mb-0.5">${t('account_email')}</div>
+      <div class="text-sm font-semibold text-slate-900 mb-5">${safeHtml(customerAccount.email || '')}</div>
+      <button onclick="renderAccountOrderList(customerAccount)" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_back_to_orders')}</button>
+    </div>`;
+}
+
+// Account security placeholder: no fake reset-password flow exists yet. This
+// panel is intentionally read-only until ACCOUNT SECURITY / PASSWORD MANAGEMENT
+// is built.
+function showAccountSecurity() {
+  const body = document.getElementById('accountBody');
+  if (!body) return;
+  accountBodyKind = 'signed_in';
+  body.innerHTML = `
+    <div class="text-center py-4">
+      <div class="w-10 h-10 mx-auto mb-3 rounded-lg bg-slate-100 flex items-center justify-center">
+        <i class="fas fa-shield-alt text-slate-400"></i>
+      </div>
+      <p class="text-sm font-semibold text-slate-800 mb-1">${t('account_security')}</p>
+      <p class="text-xs text-slate-500 mb-5">${t('account_security_soon')}</p>
+      <button onclick="renderAccountOrderList(customerAccount)" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_back_to_orders')}</button>
+    </div>`;
 }
 
 async function loadAccountOrders() {

@@ -1386,27 +1386,55 @@ test('a PayPal cancel renders "payment not completed" in Chinese', async () => {
 
 // ---- Account Phase 2: OTP (one-time code) sign-in / fast sign-up ----
 
-test('the account modal offers separate password and one-time-code tabs', async () => {
+test('the account modal defaults to the code path with password sign-in as a secondary link', async () => {
   const app = bootPawShop();
   await app.settle();
   app.run('renderAccountSignIn()');
   const html = app.nodes.get('accountBody').innerHTML;
-  assert.ok(html.includes('tabPassword'), 'a password tab is rendered');
-  assert.ok(html.includes('tabOtp'), 'an OTP tab is rendered');
-  assert.ok(html.includes('account_tab_password') === false, 'the label is resolved, not a raw key');
+  assert.ok(!html.includes('tabPassword') && !html.includes('tabOtp'), 'no competing tab shell is rendered');
+  const form = app.run("document.getElementById('accountAuthForm').innerHTML");
+  assert.ok(form.includes('accountSendBtn'), 'the code path is the default form');
+  assert.ok(form.includes("switchAccountTab('password')"), 'password sign-in is offered as a secondary link');
+  assert.ok(html.includes('account_tab_password') === false, 'labels are resolved, not raw keys');
+  assert.equal(
+    app.run("document.getElementById('accountModalTitle').textContent"),
+    'Sign in / Register',
+    'the signed-out title is Sign in / Register',
+  );
 });
 
-test('switching to the OTP tab shows the code form and hides the password form', async () => {
+test('switching to the password path shows the password form with a link back to the code path', async () => {
   const app = bootPawShop();
   await app.settle();
-  app.run("switchAccountTab('otp')");
+  app.run("switchAccountTab('password')");
   // The mock DOM keeps innerHTML as a raw string; assert on the composed body.
-  const body = app.nodes.get('accountBody').innerHTML;
   const form = app.run("document.getElementById('accountAuthForm').innerHTML");
-  assert.ok(form.includes('otpCodeArea'), 'the OTP code area is present');
-  assert.ok(form.includes('accountSendBtn'), 'the send-code button is present');
-  assert.ok(!form.includes('accountSignInBtn'), 'the password submit button is not in the OTP tab');
-  assert.ok(body.includes('tabOtp'), 'the tab shell renders the OTP tab');
+  assert.ok(form.includes('accountSignInBtn'), 'the password submit button is present');
+  assert.ok(!form.includes('otpCodeArea'), 'the OTP code area is not in the password form');
+  assert.ok(form.includes("switchAccountTab('otp')"), 'a link back to the code path is offered');
+});
+
+test('the signed-in view shows the account menu and the My account title', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/customers/me': () => ({ status: 200, body: { customer: { id: 'cus_1', email: 'buyer@example.com' } } }),
+      'GET /store/orders': () => ({ status: 200, body: { orders: [], count: 0 } }),
+    },
+  });
+  await app.settle();
+  await app.run('renderAccountSignedIn()');
+  const html = app.nodes.get('accountBody').innerHTML;
+  assert.equal(
+    app.run("document.getElementById('accountModalTitle').textContent"),
+    'My account',
+    'the signed-in title is My account',
+  );
+  assert.ok(html.includes('buyer@example.com'), 'the current email is shown');
+  assert.ok(html.includes('My orders'), 'the orders entry is present');
+  assert.ok(html.includes('Account profile'), 'the profile entry is present');
+  assert.ok(html.includes('Account security'), 'the security entry is present');
+  assert.ok(html.includes('Sign out'), 'sign out is present');
+  assert.ok(!html.includes('accountSendBtn'), 'no sign-in form is shown while signed in');
 });
 
 test('sending an OTP registers the identity, requests a code, and reveals the code inputs', async () => {
