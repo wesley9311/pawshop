@@ -20,7 +20,10 @@ const action = process.argv[5];
 // opening actions close nothing: `open-upgrade` opens the window in which an
 // existing database may be migrated onto a new release, and `rollback-disable`
 // returns the gate to its fail-closed state after a failed activation.
-const GATE_ACTIONS = ['enable', 'rollback-disable', 'open-upgrade'];
+// `abort-upgrade` closes the gate after a FAILED upgrade that produced no schema
+// or data mutation — it is the evidence-independent escape from the open-gate
+// deadlock, and it must never be confused with `enable` (activation).
+const GATE_ACTIONS = ['enable', 'rollback-disable', 'open-upgrade', 'abort-upgrade'];
 
 if (!/^[0-9a-f]{40}$/.test(releaseId || '') || !/^[0-9a-f]{64}$/.test(contentSha256 || '') ||
     release !== `/srv/pawshop-commerce/releases/${releaseId}` || !GATE_ACTIONS.includes(action)) {
@@ -34,6 +37,16 @@ if (action === 'enable') {
   execFileSync('/usr/bin/node', [
     join(release, '_commerce/scripts/verify-release-evidence.mjs'), releaseId, contentSha256,
   ], { stdio: 'ignore' });
+} else if (action === 'abort-upgrade') {
+  // Abort-upgrade closes the gate WITHOUT migration evidence, but only after an
+  // independent check proves the failed migration produced no mutation: the
+  // candidate was never activated and the live database still matches the
+  // pre-upgrade relation snapshot. This is the formal, non-manual escape from
+  // the open-gate deadlock that a failed upgrade otherwise leaves behind.
+  execFileSync('/usr/bin/node', [
+    join(release, '_commerce/scripts/verify-abort-upgrade-preconditions.mjs'),
+    releaseId, '/etc/pawshop/commerce.env',
+  ], { stdio: 'inherit' });
 }
 
 const environmentPath = '/etc/pawshop/commerce.env';
@@ -41,8 +54,8 @@ const pawshopGid = Number(execFileSync('/usr/bin/id', ['-g', 'pawshop'], { encod
 assertProductionEnvironmentFileStat(lstatSync(environmentPath), pawshopGid);
 const source = readFileSync(environmentPath, 'utf8');
 const parsed = parseProductionEnvironmentFile(source);
-const from = action === 'enable' ? '0' : '1';
-const to = action === 'enable' ? '1' : '0';
+const from = (action === 'enable' || action === 'abort-upgrade') ? '0' : '1';
+const to = (action === 'enable' || action === 'abort-upgrade') ? '1' : '0';
 if (parsed.PAWSHOP_MIGRATIONS_CONFIRMED !== from) {
   throw new Error(`Production migration gate must be ${from} before ${action}.`);
 }
@@ -75,5 +88,6 @@ const GATE_MESSAGES = {
   enable: 'Production migration gate enabled for the exact evidence-backed release.',
   'rollback-disable': 'Production migration gate returned to fail-closed state after unsuccessful first activation.',
   'open-upgrade': 'Production migration gate opened for an upgrade of the running production database.',
+  'abort-upgrade': 'Production migration gate closed after aborting a failed upgrade (database proven unchanged).',
 };
 console.log(GATE_MESSAGES[action]);

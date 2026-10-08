@@ -169,6 +169,30 @@ test('first activation changes the migration gate atomically and can fail closed
   assert.doesNotMatch(migrationGateWriter, /source .*commerce|\. .*commerce/);
 });
 
+test('abort-upgrade closes the gate only after an independent no-mutation check', () => {
+  // A failed upgrade leaves the gate open with no evidence, so `enable` (which
+  // requires evidence) cannot recover it. `abort-upgrade` is the evidence-
+  // independent escape, but it must be a distinct action that proves the failed
+  // migration produced no schema/data mutation before flipping the gate back.
+  assert.match(migrationGateWriter, /abort-upgrade/);
+  assert.match(migrationGateWriter, /verify-abort-upgrade-preconditions\.mjs/);
+  assert.match(migrationGateWriter, /releaseId, '\/etc\/pawshop\/commerce\.env'/);
+  assert.match(migrationGateWriter, /'abort-upgrade': 'Production migration gate closed after aborting a failed upgrade/);
+  // abort-upgrade flips 0 -> 1 exactly like enable, but never runs the evidence
+  // verifier (that is the enable-only path).
+  const enableIdx = migrationGateWriter.indexOf("action === 'enable'");
+  const abortIdx = migrationGateWriter.indexOf("action === 'abort-upgrade'");
+  assert.ok(enableIdx >= 0 && abortIdx > enableIdx, 'abort-upgrade is a separate branch from enable');
+  // The preconditions helper itself must be evidence-independent and mutation-proving.
+  const abortHelper = readFileSync(resolve(root, '_commerce/scripts/verify-abort-upgrade-preconditions.mjs'), 'utf8');
+  assert.match(abortHelper, /is already the active release/);
+  assert.match(abortHelper, /no pre-upgrade relation snapshot is present/);
+  assert.match(abortHelper, /live database differs from the pre-upgrade snapshot/);
+  assert.match(abortHelper, /parseRelationsSnapshot/);
+  assert.match(abortHelper, /query_to_xml/);
+  assert.match(abortHelper, /currentId === releaseId/);
+});
+
 test('first production migration is exact-release, empty-database, and fail-closed', () => {
   assert.match(firstMigration, /PAWSHOP_FIRST_MIGRATION_CONFIRMED/);
   assert.match(firstMigration, /production database is not empty/);
@@ -356,6 +380,17 @@ test('release preparation seeds the module migration directories MikroORM needs'
     writeFileSync(join(modules, 'stray.js'), '');
     symlinkSync(linkedTarget, join(modules, 'linked'));
 
+    // The project's own compiled custom modules: an auth provider without any
+    // migration must still get an empty migrations/ directory so the migrator's
+    // ensureDir is a no-op on the sealed read-only release (Phase 2 otp-email).
+    const customModules = join(fixture, '_commerce', '.medusa', 'server', 'src', 'modules');
+    mkdirSync(join(customModules, 'pawshop-otp-email-auth'), { recursive: true });
+    writeFileSync(join(customModules, 'pawshop-otp-email-auth', 'index.js'), '');
+    mkdirSync(join(customModules, 'pawshop-customer-auth', 'migrations'), { recursive: true });
+    writeFileSync(join(customModules, 'pawshop-customer-auth', 'migrations', 'Migration.js'), '');
+    mkdirSync(join(customModules, 'pawshop-otp-verification'), { recursive: true });
+    writeFileSync(join(customModules, 'pawshop-otp-verification', 'index.js'), '');
+
     const run = spawnSync(process.execPath, [seederPath, fixture], { encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
 
@@ -372,7 +407,12 @@ test('release preparation seeds the module migration directories MikroORM needs'
     // Symlinks are not followed and non-directories are ignored.
     assert.deepEqual(readdirSync(linkedTarget), []);
     assert.equal(existsSync(join(fixture, '_commerce', 'node_modules', '@medusajs', 'stray.js', 'migrations')), false);
-    assert.match(run.stdout, /Seeded 2 empty module migration directories/);
+    // A custom module with no migrations gets an empty compiled migrations/ directory.
+    assert.deepEqual(readdirSync(join(customModules, 'pawshop-otp-email-auth', 'migrations')), []);
+    assert.deepEqual(readdirSync(join(customModules, 'pawshop-otp-verification', 'migrations')), []);
+    // A custom module that declares its own migrations keeps them untouched.
+    assert.deepEqual(readdirSync(join(customModules, 'pawshop-customer-auth', 'migrations')), ['Migration.js']);
+    assert.match(run.stdout, /Seeded 4 empty module migration directories/);
 
     // Anything that is not a prepared release is refused rather than guessed at.
     for (const refused of [linkedTarget, join(fixture, 'missing'), 'relative/path']) {
