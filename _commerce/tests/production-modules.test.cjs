@@ -26,9 +26,13 @@ test('production uses Redis for cache, events, workflows, and locks', () => {
   assert.equal(modules[2].options.redisUrl, redisUrl);
   assert.equal(modules[3].options.redis.redisUrl, redisUrl);
   assert.equal(modules[4].options.providers[0].options.redisUrl, redisUrl);
-  // Without Google credentials the auth module registers emailpass alone — the
-  // exact provider set current production already has.
-  assert.deepEqual(modules[5].options.providers.map(p => p.id), ['emailpass']);
+  // Without Google credentials the auth module registers emailpass + otp-email.
+  // `otp-email` is the passwordless one-time-code provider added in Account
+  // Phase 2; it is always registered alongside emailpass (no credential gate —
+  // its HMAC key derives from the validated JWT_SECRET).
+  assert.deepEqual(modules[5].options.providers.map(p => p.id), ['emailpass', 'otp-email']);
+  assert.equal(modules[5].options.providers[1].resolve, './src/modules/pawshop-otp-email-auth');
+  assert.deepEqual(modules[5].options.providers[1].options, { hmac_secret: JWT_SECRET });
   assert.throws(() => productionModules({ redisUrl: '', fileStorage, jwtSecret: JWT_SECRET }), /validated Redis URL/);
   assert.throws(() => productionModules({ redisUrl, fileStorage: {}, jwtSecret: JWT_SECRET }), /object storage/);
   assert.throws(() => productionModules({ redisUrl, fileStorage }), /JWT secret/);
@@ -44,19 +48,19 @@ test('the auth module adds google only when the full credential triple is presen
   const auth = (googleAuth) => productionModules({ redisUrl, fileStorage, googleAuth, jwtSecret: JWT_SECRET })
     .find(m => m.resolve === '@medusajs/medusa/auth');
 
-  // Absent / null / empty triple -> emailpass only.
-  assert.deepEqual(auth(undefined).options.providers.map(p => p.id), ['emailpass']);
-  assert.deepEqual(auth(null).options.providers.map(p => p.id), ['emailpass']);
-  assert.deepEqual(auth({}).options.providers.map(p => p.id), ['emailpass']);
+  // Absent / null / empty triple -> emailpass + otp-email (no google).
+  assert.deepEqual(auth(undefined).options.providers.map(p => p.id), ['emailpass', 'otp-email']);
+  assert.deepEqual(auth(null).options.providers.map(p => p.id), ['emailpass', 'otp-email']);
+  assert.deepEqual(auth({}).options.providers.map(p => p.id), ['emailpass', 'otp-email']);
 
-  // Full triple -> emailpass + google, google carries its resolved options.
+  // Full triple -> emailpass + otp-email + google, google carries its resolved options.
   const googleAuth = {
     clientId: '1234-abc.apps.googleusercontent.com',
     clientSecret: 'a'.repeat(24),
     callbackUrl: 'https://pawlivora.com/app/login',
   };
   const withGoogle = auth(googleAuth).options.providers;
-  assert.deepEqual(withGoogle.map(p => p.id), ['emailpass', 'google']);
+  assert.deepEqual(withGoogle.map(p => p.id), ['emailpass', 'otp-email', 'google']);
   const google = withGoogle.find(p => p.id === 'google');
   assert.deepEqual(google.options, googleAuth);
 });

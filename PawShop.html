@@ -541,6 +541,26 @@ const I18N = {
     account_unavailable: 'Your account could not be loaded. Please try again.',
     account_token_expired: 'Your session has expired. Please sign in again.',
     account_verify_note: 'This email still needs to be verified before you can sign in.',
+    // Account Phase 2 — password login vs OTP (quick sign-in / fast sign-up).
+    account_tab_password: 'Password',
+    account_tab_code: 'One-time code',
+    account_code_note: 'We\'ll email you a 6-digit code. No password needed.',
+    account_code_send: 'Send code',
+    account_code_sending: 'Sending…',
+    account_code_sent: 'Code sent. Check your inbox.',
+    account_code_enter: 'Enter the 6-digit code we emailed you.',
+    account_code_placeholder: '000000',
+    account_code_verify: 'Verify & sign in',
+    account_code_verifying: 'Verifying…',
+    account_code_resend: 'Resend code',
+    account_code_resend_in: 'Resend in ',
+    account_code_seconds: 's',
+    account_code_invalid: 'That code is incorrect or has expired. Please try again.',
+    account_code_required: 'Please enter the 6-digit code.',
+    account_code_rate_limited: 'Too many attempts. Please wait a moment and try again.',
+    account_register_success: 'Your account is ready. Welcome!',
+    account_register_failed: 'We could not create your account. Please try again.',
+    account_otp_unavailable: 'One-time sign-in is temporarily unavailable. Please try again.',
   },
   zh: {
     topbar_note: '所有订单统一运费',
@@ -725,6 +745,26 @@ const I18N = {
     account_unavailable: '账户信息加载失败，请重试。',
     account_token_expired: '登录已过期，请重新登录。',
     account_verify_note: '该邮箱需先完成验证后才能登录。',
+    // 账户 Phase 2 —— 密码登录 vs 验证码（快速登录 / 快速注册）。
+    account_tab_password: '密码登录',
+    account_tab_code: '验证码登录',
+    account_code_note: '我们会向您发送一个 6 位验证码，无需密码。',
+    account_code_send: '发送验证码',
+    account_code_sending: '发送中…',
+    account_code_sent: '验证码已发送，请查收邮件。',
+    account_code_enter: '请输入我们发送到您邮箱的 6 位验证码。',
+    account_code_placeholder: '000000',
+    account_code_verify: '验证并登录',
+    account_code_verifying: '验证中…',
+    account_code_resend: '重新发送',
+    account_code_resend_in: '重新发送（',
+    account_code_seconds: ' 秒）',
+    account_code_invalid: '验证码错误或已过期，请重试。',
+    account_code_required: '请输入 6 位验证码。',
+    account_code_rate_limited: '尝试次数过多，请稍后再试。',
+    account_register_success: '账户已创建，欢迎！',
+    account_register_failed: '账户创建失败，请重试。',
+    account_otp_unavailable: '验证码登录暂不可用，请稍后再试。',
   },
 };
 
@@ -2372,6 +2412,13 @@ let accountBodyKind = 'signed_out'; // signed_out | signed_in | order_detail
 let accountActiveOrder = null;     // the order currently shown in account detail
 let accountRefreshTimer = null;
 
+// Account Phase 2 OTP state. `otpRegToken` is the actorless registration token
+// that scopes the request/confirm steps; it is transient (never persisted) and
+// cleared whenever the sign-in form re-renders or the user switches tabs.
+let accountAuthTab = 'password';   // 'password' | 'otp'
+let otpRegToken = null;            // actorless token from otpRegister()
+let otpResendTimer = null;         // 60s resend cooldown handle
+
 function readCustomerToken() {
   try { return localStorage.getItem(LS_CUSTOMER_TOKEN) || null; } catch (_) { return null; }
 }
@@ -2400,6 +2447,7 @@ function openAccount() {
 }
 function closeAccount() {
   if (accountRefreshTimer) { clearTimeout(accountRefreshTimer); accountRefreshTimer = null; }
+  if (otpResendTimer) { clearInterval(otpResendTimer); otpResendTimer = null; }
   document.getElementById('accountModal').classList.remove('open');
 }
 
@@ -2414,16 +2462,65 @@ function renderAccountSignIn() {
   const body = document.getElementById('accountBody');
   if (!body) return;
   accountBodyKind = 'signed_out';
+  // Re-rendering the sign-in form drops any in-flight OTP registration token and
+  // cancels the resend countdown; the buyer starts a fresh attempt.
+  otpRegToken = null;
+  if (otpResendTimer) { clearInterval(otpResendTimer); otpResendTimer = null; }
   body.innerHTML = `
     <div>
       <p class="text-sm text-slate-500 mb-4">${t('account_signin_note')}</p>
-      <label class="block text-sm font-medium mb-1" for="accountEmail">${t('account_email')}</label>
-      <input type="email" id="accountEmail" autocomplete="email" placeholder="${t('lookup_email_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
-      <label class="block text-sm font-medium mb-1" for="accountPassword">${t('account_password')}</label>
-      <input type="password" id="accountPassword" autocomplete="current-password" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-4 focus:outline-none focus:ring-1 focus:ring-slate-300">
-      <button onclick="submitAccountSignIn()" id="accountSignInBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_signin')}</button>
-      <p id="accountSignInError" class="text-xs text-red-600 mt-3 hidden"></p>
+      <div class="flex gap-2 mb-4" role="tablist">
+        <button id="tabPassword" onclick="switchAccountTab('password')" class="flex-1 py-2 text-sm font-medium rounded-lg border ${accountAuthTab === 'password' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}">${t('account_tab_password')}</button>
+        <button id="tabOtp" onclick="switchAccountTab('otp')" class="flex-1 py-2 text-sm font-medium rounded-lg border ${accountAuthTab === 'otp' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}">${t('account_tab_code')}</button>
+      </div>
+      <div id="accountAuthForm"></div>
     </div>`;
+  renderAccountAuthForm();
+}
+
+// Render only the active tab's form (password or OTP) inside the shared shell.
+function renderAccountAuthForm() {
+  const form = document.getElementById('accountAuthForm');
+  if (!form) return;
+  if (accountAuthTab === 'otp') {
+    form.innerHTML = `
+      <div>
+        <p class="text-sm text-slate-500 mb-3">${t('account_code_note')}</p>
+        <label class="block text-sm font-medium mb-1" for="accountEmail">${t('account_email')}</label>
+        <input type="email" id="accountEmail" autocomplete="email" placeholder="${t('lookup_email_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <div id="otpCodeArea" class="hidden">
+          <p class="text-sm text-slate-500 mb-3">${t('account_code_enter')}</p>
+          <div class="flex justify-center gap-2 mb-3" id="otpCodeInputs"></div>
+          <p id="accountOtpError" class="text-xs text-red-600 mb-3 hidden"></p>
+          <button onclick="submitAccountOtp()" id="accountOtpBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700 mb-2">${t('account_code_verify')}</button>
+          <button onclick="resendOtp()" id="accountResendBtn" class="w-full py-2 text-sm text-slate-600 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed">${t('account_code_resend')}</button>
+        </div>
+        <button onclick="sendOtp()" id="accountSendBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_code_send')}</button>
+        <p id="accountSendError" class="text-xs text-red-600 mt-3 hidden"></p>
+      </div>`;
+    buildOtpInputs();
+  } else {
+    form.innerHTML = `
+      <div>
+        <label class="block text-sm font-medium mb-1" for="accountEmail">${t('account_email')}</label>
+        <input type="email" id="accountEmail" autocomplete="email" placeholder="${t('lookup_email_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <label class="block text-sm font-medium mb-1" for="accountPassword">${t('account_password')}</label>
+        <input type="password" id="accountPassword" autocomplete="current-password" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-4 focus:outline-none focus:ring-1 focus:ring-slate-300">
+        <button onclick="submitAccountSignIn()" id="accountSignInBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_signin')}</button>
+        <p id="accountSignInError" class="text-xs text-red-600 mt-3 hidden"></p>
+      </div>`;
+  }
+}
+
+function switchAccountTab(tab) {
+  if (accountAuthTab === tab) return;
+  accountAuthTab = tab;
+  // Dropping the OTP tab discards any in-flight registration token + countdown.
+  if (tab === 'password') {
+    otpRegToken = null;
+    if (otpResendTimer) { clearInterval(otpResendTimer); otpResendTimer = null; }
+  }
+  renderAccountSignIn();
 }
 
 async function submitAccountSignIn() {
@@ -2457,6 +2554,220 @@ async function submitAccountSignIn() {
   } finally {
     btn.disabled = false;
     btn.textContent = t('account_signin');
+  }
+}
+
+// ---- OTP (one-time code) sign-in / fast sign-up ----
+//
+// Uniform flow (new + existing emails):
+//   sendOtp()     → otpRegister(email) → actorless token → requestOtp(token, email)
+//   submitAccountOtp() → otpLogin(email, code) → JWT
+//       · existing bound identity → actor-bound token (full login)
+//       · brand-new email → actorless token → registerCustomer → refresh → login
+
+function accountEmailValue() {
+  const el = document.getElementById('accountEmail');
+  return el ? (el.value || '').trim().toLowerCase() : '';
+}
+
+async function sendOtp() {
+  const email = accountEmailValue();
+  const errEl = document.getElementById('accountSendError');
+  const btn = document.getElementById('accountSendBtn');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast(t('co_email_required')); return; }
+  btn.disabled = true;
+  btn.textContent = t('account_code_sending');
+  if (errEl) errEl.classList.add('hidden');
+  try {
+    const token = await store.otpRegister(email);
+    if (!token) {
+      if (errEl) { errEl.textContent = t('account_otp_unavailable'); errEl.classList.remove('hidden'); }
+      else showToast(t('account_otp_unavailable'));
+      return;
+    }
+    otpRegToken = token;
+    await store.requestOtp(token, email);
+    // Reveal the code entry area and start the 60s resend countdown.
+    const area = document.getElementById('otpCodeArea');
+    if (area) area.classList.remove('hidden');
+    if (btn) btn.classList.add('hidden');
+    buildOtpInputs();
+    startResendCountdown();
+    if (errEl) { errEl.textContent = t('account_code_sent'); errEl.classList.remove('hidden'); }
+    showToast(t('account_code_sent'));
+  } catch (error) {
+    if (error && (error.status === 429 || error.kind === 'rejected')) {
+      if (errEl) { errEl.textContent = t('account_code_rate_limited'); errEl.classList.remove('hidden'); }
+      else showToast(t('account_code_rate_limited'));
+    } else {
+      if (errEl) { errEl.textContent = t('account_otp_unavailable'); errEl.classList.remove('hidden'); }
+      else showToast(t('account_otp_unavailable'));
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t('account_code_send');
+  }
+}
+
+// Build six single-digit inputs with auto-advance / backspace / digit-only.
+// Built as an innerHTML string (the page's established pattern) so the six
+// inputs are addressable by id for focus management and value reads.
+function buildOtpInputs() {
+  const wrap = document.getElementById('otpCodeInputs');
+  if (!wrap) return;
+  wrap.innerHTML = [0, 1, 2, 3, 4, 5].map(i => `
+    <input type="tel" id="otpDigit${i}" maxlength="1" inputmode="numeric" autocomplete="one-time-code"
+      data-otp-index="${i}" aria-label="${t('account_code_placeholder')}"
+      oninput="handleOtpInput(${i})" onkeydown="handleOtpKeydown(${i}, event)"
+      class="w-10 h-12 text-center text-lg font-semibold border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-300">`
+  ).join('');
+  const first = document.getElementById('otpDigit0');
+  if (first && typeof first.focus === 'function') first.focus();
+}
+
+// Digit-only + auto-advance on input.
+function handleOtpInput(index) {
+  const el = document.getElementById('otpDigit' + index);
+  if (!el) return;
+  el.value = (el.value || '').replace(/[^0-9]/g, '').slice(0, 1);
+  if (el.value && index < 5) {
+    const next = document.getElementById('otpDigit' + (index + 1));
+    if (next && typeof next.focus === 'function') next.focus();
+  }
+}
+
+// Backspace on an empty field moves focus to the previous input.
+function handleOtpKeydown(index, event) {
+  if (event && event.key === 'Backspace') {
+    const el = document.getElementById('otpDigit' + index);
+    if (el && !el.value && index > 0) {
+      const prev = document.getElementById('otpDigit' + (index - 1));
+      if (prev && typeof prev.focus === 'function') prev.focus();
+    }
+  }
+}
+
+function readOtpCode() {
+  let out = '';
+  for (let i = 0; i < 6; i++) {
+    const el = document.getElementById('otpDigit' + i);
+    out += (el && el.value) || '';
+  }
+  return out;
+}
+
+async function resendOtp() {
+  const email = accountEmailValue();
+  if (!otpRegToken) return;
+  const btn = document.getElementById('accountResendBtn');
+  const errEl = document.getElementById('accountOtpError');
+  if (btn) btn.disabled = true;
+  if (errEl) errEl.classList.add('hidden');
+  try {
+    await store.requestOtp(otpRegToken, email);
+    startResendCountdown();
+    showToast(t('account_code_sent'));
+  } catch (error) {
+    if (error && (error.status === 429 || error.kind === 'rejected')) {
+      if (errEl) { errEl.textContent = t('account_code_rate_limited'); errEl.classList.remove('hidden'); }
+      else showToast(t('account_code_rate_limited'));
+    } else {
+      if (errEl) { errEl.textContent = t('account_otp_unavailable'); errEl.classList.remove('hidden'); }
+      else showToast(t('account_otp_unavailable'));
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// 60-second resend cooldown. The resend button is disabled and shows a live
+// countdown until the window elapses.
+function startResendCountdown() {
+  if (otpResendTimer) clearInterval(otpResendTimer);
+  const btn = document.getElementById('accountResendBtn');
+  let remaining = 60;
+  const render = () => {
+    if (!btn) return;
+    if (remaining <= 0) {
+      clearInterval(otpResendTimer); otpResendTimer = null;
+      btn.disabled = false;
+      btn.textContent = t('account_code_resend');
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = t('account_code_resend_in') + remaining + t('account_code_seconds');
+    remaining--;
+  };
+  render();
+  otpResendTimer = setInterval(render, 1000);
+}
+
+async function submitAccountOtp() {
+  const email = accountEmailValue();
+  const code = readOtpCode();
+  const errEl = document.getElementById('accountOtpError');
+  const btn = document.getElementById('accountOtpBtn');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast(t('co_email_required')); return; }
+  if (!/^[0-9]{6}$/.test(code)) {
+    if (errEl) { errEl.textContent = t('account_code_required'); errEl.classList.remove('hidden'); }
+    else showToast(t('account_code_required'));
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = t('account_code_verifying');
+  if (errEl) errEl.classList.add('hidden');
+  try {
+    const result = await store.otpLogin(email, code);
+    if (!result || !result.token) {
+      if (errEl) { errEl.textContent = t('account_code_invalid'); errEl.classList.remove('hidden'); }
+      else showToast(t('account_code_invalid'));
+      return;
+    }
+    // A brand-new email returns an actorless token (no customer bound yet): run
+    // registerCustomer + refresh to obtain the actor-bound login token. An
+    // existing identity already yields an actor-bound token.
+    if (result.verification_required) {
+      // Should not happen for otp-email (the code IS the verification), but guard.
+      if (errEl) { errEl.textContent = t('account_code_invalid'); errEl.classList.remove('hidden'); }
+      return;
+    }
+    let token = result.token;
+    // If the token is actorless (new user), claim the customer then refresh.
+    // We detect "actorless" by attempting the customer claim; on an existing
+    // bound identity the token already carries the actor and registerCustomer is
+    // not needed, so we instead validate via getCurrentCustomer.
+    const probe = await store.getCurrentCustomer(token).catch(() => null);
+    if (!probe) {
+      const customer = await store.registerCustomer(token, email);
+      if (!customer) {
+        if (errEl) { errEl.textContent = t('account_register_failed'); errEl.classList.remove('hidden'); }
+        else showToast(t('account_register_failed'));
+        return;
+      }
+      const fresh = await store.refreshToken(token);
+      if (fresh) token = fresh;
+      else {
+        if (errEl) { errEl.textContent = t('account_register_failed'); errEl.classList.remove('hidden'); }
+        else showToast(t('account_register_failed'));
+        return;
+      }
+      showToast(t('account_register_success'));
+    }
+    setCustomerSession(token);
+    otpRegToken = null;
+    if (otpResendTimer) { clearInterval(otpResendTimer); otpResendTimer = null; }
+    renderAccountSignedIn();
+  } catch (error) {
+    if (error && error.kind === 'unauthorized') {
+      if (errEl) { errEl.textContent = t('account_code_invalid'); errEl.classList.remove('hidden'); }
+      else showToast(t('account_code_invalid'));
+    } else {
+      if (errEl) { errEl.textContent = t('account_otp_unavailable'); errEl.classList.remove('hidden'); }
+      else showToast(t('account_otp_unavailable'));
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t('account_code_verify');
   }
 }
 

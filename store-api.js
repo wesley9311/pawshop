@@ -608,6 +608,65 @@
         return payload || null;
       },
 
+      // ---- passwordless OTP (Account Phase 2) ----
+      //
+      // A new user registers with email only (no password); an existing user can
+      // also sign in with a one-time code. The uniform flow is:
+      //   1. otpRegister(email)  → actorless token (idempotent for new + existing)
+      //   2. requestOtp(token, email) → 6-digit code emailed
+      //   3. otpLogin(email, code) → verifies + consumes the code → JWT
+      //   4. (new users only) registerCustomer(token, email) → create/claim customer
+      //      then refreshToken to obtain an actor-bound token.
+      //
+      // These live under `/auth/...` (requestAuth), never the `/store` baseUrl.
+
+      // Establish (or reuse) the otp-email auth identity. Idempotent: works for a
+      // brand-new email and for an email that already has an emailpass/google or
+      // otp-email identity (the latter binds to the SAME customer). Returns the
+      // actorless registration token needed for the next two steps.
+      async otpRegister(email) {
+        var payload = await requestAuth('/auth/customer/otp-email/register', {
+          method: 'POST',
+          body: { email: email },
+        });
+        return payload && payload.token ? payload.token : null;
+      },
+
+      // Request a 6-digit OTP for the email bound to the (actorless) registration
+      // token. The code is emailed; it never appears in this response.
+      async requestOtp(token, email) {
+        await requestAuth('/auth/verification/request', {
+          method: 'POST',
+          headers: { authorization: 'Bearer ' + token },
+          body: { entity_id: email, entity_type: 'customer', code_provider: 'otp' },
+        });
+      },
+
+      // Verify + consume the OTP and obtain a JWT. For an email whose identity is
+      // already bound to a customer this is a full login (actor-bound token); for
+      // a brand-new email the token is still actorless and the caller must run
+      // registerCustomer + refreshToken next. Resolves to the auth payload
+      // (`{ token }`), or `{ token }` with an actorless token for a new user.
+      async otpLogin(email, code) {
+        var payload = await requestAuth('/auth/customer/otp-email', {
+          method: 'POST',
+          body: { email: email, code: code },
+        });
+        return payload || null;
+      },
+
+      // Create (or claim) the customer for the verified actorless token, binding
+      // the auth identity to the customer. After this, refreshToken upgrades the
+      // actorless token to an actor-bound login token.
+      async registerCustomer(token, email) {
+        var payload = await request('/customers', {
+          method: 'POST',
+          headers: { authorization: 'Bearer ' + token },
+          body: { email: email },
+        });
+        return payload && payload.customer ? payload.customer : null;
+      },
+
       // Exchange a still-valid JWT for a fresh one before it expires. Keeps a
       // signed-in session alive without re-entering the password.
       async refreshToken(token) {

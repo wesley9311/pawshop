@@ -16,6 +16,16 @@ function productionModules({ redisUrl, fileStorage, googleAuth, paypal, jwtSecre
   // (validated as a complete triple in production-policy), google is added.
   const authProviders = [
     { resolve: '@medusajs/medusa/auth-emailpass', id: 'emailpass' },
+    // Passwordless "email + 6-digit OTP" auth provider (Account Phase 2). It is
+    // always registered alongside emailpass (no credential gate): the OTP HMAC
+    // key is derived from the same validated JWT_SECRET, so no new env key is
+    // introduced. It owns a separate `provider_identity` (`otp-email`), never the
+    // emailpass identity, so existing emailpass/google users are untouched.
+    {
+      resolve: './src/modules/pawshop-otp-email-auth',
+      id: 'otp-email',
+      options: { hmac_secret: jwtSecret },
+    },
   ];
   if (googleAuth?.clientId && googleAuth?.clientSecret && googleAuth?.callbackUrl) {
     authProviders.push({

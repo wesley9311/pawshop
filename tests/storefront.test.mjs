@@ -119,7 +119,12 @@ function bootPawShop({ routes = {}, storage = new Map(), lang = 'en' } = {}) {
       querySelector: () => null,
       addEventListener() {},
     },
-    addEventListener() {}, setTimeout: fn => fn(), clearTimeout() {},
+    addEventListener() {},
+    // Timers are collected, never auto-invoked: the page schedules token refresh
+    // and toast auto-hide via setTimeout/setInterval, and invoking them
+    // synchronously would recurse (scheduleTokenRefresh → refresh → schedule…).
+    setTimeout() { return 1; }, clearTimeout() {},
+    setInterval() { return 1; }, clearInterval() {},
     async fetch(url, options = {}) {
       const method = (options.method || 'GET').toUpperCase();
       const path = String(url).split('?')[0];
@@ -1377,4 +1382,86 @@ test('a PayPal cancel renders "payment not completed" in Chinese', async () => {
   assert.ok(html.includes('返回购物车'), 'cancel offers 返回购物车 in Chinese');
   assert.ok(html.includes('重试支付'), 'cancel offers 重试支付 in Chinese');
   assert.ok(!html.includes('支付已确认'), 'cancel never shows 支付已确认 in Chinese');
+});
+
+// ---- Account Phase 2: OTP (one-time code) sign-in / fast sign-up ----
+
+test('the account modal offers separate password and one-time-code tabs', async () => {
+  const app = bootPawShop();
+  await app.settle();
+  app.run('renderAccountSignIn()');
+  const html = app.nodes.get('accountBody').innerHTML;
+  assert.ok(html.includes('tabPassword'), 'a password tab is rendered');
+  assert.ok(html.includes('tabOtp'), 'an OTP tab is rendered');
+  assert.ok(html.includes('account_tab_password') === false, 'the label is resolved, not a raw key');
+});
+
+test('switching to the OTP tab shows the code form and hides the password form', async () => {
+  const app = bootPawShop();
+  await app.settle();
+  app.run("switchAccountTab('otp')");
+  // The mock DOM keeps innerHTML as a raw string; assert on the composed body.
+  const body = app.nodes.get('accountBody').innerHTML;
+  const form = app.run("document.getElementById('accountAuthForm').innerHTML");
+  assert.ok(form.includes('otpCodeArea'), 'the OTP code area is present');
+  assert.ok(form.includes('accountSendBtn'), 'the send-code button is present');
+  assert.ok(!form.includes('accountSignInBtn'), 'the password submit button is not in the OTP tab');
+  assert.ok(body.includes('tabOtp'), 'the tab shell renders the OTP tab');
+});
+
+test('sending an OTP registers the identity, requests a code, and reveals the code inputs', async () => {
+  const app = bootPawShop({
+    routes: {
+      'POST /auth/customer/otp-email/register': () => ({ status: 200, body: { token: 'reg_token' } }),
+      'POST /auth/verification/request': () => ({ status: 201, body: {} }),
+    },
+  });
+  await app.settle();
+  app.run("switchAccountTab('otp')");
+  app.run("document.getElementById('accountEmail').value = 'buyer@example.com'");
+  app.run('sendOtp()');
+  await app.settle();
+
+  assert.deepEqual(
+    app.paths().filter(p => p.startsWith('POST /auth')),
+    ['POST /auth/customer/otp-email/register', 'POST /auth/verification/request'],
+    'register then request, in order',
+  );
+  assert.equal(app.run('otpRegToken'), 'reg_token', 'the actorless token is held in memory, never persisted');
+  assert.equal(app.storage.get('pawshop_customer_token'), undefined, 'the registration token is never written to storage');
+  // After the code is sent the code area is revealed (classList 'hidden' removed).
+  const codeArea = app.nodes.get('otpCodeArea');
+  assert.ok(!codeArea.classList.contains('hidden'), 'the code area is revealed after the code is sent');
+});
+
+test('OTP sign-in for a NEW email claims the customer then refreshes to an actor-bound token', async () => {
+  const app = bootPawShop({
+    routes: {
+      'POST /auth/customer/otp-email': () => ({ status: 200, body: { token: 'actorless_token' } }),
+      // The probe with the actorless token is rejected (no customer bound yet);
+      // the actor-bound token resolves to the customer.
+      'GET /store/customers/me': (_path, options) => {
+        const auth = (options && options.headers && options.headers.authorization) || '';
+        if (auth.includes('actorless_token')) return { status: 401, body: {} };
+        return { status: 200, body: { customer: { id: 'cus_1', email: 'buyer@example.com', has_account: true } } };
+      },
+      'POST /store/customers': () => ({ status: 200, body: { customer: { id: 'cus_1', email: 'buyer@example.com' } } }),
+      'POST /auth/token/refresh': () => ({ status: 200, body: { token: 'actor_bound_token' } }),
+    },
+  });
+  await app.settle();
+  app.run("switchAccountTab('otp')");
+  app.run("document.getElementById('accountEmail').value = 'buyer@example.com'");
+  app.run('otpRegToken = "reg_token"');
+  // Fill the six digit inputs, then submit.
+  app.run("buildOtpInputs()");
+  app.run("for (let i = 0; i < 6; i++) document.getElementById('otpDigit' + i).value = '123456'[i];");
+  app.run('submitAccountOtp()');
+  await app.settle();
+
+  const paths = app.paths();
+  assert.ok(paths.includes('POST /auth/customer/otp-email'), 'authenticates via otp-email');
+  assert.ok(paths.includes('POST /store/customers'), 'claims the customer for a new email');
+  assert.ok(paths.includes('POST /auth/token/refresh'), 'refreshes to an actor-bound token');
+  assert.equal(app.run('customerToken'), 'actor_bound_token', 'the final token is the refreshed actor-bound token');
 });

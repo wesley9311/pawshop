@@ -176,13 +176,31 @@ function validateProductionEnvironment(env) {
   // must not appear here either. This keeps both layers (registered providers and
   // allowed methods) identical to the current production shape when Google is absent.
   //
-  // `customer` is explicitly emailpass-only: the customer actor must never see the
-  // Google provider, whose callback is hardwired to the admin `/app/login`. Without
-  // this explicit `customer` entry, the default (no allowlist = every registered
-  // provider allowed) would accidentally expose Google to the customer actor.
+  // `customer` is explicitly emailpass + otp-email only: the customer actor must
+  // never see the Google provider, whose callback is hardwired to the admin
+  // `/app/login`. Without this explicit `customer` entry, the default (no
+  // allowlist = every registered provider allowed) would accidentally expose
+  // Google to the customer actor. `otp-email` is the passwordless one-time-code
+  // login added in Account Phase 2; it sits beside emailpass so existing
+  // email+password customers keep working unchanged.
   const authMethodsPerActor = googleAuth
-    ? { user: ['emailpass', 'google'], customer: ['emailpass'] }
-    : { user: ['emailpass'], customer: ['emailpass'] };
+    ? { user: ['emailpass', 'google'], customer: ['emailpass', 'otp-email'] }
+    : { user: ['emailpass'], customer: ['emailpass', 'otp-email'] };
+
+  // OTP login/registration is gated on the email being verified. Without this,
+  // the passwordless `otp-email` register endpoint returns an actorless token and
+  // `POST /auth/token/refresh` re-reads the identity from the DB and upgrades it to
+  // an actor-bound JWT with NO OTP — an account-takeover vector for any existing
+  // customer. Requiring verification per actor makes both `authenticate` and
+  // `token/refresh` return an actorless token (not a login) until `verified_at` is
+  // set, which only the OTP confirm step can do.
+  //
+  // `entity_type` MUST match the value `verif_otp` stores (production rows use
+  // `entity_type='customer'`), or `validateVerification` can never find the row and
+  // every OTP login deadlocks as "requires verification".
+  const authVerificationsPerActor = {
+    customer: [{ entity_type: 'customer', auth_provider: 'otp-email' }],
+  };
 
   // PayPal is OPTIONAL at this layer, exactly like Google OAuth: while the owner
   // has not provisioned PayPal developer credentials, all six values are absent
@@ -242,7 +260,7 @@ function validateProductionEnvironment(env) {
     paypal,
     mode: env.PAWSHOP_MODE,
     commerceOpen: commerceIsOpen(env.PAWSHOP_MODE),
-    http: { storeCors, adminCors, authCors: adminCors, jwtSecret: env.JWT_SECRET, cookieSecret: env.COOKIE_SECRET, authMethodsPerActor },
+    http: { storeCors, adminCors, authCors: adminCors, jwtSecret: env.JWT_SECRET, cookieSecret: env.COOKIE_SECRET, authMethodsPerActor, authVerificationsPerActor },
   };
 }
 
