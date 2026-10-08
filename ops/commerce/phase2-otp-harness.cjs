@@ -153,7 +153,10 @@ function count(table, where = '') {
 }
 
 function authIdentityIds(email) {
-  return sqlRows(`select ai.id from auth_identity ai join provider_identity pi on pi.auth_identity_id = ai.id where pi.entity_id = ${q(email)} and ai.deleted_at is null and pi.deleted_at is null;`);
+  // DISTINCT: cross-provider binding (emailpass + otp-email) legitimately yields
+  // multiple provider_identity rows pointing at the SAME auth_identity. The
+  // identity count must be the distinct auth_identity id set, not the row count.
+  return sqlRows(`select distinct ai.id from auth_identity ai join provider_identity pi on pi.auth_identity_id = ai.id where pi.entity_id = ${q(email)} and ai.deleted_at is null and pi.deleted_at is null;`);
 }
 
 function providerIdentities(email) {
