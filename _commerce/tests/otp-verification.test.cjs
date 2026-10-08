@@ -299,5 +299,14 @@ test('the provider strips provider_metadata (code_hash) from its request return 
   // it returns, otherwise the digest leaks to the caller.
   assert.ok(/stripProviderMetadata/.test(providerSource), 'provider sanitizes its return value');
   assert.ok(/provider_metadata:\s*_omitted/.test(providerSource), 'provider_metadata is destructured away (never returned)');
-  assert.ok(/stripProviderMetadata\(existing\[0\]\)/.test(providerSource), 'already-verified path also strips provider_metadata');
+});
+
+test('request() always mints a fresh code (no already-verified short-circuit)', () => {
+  // Phase 2 OTP is a one-time LOGIN factor, not a one-time registration gate: a
+  // returning user must be able to request a fresh code on every sign-in. The
+  // provider must therefore never early-return an already-verified record without
+  // issuing a new code — otherwise a second OTP login (or a password user opting
+  // into OTP) would get "event carried no recipient or code" and fail to capture.
+  assert.ok(!/existing\[0\]\.verified_at\)\s*\{/.test(providerSource), 'no already-verified short-circuit that skips code generation');
+  assert.ok(/verified_at:\s*null/.test(providerSource), 'the update branch resets verified_at so a fresh code is claimable');
 });

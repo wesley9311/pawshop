@@ -142,12 +142,14 @@ class OtpVerificationProvider {
       sharedContext,
     )
 
-    if (existing.length && existing[0].verified_at) {
-      // Already verified — return the existing record without issuing a new code.
-      // `provider_metadata` (the keyed HMAC digest) is internal and must never
-      // reach the caller.
-      return stripProviderMetadata(existing[0]) as AuthTypes.RequestAuthVerificationResponse
-    }
+    // A request ALWAYS issues a fresh code, even for an already-verified identity.
+    // The OTP is a one-time login factor (Phase 2), not a one-time registration
+    // gate: a returning user must be able to request a new code on every sign-in.
+    // The `existing.length` branch below therefore unconditionally resets
+    // `verified_at` to null and overwrites `code_hash` with the new digest — the
+    // prior code is invalidated and the new one becomes the only claimable code.
+    // (The "already verified" dedup, if ever needed, belongs to the caller's
+    // registration flow, never to this provider, which only mints codes.)
 
     const code = generateOtpCode()
     const digest = digestCode(this.hmacKey_, code)
