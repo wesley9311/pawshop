@@ -559,6 +559,7 @@ const I18N = {
     account_password_saved: 'Password saved.',
     account_password_failed: 'Could not save password. Check your code or current password.',
     account_code_reverify: 'Verify your email again before setting a password.',
+    account_security_code: 'Email code',
     account_save_password: 'Save password',
     account_resize: 'Drag to resize account window',
     account_no_orders: 'You have no orders yet.',
@@ -789,6 +790,7 @@ const I18N = {
     account_password_saved: '密码已保存。',
     account_password_failed: '无法保存密码，请检查验证码或当前密码。',
     account_code_reverify: '设置密码前，请再次验证邮箱。',
+    account_security_code: '邮箱验证码',
     account_save_password: '保存密码',
     account_resize: '拖动调整账户窗口宽度',
     account_no_orders: '暂无订单。',
@@ -834,6 +836,8 @@ function applyI18n() {
   document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   document.querySelectorAll('[data-i18n-a11y]').forEach(el => { el.setAttribute('aria-label', t(el.dataset.i18nA11y)); });
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.setAttribute('title', t(el.dataset.i18nTitle)); });
+  const resize = document.getElementById('accountResize');
+  if (resize) { resize.setAttribute('aria-label', t('account_resize')); resize.setAttribute('title', t('account_resize')); }
   // The footer "Contact us" link is a plain mailto: with no order context; keep
   // its href in step with the current language (subject wording localizes).
   const contactLink = document.getElementById('footerContactLink');
@@ -2542,6 +2546,7 @@ function closeAccount() {
   if (accountRefreshTimer) { clearTimeout(accountRefreshTimer); accountRefreshTimer = null; }
   if (otpResendTimer) { clearInterval(otpResendTimer); otpResendTimer = null; }
   clearSecurityOtp();
+  accountBodyKind = 'closed';
   document.getElementById('accountModal').classList.remove('open');
   if (accountScrollPosition !== null) {
     const previous = accountScrollPosition;
@@ -2556,6 +2561,7 @@ function closeAccount() {
     window.scrollTo(0, previous.y);
     root.style.scrollBehavior = scrollBehavior;
   }
+  if (customerToken) scheduleTokenRefresh();
 }
 
 function startAccountResize(event) {
@@ -3043,7 +3049,7 @@ async function showAccountSecurity() {
       ${passwordSet ? `<label class="block text-sm" for="securityCurrentPassword">${t('account_current_password')}</label><input id="securityCurrentPassword" type="password" autocomplete="current-password" class="w-full px-3 py-2 border rounded-lg">` : `
         <p class="text-sm text-slate-500">${t('account_code_reverify')}</p>
         <button id="securitySendBtn" onclick="sendSecurityOtp()" class="px-4 py-2 border rounded-lg text-sm">${t('account_code_send')}</button>
-        <label class="block text-sm" for="securityCode">${t('account_code_placeholder')}</label>
+        <label class="block text-sm" for="securityCode">${t('account_security_code')}</label>
         <input id="securityCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="w-full px-3 py-2 border rounded-lg" disabled>`}
       <label class="block text-sm" for="securityNewPassword">${t('account_new_password')}</label>
       <input id="securityNewPassword" type="password" autocomplete="new-password" class="w-full px-3 py-2 border rounded-lg">
@@ -3065,9 +3071,11 @@ async function sendSecurityOtp() {
   if (!btn || btn.disabled) return;
   btn.disabled = true;
   try {
-    securityRegToken = await store.otpRegister(customerAccount.email);
-    if (!securityRegToken) throw new Error('No registration token');
-    await store.requestOtp(securityRegToken, customerAccount.email);
+    const token = await store.otpRegister(customerAccount.email);
+    if (!token) throw new Error('No registration token');
+    await store.requestOtp(token, customerAccount.email);
+    if (accountBodyKind !== 'security' || !document.getElementById('accountModal').classList.contains('open')) return;
+    securityRegToken = token;
     const code = document.getElementById('securityCode');
     if (code) { code.disabled = false; code.focus(); }
     securityMessage('account_code_sent');
