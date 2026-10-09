@@ -1435,6 +1435,34 @@ test('the signed-in view shows the account menu and the My account title', async
   assert.ok(html.includes('Account security'), 'the security entry is present');
   assert.ok(html.includes('Sign out'), 'sign out is present');
   assert.ok(!html.includes('accountSendBtn'), 'no sign-in form is shown while signed in');
+  assert.ok(!html.includes('accountOrdersList'), 'the hub does not embed the orders list');
+});
+
+test('orders, profile, and security are separate account views with a return to the hub', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/customers/me': () => ({ status: 200, body: { customer: { id: 'cus_1', email: 'buyer@example.com', has_account: true } } }),
+      'GET /store/orders': () => ({ status: 200, body: { orders: [], count: 0 } }),
+      'GET /store/customers/me/security': () => ({ status: 200, body: { email_code_enabled: true, password_set: false } }),
+    },
+  });
+  await app.settle();
+  app.run("setCustomerSession('customer_token')");
+  await app.run('renderAccountSignedIn()');
+  app.run('showAccountOrders()');
+  await app.settle();
+  assert.ok(app.nodes.get('accountBody').innerHTML.includes('accountOrdersList'));
+  assert.equal(app.run('accountBodyKind'), 'orders');
+  app.run('showAccountHub()');
+  assert.ok(!app.nodes.get('accountBody').innerHTML.includes('accountOrdersList'));
+  app.run('showAccountProfile()');
+  assert.equal(app.run('accountBodyKind'), 'profile');
+  assert.ok(app.nodes.get('accountBody').innerHTML.includes('Active'));
+  await app.run('showAccountSecurity()');
+  assert.equal(app.run('accountBodyKind'), 'security');
+  assert.ok(app.nodes.get('accountBody').innerHTML.includes('Set password'));
+  app.run('showAccountHub()');
+  assert.equal(app.run('accountBodyKind'), 'hub');
 });
 
 test('sending an OTP registers the identity, requests a code, and reveals the code inputs', async () => {
