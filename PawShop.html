@@ -22,6 +22,10 @@
   .drawer.open { transform: translateX(0); }
   .modal { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
   .modal.open { opacity: 1; pointer-events: auto; }
+  #accountPanel { width: min(70vw, 1100px); max-width: calc(100vw - 16px); min-width: min(680px, calc(100vw - 16px)); }
+  #accountScroll { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  #accountResize { touch-action: none; cursor: ew-resize; }
+  @media (max-width: 639px) { #accountPanel { width: calc(100vw - 16px) !important; min-width: 0; } #accountResize { display: none; } }
   .toast { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
   .toast.show { opacity: 1; }
   ::-webkit-scrollbar { width: 6px; }
@@ -224,15 +228,18 @@
 
 <!-- ===== Account Modal ===== -->
 <div id="accountModal" class="modal fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-4" onclick="closeAccount()">
-  <div class="bg-white rounded-xl w-full max-w-lg max-h-[94vh] overflow-y-auto" onclick="event.stopPropagation()">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+  <div id="accountPanel" role="dialog" aria-modal="true" aria-labelledby="accountModalTitle" class="relative bg-white rounded-xl max-h-[94dvh] flex flex-col shadow-xl" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
       <h3 class="font-bold" id="accountModalTitle">My account</h3>
       <button onclick="closeAccount()" class="p-2 hover:bg-slate-100 rounded" aria-label="Close" data-i18n-a11y="a11y_close">
         <i class="fas fa-times"></i>
       </button>
     </div>
-    <div class="p-5 space-y-5">
+    <div id="accountScroll" class="p-5 space-y-5 min-h-0 overflow-y-auto">
       <div id="accountBody"></div>
+    </div>
+    <div id="accountResize" role="separator" aria-orientation="vertical" aria-label="Resize account window" onpointerdown="startAccountResize(event)" class="absolute right-0 top-1/4 h-1/2 w-3 flex items-center justify-center group" title="Resize">
+      <span class="h-12 w-1 rounded-full bg-slate-300 group-hover:bg-slate-500"></span>
     </div>
   </div>
 </div>
@@ -536,7 +543,24 @@ const I18N = {
     account_orders: 'My orders',
     account_profile: 'Account profile',
     account_security: 'Account security',
-    account_security_soon: 'Coming soon',
+    account_back: 'Back to my account',
+    account_status: 'Account status',
+    account_active: 'Active',
+    account_code_enabled: 'Email code: enabled',
+    account_password_set: 'Password: set',
+    account_password_unset: 'Password: not set',
+    account_set_password: 'Set password',
+    account_change_password: 'Change password',
+    account_current_password: 'Current password',
+    account_new_password: 'New password',
+    account_confirm_password: 'Confirm new password',
+    account_password_mismatch: 'New passwords do not match.',
+    account_password_length: 'Use 12 to 128 characters.',
+    account_password_saved: 'Password saved.',
+    account_password_failed: 'Could not save password. Check your code or current password.',
+    account_code_reverify: 'Verify your email again before setting a password.',
+    account_save_password: 'Save password',
+    account_resize: 'Drag to resize account window',
     account_no_orders: 'You have no orders yet.',
     account_orders_note: 'Your orders are shown below, most recent first.',
     account_signout: 'Sign out',
@@ -749,7 +773,24 @@ const I18N = {
     account_orders: '我的订单',
     account_profile: '账户资料',
     account_security: '账户安全',
-    account_security_soon: '即将上线',
+    account_back: '返回我的账户',
+    account_status: '账户状态',
+    account_active: '正常',
+    account_code_enabled: '邮箱验证码：已启用',
+    account_password_set: '密码：已设置',
+    account_password_unset: '密码：未设置',
+    account_set_password: '设置密码',
+    account_change_password: '修改密码',
+    account_current_password: '当前密码',
+    account_new_password: '新密码',
+    account_confirm_password: '确认新密码',
+    account_password_mismatch: '两次输入的新密码不一致。',
+    account_password_length: '密码需为 12 至 128 个字符。',
+    account_password_saved: '密码已保存。',
+    account_password_failed: '无法保存密码，请检查验证码或当前密码。',
+    account_code_reverify: '设置密码前，请再次验证邮箱。',
+    account_save_password: '保存密码',
+    account_resize: '拖动调整账户窗口宽度',
     account_no_orders: '暂无订单。',
     account_orders_note: '以下是您的订单，按时间倒序排列。',
     account_signout: '退出登录',
@@ -814,7 +855,16 @@ function setLang(l) {
   if (document.getElementById('checkoutModal').classList.contains('open')) renderCheckout();
   // Account modal: its title and body are built from t() at render time. Re-render
   // it on language switch so the title (登录/注册 vs 我的账户) and form stay correct.
-  if (document.getElementById('accountModal').classList.contains('open')) renderAccount();
+  if (document.getElementById('accountModal').classList.contains('open')) {
+    if (!customerAccount || !customerToken) renderAccountSignIn();
+    else if (accountBodyKind === 'orders') showAccountOrders();
+    else if (accountBodyKind === 'profile') showAccountProfile();
+    else if (accountBodyKind === 'security') showAccountSecurity();
+    else if (accountBodyKind === 'order_detail' && accountActiveOrder) {
+      setAccountModalTitle(t('account_orders'));
+      document.getElementById('accountBody').innerHTML = accountOrderDetailHtml(accountActiveOrder);
+    } else showAccountHub();
+  }
   if (document.getElementById('orderModal').classList.contains('open')) {
     switch (orderBodyKind) {
       case 'success': renderOrderSuccess(lastResolvedOrder); break;
@@ -2427,11 +2477,13 @@ function retryBootstrap() { bootstrap(); }
 // enforces ownership on every order read (customer_id === actor_id), so the
 // account view can only ever list this customer's own orders.
 const LS_CUSTOMER_TOKEN = 'pawshop_customer_token';
+const LS_ACCOUNT_WIDTH = 'pawshop_account_width';
 let customerToken = null;
 let customerAccount = null;        // normalized customer profile (or null)
-let accountBodyKind = 'signed_out'; // signed_out | signed_in | order_detail
+let accountBodyKind = 'signed_out'; // signed_out | hub | orders | profile | security | order_detail
 let accountActiveOrder = null;     // the order currently shown in account detail
 let accountRefreshTimer = null;
+let accountScrollPosition = null;
 
 // Account Phase 2 OTP state. `otpRegToken` is the actorless registration token
 // that scopes the request/confirm steps; it is transient (never persisted) and
@@ -2463,13 +2515,69 @@ function updateAccountDot() {
 }
 
 function openAccount() {
+  if (accountScrollPosition === null) {
+    accountScrollPosition = {
+      y: window.scrollY || 0,
+      position: document.body.style.position,
+      top: document.body.style.top,
+      width: document.body.style.width,
+      overflow: document.body.style.overflow,
+    };
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${accountScrollPosition.y}px`;
+    document.body.style.width = '100%';
+    document.body.style.overflow = 'hidden';
+  }
+  const panel = document.getElementById('accountPanel');
+  const resize = document.getElementById('accountResize');
+  if (resize) { resize.setAttribute('aria-label', t('account_resize')); resize.setAttribute('title', t('account_resize')); }
+  try {
+    const width = Number(localStorage.getItem(LS_ACCOUNT_WIDTH));
+    if (panel && width >= 680 && width <= 1100) panel.style.width = `${width}px`;
+  } catch (_) { /* local preference is optional */ }
   document.getElementById('accountModal').classList.add('open');
   renderAccount();
 }
 function closeAccount() {
   if (accountRefreshTimer) { clearTimeout(accountRefreshTimer); accountRefreshTimer = null; }
   if (otpResendTimer) { clearInterval(otpResendTimer); otpResendTimer = null; }
+  clearSecurityOtp();
   document.getElementById('accountModal').classList.remove('open');
+  if (accountScrollPosition !== null) {
+    const previous = accountScrollPosition;
+    accountScrollPosition = null;
+    document.body.style.position = previous.position;
+    document.body.style.top = previous.top;
+    document.body.style.width = previous.width;
+    document.body.style.overflow = previous.overflow;
+    const root = document.documentElement;
+    const scrollBehavior = root.style.scrollBehavior;
+    root.style.scrollBehavior = 'auto';
+    window.scrollTo(0, previous.y);
+    root.style.scrollBehavior = scrollBehavior;
+  }
+}
+
+function startAccountResize(event) {
+  if (!event || event.pointerType === 'touch') return;
+  event.preventDefault();
+  event.stopPropagation();
+  const panel = document.getElementById('accountPanel');
+  if (!panel) return;
+  const startX = event.clientX;
+  const startWidth = panel.getBoundingClientRect().width;
+  const move = (next) => {
+    const max = Math.min(1100, window.innerWidth - 32);
+    const width = Math.round(Math.max(Math.min(680, max), Math.min(max, startWidth + (next.clientX - startX) * 2)));
+    panel.style.width = `${width}px`;
+  };
+  const stop = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', stop);
+    try { localStorage.setItem(LS_ACCOUNT_WIDTH, String(Math.round(panel.getBoundingClientRect().width))); } catch (_) {}
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', stop, { once: true });
 }
 
 // Render the account modal into its current state: signed-out login form, the
@@ -2528,7 +2636,6 @@ function renderAccountAuthForm() {
       </div>
       <div class="mt-5 pt-4 border-t border-slate-100 space-y-2">
         <button onclick="switchAccountTab('password')" class="block text-sm text-slate-500 hover:text-slate-900 underline underline-offset-2">${t('account_has_password')} ${t('account_use_password')}</button>
-        <button onclick="switchAccountTab('password')" class="block text-sm text-slate-500 hover:text-slate-900 underline underline-offset-2">${t('account_forgot_password')} ${t('account_use_code_login')}</button>
       </div>`;
     buildOtpInputs();
   } else {
@@ -2543,6 +2650,7 @@ function renderAccountAuthForm() {
       </div>
       <div class="mt-5 pt-4 border-t border-slate-100">
         <button onclick="switchAccountTab('otp')" class="block text-sm text-slate-500 hover:text-slate-900 underline underline-offset-2">${t('account_use_code')}</button>
+        <button onclick="switchAccountTab('otp')" class="block mt-2 text-sm text-slate-500 hover:text-slate-900 underline underline-offset-2">${t('account_forgot_password')} ${t('account_use_code_login')}</button>
       </div>`;
   }
 }
@@ -2838,73 +2946,170 @@ async function renderAccountSignedIn() {
     }
   }
   customerAccount = account;
-  renderAccountOrderList(account);
+  showAccountHub();
 }
 
-function renderAccountOrderList(account) {
+function accountBackButton(action, label) {
+  return `<button onclick="${action}" class="mb-5 inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900"><i class="fas fa-chevron-left text-xs"></i>${label}</button>`;
+}
+
+function showAccountHub() {
   const body = document.getElementById('accountBody');
-  if (!body) return;
-  accountBodyKind = 'signed_in';
+  if (!body || !customerAccount) return;
+  clearSecurityOtp();
+  accountBodyKind = 'hub';
+  setAccountModalTitle(t('account_title'));
   body.innerHTML = `
     <div>
       <div class="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
         <div>
           <div class="text-xs text-slate-500 mb-0.5">${t('account_email')}</div>
-          <div class="text-sm font-semibold text-slate-900">${safeHtml(account.email || '')}</div>
+          <div class="text-sm font-semibold text-slate-900 break-all">${safeHtml(customerAccount.email || '')}</div>
         </div>
         <button onclick="signOutAccount()" class="px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">${t('account_signout')}</button>
       </div>
-      <nav class="flex flex-col gap-1 mb-5" aria-label="${t('account_orders')}">
-        <button onclick="renderAccountSignedIn()" class="flex items-center justify-between px-3 py-2.5 text-left text-sm text-slate-700 rounded-lg hover:bg-slate-50">
+      <nav class="flex flex-col gap-1" aria-label="${t('account_title')}">
+        <button onclick="showAccountOrders()" class="flex items-center justify-between px-3 py-3 text-left text-sm text-slate-700 rounded-lg hover:bg-slate-50">
           <span class="font-medium">${t('account_orders')}</span>
           <i class="fas fa-chevron-right text-xs text-slate-400"></i>
         </button>
-        <button onclick="showAccountProfile()" class="flex items-center justify-between px-3 py-2.5 text-left text-sm text-slate-700 rounded-lg hover:bg-slate-50">
+        <button onclick="showAccountProfile()" class="flex items-center justify-between px-3 py-3 text-left text-sm text-slate-700 rounded-lg hover:bg-slate-50">
           <span class="font-medium">${t('account_profile')}</span>
           <i class="fas fa-chevron-right text-xs text-slate-400"></i>
         </button>
-        <button onclick="showAccountSecurity()" class="flex items-center justify-between px-3 py-2.5 text-left text-sm text-slate-700 rounded-lg hover:bg-slate-50">
+        <button onclick="showAccountSecurity()" class="flex items-center justify-between px-3 py-3 text-left text-sm text-slate-700 rounded-lg hover:bg-slate-50">
           <span class="font-medium">${t('account_security')}</span>
-          <span class="text-xs text-slate-400">${t('account_security_soon')}</span>
+          <i class="fas fa-chevron-right text-xs text-slate-400"></i>
         </button>
       </nav>
-      <h4 class="text-sm font-semibold text-slate-800 mb-2">${t('account_orders')}</h4>
-      <p class="text-xs text-slate-500 mb-4">${t('account_orders_note')}</p>
-      <div id="accountOrdersList" class="text-center py-3 text-sm text-slate-500">${t('account_loading')}</div>
     </div>`;
+}
+
+function showAccountOrders() {
+  const body = document.getElementById('accountBody');
+  if (!body || !customerAccount) return;
+  accountBodyKind = 'orders';
+  setAccountModalTitle(t('account_orders'));
+  body.innerHTML = `
+    ${accountBackButton('showAccountHub()', t('account_back'))}
+    <div id="accountOrdersList" class="text-center py-3 text-sm text-slate-500">${t('account_loading')}</div>`;
   loadAccountOrders();
 }
 
-// Account profile (read-only for now): show the signed-in email and a note that
-// password management arrives with Account Security.
 function showAccountProfile() {
   const body = document.getElementById('accountBody');
   if (!body || !customerAccount) return;
-  accountBodyKind = 'signed_in';
+  accountBodyKind = 'profile';
+  setAccountModalTitle(t('account_profile'));
   body.innerHTML = `
     <div>
+      ${accountBackButton('showAccountHub()', t('account_back'))}
       <div class="text-xs text-slate-500 mb-0.5">${t('account_email')}</div>
-      <div class="text-sm font-semibold text-slate-900 mb-5">${safeHtml(customerAccount.email || '')}</div>
-      <button onclick="renderAccountOrderList(customerAccount)" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_back_to_orders')}</button>
+      <div class="text-sm font-semibold text-slate-900 mb-5 break-all">${safeHtml(customerAccount.email || '')}</div>
+      <div class="text-xs text-slate-500 mb-0.5">${t('account_status')}</div>
+      <div class="text-sm font-semibold text-slate-900">${customerAccount.hasAccount ? t('account_active') : '—'}</div>
     </div>`;
 }
 
-// Account security placeholder: no fake reset-password flow exists yet. This
-// panel is intentionally read-only until ACCOUNT SECURITY / PASSWORD MANAGEMENT
-// is built.
-function showAccountSecurity() {
+let securityRegToken = null;
+let securityResendTimer = null;
+function clearSecurityOtp() {
+  securityRegToken = null;
+  if (securityResendTimer) { clearInterval(securityResendTimer); securityResendTimer = null; }
+}
+
+async function showAccountSecurity() {
   const body = document.getElementById('accountBody');
-  if (!body) return;
-  accountBodyKind = 'signed_in';
+  if (!body || !customerAccount) return;
+  clearSecurityOtp();
+  accountBodyKind = 'security';
+  setAccountModalTitle(t('account_security'));
+  body.innerHTML = `${accountBackButton('showAccountHub()', t('account_back'))}<div class="text-sm text-slate-500">${t('account_loading')}</div>`;
+  let status;
+  try { status = await store.getAccountSecurity(customerToken); }
+  catch (error) {
+    if (error && error.kind === 'unauthorized') { clearCustomerSession(); renderAccountSignIn(); return; }
+    if (accountBodyKind === 'security') body.innerHTML = `${accountBackButton('showAccountHub()', t('account_back'))}<p class="text-sm text-red-600">${t('account_unavailable')}</p>`;
+    return;
+  }
+  if (accountBodyKind !== 'security') return;
+  const passwordSet = status.password_set === true;
   body.innerHTML = `
-    <div class="text-center py-4">
-      <div class="w-10 h-10 mx-auto mb-3 rounded-lg bg-slate-100 flex items-center justify-center">
-        <i class="fas fa-shield-alt text-slate-400"></i>
-      </div>
-      <p class="text-sm font-semibold text-slate-800 mb-1">${t('account_security')}</p>
-      <p class="text-xs text-slate-500 mb-5">${t('account_security_soon')}</p>
-      <button onclick="renderAccountOrderList(customerAccount)" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_back_to_orders')}</button>
+    ${accountBackButton('showAccountHub()', t('account_back'))}
+    <div class="space-y-3 max-w-lg">
+      <p class="text-sm text-slate-700">${t('account_code_enabled')}</p>
+      <p class="text-sm text-slate-700">${t(passwordSet ? 'account_password_set' : 'account_password_unset')}</p>
+      <h4 class="font-semibold pt-3">${t(passwordSet ? 'account_change_password' : 'account_set_password')}</h4>
+      ${passwordSet ? `<label class="block text-sm" for="securityCurrentPassword">${t('account_current_password')}</label><input id="securityCurrentPassword" type="password" autocomplete="current-password" class="w-full px-3 py-2 border rounded-lg">` : `
+        <p class="text-sm text-slate-500">${t('account_code_reverify')}</p>
+        <button id="securitySendBtn" onclick="sendSecurityOtp()" class="px-4 py-2 border rounded-lg text-sm">${t('account_code_send')}</button>
+        <label class="block text-sm" for="securityCode">${t('account_code_placeholder')}</label>
+        <input id="securityCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="w-full px-3 py-2 border rounded-lg" disabled>`}
+      <label class="block text-sm" for="securityNewPassword">${t('account_new_password')}</label>
+      <input id="securityNewPassword" type="password" autocomplete="new-password" class="w-full px-3 py-2 border rounded-lg">
+      <label class="block text-sm" for="securityConfirmPassword">${t('account_confirm_password')}</label>
+      <input id="securityConfirmPassword" type="password" autocomplete="new-password" class="w-full px-3 py-2 border rounded-lg">
+      <button id="securitySaveBtn" onclick="saveSecurityPassword(${passwordSet})" class="w-full py-3 bg-slate-900 text-white rounded-lg text-sm">${t('account_save_password')}</button>
+      <p id="securityMessage" role="status" class="text-sm text-red-600 hidden"></p>
     </div>`;
+}
+
+function securityMessage(key) {
+  const el = document.getElementById('securityMessage');
+  if (el) { el.textContent = t(key); el.classList.remove('hidden'); }
+}
+
+async function sendSecurityOtp() {
+  if (!customerAccount || !customerToken) return;
+  const btn = document.getElementById('securitySendBtn');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  try {
+    securityRegToken = await store.otpRegister(customerAccount.email);
+    if (!securityRegToken) throw new Error('No registration token');
+    await store.requestOtp(securityRegToken, customerAccount.email);
+    const code = document.getElementById('securityCode');
+    if (code) { code.disabled = false; code.focus(); }
+    securityMessage('account_code_sent');
+    let remaining = 60;
+    btn.textContent = `${t('account_code_resend_in')}${remaining}${t('account_code_seconds')}`;
+    securityResendTimer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        clearInterval(securityResendTimer); securityResendTimer = null;
+        btn.disabled = false;
+        btn.textContent = t('account_code_resend');
+      } else btn.textContent = `${t('account_code_resend_in')}${remaining}${t('account_code_seconds')}`;
+    }, 1000);
+  } catch (error) {
+    btn.disabled = false;
+    securityMessage(error && error.status === 429 ? 'account_code_rate_limited' : 'account_otp_unavailable');
+  }
+}
+
+async function saveSecurityPassword(passwordSet) {
+  const newer = document.getElementById('securityNewPassword').value;
+  const confirmed = document.getElementById('securityConfirmPassword').value;
+  if (newer !== confirmed) { securityMessage('account_password_mismatch'); return; }
+  if (newer.length < 12 || newer.length > 128) { securityMessage('account_password_length'); return; }
+  const data = { new_password: newer };
+  if (passwordSet) {
+    data.current_password = document.getElementById('securityCurrentPassword').value;
+    if (!data.current_password) { securityMessage('account_password_required'); return; }
+  } else {
+    data.code = document.getElementById('securityCode').value.trim();
+    if (!securityRegToken || !/^[0-9]{6}$/.test(data.code)) { securityMessage('account_code_required'); return; }
+  }
+  const btn = document.getElementById('securitySaveBtn');
+  btn.disabled = true;
+  try {
+    await store.saveAccountPassword(customerToken, data);
+    clearSecurityOtp();
+    showToast(t('account_password_saved'));
+    await showAccountSecurity();
+  } catch (_) {
+    securityMessage('account_password_failed');
+  } finally { btn.disabled = false; }
 }
 
 async function loadAccountOrders() {
@@ -2964,7 +3169,7 @@ async function openAccountOrder(orderId) {
     body.innerHTML = `
       <div class="text-center py-6">
         <p class="text-sm text-slate-500 mb-4">${t('order_not_found')}</p>
-        <button onclick="renderAccountSignedIn()" class="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('account_back_to_orders')}</button>
+        <button onclick="showAccountOrders()" class="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">${t('account_back_to_orders')}</button>
       </div>`;
     return;
   }
@@ -3031,7 +3236,7 @@ function accountOrderDetailHtml(order) {
           </div>
         </div>
       </section>
-      <button onclick="renderAccountSignedIn()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_back_to_orders')}</button>
+      <button onclick="showAccountOrders()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_back_to_orders')}</button>
     </div>`;
 }
 

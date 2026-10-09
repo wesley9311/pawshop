@@ -709,6 +709,20 @@
         }
       },
 
+      async getAccountSecurity(token) {
+        return request('/customers/me/security', {
+          headers: { authorization: 'Bearer ' + token },
+        });
+      },
+
+      async saveAccountPassword(token, data) {
+        return request('/customers/me/security', {
+          method: 'POST',
+          headers: { authorization: 'Bearer ' + token },
+          body: data,
+        });
+      },
+
       // The signed-in customer's own orders, newest first. The server filters by
       // `customer_id = actor_id`, so this can never return another customer's
       // order. Resolves to `{ orders, count }`.

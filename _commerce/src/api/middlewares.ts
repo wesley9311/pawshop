@@ -71,6 +71,10 @@ export default defineMiddlewares({
             method: 'POST' as const,
             middlewares: [authenticate('customer', ['session', 'bearer'], { allowUnregistered: true })],
           },
+          {
+            matcher: '/store/customers/me/security',
+            middlewares: [authenticate('customer', ['bearer'])],
+          },
           // Canonicalize the email before it reaches emailpass register/login and
           // before any lookup. This is the single choke point that keeps register /
           // login / verification / lookup / claim on one address form.
