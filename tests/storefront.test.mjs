@@ -1621,22 +1621,21 @@ test('checkout columns stretch, and a selected shipping method does not keep the
   assert.ok(!labelTag.includes('border-slate-200'), 'the selected method must not also carry the grey border');
 });
 
-test('the signed-out account window stays narrow and its primary buttons wrap their labels', () => {
+test('the signed-out account window uses the owner-approved large size and full-width primary buttons', () => {
   const html = read('PawShop.html');
   assert.match(
     html,
-    /#accountPanel\s*\{\s*width:\s*min\(340px,\s*calc\(100vw - 32px\)\);\s*max-width:\s*min\(340px,\s*calc\(100vw - 32px\)\);\s*flex:\s*none;/,
+    /#accountPanel\s*\{\s*width:\s*min\(792px,\s*calc\(100vw - 32px\)\);\s*max-width:\s*min\(792px,\s*calc\(100vw - 32px\)\);\s*height:\s*min\(978px,\s*calc\(100dvh - 32px\)\);\s*max-height:\s*min\(978px,\s*calc\(100dvh - 32px\)\);\s*flex:\s*none;/,
   );
   assert.ok(!html.includes('id="accountResize"'), 'the account window has no resize handle');
   assert.doesNotMatch(html, /(?:getItem|LS_ACCOUNT_WIDTH).*pawshop_account_width|pawshop_account_width.*(?:getItem|LS_ACCOUNT_WIDTH)/);
 
-  const requiredClasses = 'px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg';
+  const requiredClasses = 'w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg';
   for (const id of ['accountSendBtn', 'accountOtpBtn', 'accountSignInBtn']) {
     const start = html.indexOf(`id="${id}"`);
     assert.ok(start >= 0, `${id} exists`);
     const tagStart = html.lastIndexOf('<button', start);
     const tag = html.slice(tagStart, html.indexOf('>', start));
-    assert.ok(tag.includes(requiredClasses), `${id} uses the compact primary-button classes`);
-    assert.doesNotMatch(tag, /\bw-full\b/, `${id} wraps its label instead of filling the modal`);
+    assert.ok(tag.includes(requiredClasses), `${id} uses the full-width primary-button classes`);
   }
 });

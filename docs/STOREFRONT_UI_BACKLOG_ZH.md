@@ -8,11 +8,11 @@
 
 文件：`PawShop.html`。
 
-- `#accountPanel` 的宽度是 `min(340px, calc(100vw - 32px))`，并有同样的 `max-width`，`flex: none`。没有拖宽把手，不读 `pawshop_account_width`。
-- 「发送验证码」「验证并登录」「密码登录」不是 `w-full`。类名是 `px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg`，按钮只包住文字。
+- `#accountPanel` 宽 792px、高 978px（小屏用 `min(792px, calc(100vw - 32px))` 和 `min(978px, calc(100dvh - 32px))`，并加同样的 max-width / max-height，`flex: none`）。这是店主 2026-10-10 按参考图定的尺寸，不要改回 340px 或 680px。没有拖宽把手，不读 `pawshop_account_width`。
+- 「发送验证码」「验证并登录」「密码登录」用 `w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg`，按钮横贯窗口，和图里一样。
 - 登录、验证码、订单、资料、安全的流程不要改。
 
-店主打开 `https://pawlivora.com`，点右上角人头，应看到窄窗口和小按钮。只改本地文件不算完成。
+店主打开 `https://pawlivora.com`，点右上角人头，应看到约 792×978 的登录窗，按钮横贯窗口。屏幕更小则缩进视口。只改本地文件不算完成。
 
 ## 怎么发到 pawlivora.com
 
