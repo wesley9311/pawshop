@@ -22,10 +22,8 @@
   .drawer.open { transform: translateX(0); }
   .modal { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
   .modal.open { opacity: 1; pointer-events: auto; }
-  #accountPanel { width: min(70vw, 1100px); max-width: calc(100vw - 16px); min-width: min(680px, calc(100vw - 16px)); }
+  #accountPanel { width: min(340px, calc(100vw - 32px)); max-width: min(340px, calc(100vw - 32px)); flex: none; }
   #accountScroll { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
-  #accountResize { touch-action: none; cursor: ew-resize; }
-  @media (max-width: 639px) { #accountPanel { width: calc(100vw - 16px) !important; min-width: 0; } #accountResize { display: none; } }
   .toast { opacity: 0; pointer-events: none; transition: opacity 0.2s; }
   .toast.show { opacity: 1; }
   ::-webkit-scrollbar { width: 6px; }
@@ -34,6 +32,7 @@
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   .spinner { border: 2px solid #e2e8f0; border-top: 2px solid #0f172a; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .hit { min-width: 44px; min-height: 44px; }
 </style>
 </head>
 <body class="bg-white text-slate-900">
@@ -41,7 +40,7 @@
 <!-- ===== Top Bar ===== -->
 <div class="bg-slate-900 text-white text-xs py-2 px-4">
   <div class="max-w-6xl mx-auto flex items-center justify-between">
-    <span data-i18n="topbar_note">Flat-rate shipping on all orders</span>
+    <span data-i18n="topbar_note">Shipping is calculated at checkout</span>
     <div class="flex items-center gap-3">
       <select id="langSelect" onchange="setLang(this.value)" class="bg-transparent text-white text-xs border-none cursor-pointer">
         <option value="en">English</option>
@@ -63,11 +62,11 @@
       </div>
       <div class="flex items-center gap-4">
         <div class="hidden sm:block">
-          <input type="text" id="searchInput" placeholder="Search products..." data-i18n-ph="search_ph" class="w-48 lg:w-64 px-4 py-2 bg-slate-50 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300" oninput="handleSearch()">
+          <input type="text" id="searchInput" placeholder="Search products..." data-i18n-ph="search_ph" class="w-48 lg:w-64 px-4 py-2 bg-slate-50 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300" oninput="handleSearch(this)">
         </div>
-        <button onclick="openWaitlist()" aria-label="Launch information" title="Launch information" data-i18n-a11y="a11y_launch" data-i18n-title="a11y_launch" class="hover:opacity-70">
+        <a id="headerContactLink" href="#" onclick="if (this.getAttribute('href') === '#') event.preventDefault();" aria-label="Contact us" title="Contact us" data-i18n-a11y="footer_contact" data-i18n-title="footer_contact" class="hover:opacity-70">
           <i class="fas fa-headset text-slate-700 text-lg"></i>
-        </button>
+        </a>
         <button onclick="openAccount()" class="relative" aria-label="Account" data-i18n-a11y="a11y_account" title="Account" data-i18n-title="a11y_account">
           <i class="fas fa-user text-slate-700"></i>
           <span id="accountDot" class="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full hidden"></span>
@@ -84,7 +83,7 @@
   </div>
   <div id="mobileMenu" class="md:hidden hidden border-t border-slate-100">
     <div class="px-4 py-3 space-y-2">
-      <input type="text" placeholder="Search products..." data-i18n-ph="search_ph" class="w-full px-4 py-2 bg-slate-50 rounded-lg text-sm" oninput="handleSearch()">
+      <input type="text" id="searchInputMobile" placeholder="Search products..." data-i18n-ph="search_ph" class="w-full px-4 py-2 bg-slate-50 rounded-lg text-sm" oninput="handleSearch(this)">
       <a href="#products" class="block py-2 text-sm" onclick="toggleMobileMenu()" data-i18n="nav_shop">Shop</a>
     </div>
   </div>
@@ -157,6 +156,7 @@
 </footer>
 
 <!-- ===== Cart Drawer ===== -->
+<div id="cartBackdrop" class="fixed inset-0 bg-black/50 z-50 hidden" onclick="closeCart()"></div>
 <div id="cartDrawer" class="drawer fixed top-0 right-0 bottom-0 w-full max-w-sm bg-white z-50 flex flex-col">
   <div class="p-4 border-b border-slate-100 flex items-center justify-between">
     <h3 class="font-bold"><span data-i18n="cart">Cart</span> <span id="cartItemCount" class="text-sm text-slate-400 font-normal">(0)</span></h3>
@@ -238,9 +238,6 @@
     <div id="accountScroll" class="p-5 space-y-5 min-h-0 overflow-y-auto">
       <div id="accountBody"></div>
     </div>
-    <div id="accountResize" role="separator" aria-orientation="vertical" aria-label="Resize account window" onpointerdown="startAccountResize(event)" class="absolute right-0 top-1/4 h-1/2 w-3 flex items-center justify-center group" title="Resize">
-      <span class="h-12 w-1 rounded-full bg-slate-300 group-hover:bg-slate-500"></span>
-    </div>
   </div>
 </div>
 
@@ -253,7 +250,7 @@
     <h2 class="text-lg font-bold mb-1 text-center" data-i18n="waitlist_title">Launch status</h2>
     <p class="text-xs text-slate-500 text-center mb-6" data-i18n="waitlist_body">The catalog and cart are live. Checkout opens once payment is connected.</p>
     <button onclick="submitWaitlist()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2" data-i18n="waitlist_cta">Check launch status</button>
-    <button onclick="document.getElementById('waitlistModal').classList.remove('open')" class="w-full py-2 text-xs text-slate-400 hover:text-slate-600" data-i18n="waitlist_no">No thanks</button>
+    <button onclick="closeWaitlist()" class="w-full py-2 text-xs text-slate-400 hover:text-slate-600" data-i18n="waitlist_no">No thanks</button>
   </div>
 </div>
 
@@ -360,7 +357,7 @@ function localizedFallback() { return t('product_copy_pending'); }
 // ===== i18n:界面双语 =====
 const I18N = {
   en: {
-    topbar_note: 'Flat-rate shipping on all orders',
+    topbar_note: 'Shipping is calculated at checkout',
     nav_shop: 'Shop',
     search_ph: 'Search products...',
     hero_title: 'Happier pets, easier days.',
@@ -372,6 +369,8 @@ const I18N = {
     sort_popular: 'Featured', sort_price_low: 'Price: low to high', sort_price_high: 'Price: high to low',
     load_more: 'Load more', no_products: 'No products available for purchase yet',
     no_products_note: 'The shop is being stocked. Please check back soon.',
+    no_matches: 'No products match.',
+    no_matches_note: 'Try a different search or category.',
     catalog_unavailable: 'The shop is temporarily unavailable. Please refresh later.',
     loading: 'Loading products…',
     retry: 'Try again',
@@ -381,9 +380,9 @@ const I18N = {
     from_price: 'From',
     variant: 'Option', quantity: 'Quantity', sku: 'SKU',
     add_to_cart: 'Add to cart', adding: 'Adding…',
-    trust_flat_shipping: 'Flat shipping', trust_taxes: 'Taxes calculated at checkout',
-    trust_line: 'Ships from China · Flat-rate shipping',
-    shipping_details: 'Flat-rate shipping applies to every order in the US pilot market. Taxes are calculated at checkout.',
+    trust_flat_shipping: 'Calculated at checkout', trust_taxes: 'Taxes calculated at checkout',
+    trust_line: 'Ships from China · Shipping calculated at checkout',
+    shipping_details: 'Shipping is calculated at checkout for the US pilot market. Taxes are calculated at checkout.',
     returns_details: 'Our returns and refunds policy is published before checkout opens.',
     footer_tag: 'Pet supplies for cats & dogs, carefully selected.',
     footer_support: 'Support', footer_shipping: 'Shipping policy', footer_returns: 'Returns & refunds', footer_faq: 'FAQ',
@@ -561,7 +560,6 @@ const I18N = {
     account_code_reverify: 'Verify your email again before setting a password.',
     account_security_code: 'Email code',
     account_save_password: 'Save password',
-    account_resize: 'Drag to resize account window',
     account_no_orders: 'You have no orders yet.',
     account_orders_note: 'Your orders are shown below, most recent first.',
     account_signout: 'Sign out',
@@ -597,7 +595,7 @@ const I18N = {
     account_otp_unavailable: 'One-time sign-in is temporarily unavailable. Please try again.',
   },
   zh: {
-    topbar_note: '所有订单统一运费',
+    topbar_note: '运费在结算时计算',
     nav_shop: '商品',
     search_ph: '搜索商品...',
     hero_title: '让毛孩子更幸福，让生活更轻松',
@@ -609,6 +607,8 @@ const I18N = {
     sort_popular: '推荐', sort_price_low: '价格从低到高', sort_price_high: '价格从高到低',
     load_more: '加载更多', no_products: '暂无可购买商品',
     no_products_note: '商品正在上架中，请稍后再来。',
+    no_matches: '没有符合的商品。',
+    no_matches_note: '换个搜索词或分类试试。',
     catalog_unavailable: '商品暂时无法加载，请稍后刷新。',
     loading: '正在加载商品…',
     retry: '重试',
@@ -618,9 +618,9 @@ const I18N = {
     from_price: '起价',
     variant: '款式', quantity: '数量', sku: 'SKU',
     add_to_cart: '加入购物车', adding: '正在加入…',
-    trust_flat_shipping: '统一运费', trust_taxes: '税费在结算时计算',
-    trust_line: '从中国发货 · 统一运费',
-    shipping_details: '美国试运营市场所有订单适用统一运费，税费在结算时计算。',
+    trust_flat_shipping: '结算时计算', trust_taxes: '税费在结算时计算',
+    trust_line: '从中国发货 · 运费在结算时计算',
+    shipping_details: '美国试运营市场的运费在结算时计算，税费也在结算时计算。',
     returns_details: '退换与退款政策将在结算开放前公布。',
     footer_tag: '精选犬猫好物。',
     footer_support: '支持', footer_shipping: '配送政策', footer_returns: '退换与退款', footer_faq: '常见问题',
@@ -792,7 +792,6 @@ const I18N = {
     account_code_reverify: '设置密码前，请再次验证邮箱。',
     account_security_code: '邮箱验证码',
     account_save_password: '保存密码',
-    account_resize: '拖动调整账户窗口宽度',
     account_no_orders: '暂无订单。',
     account_orders_note: '以下是您的订单，按时间倒序排列。',
     account_signout: '退出登录',
@@ -836,12 +835,12 @@ function applyI18n() {
   document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   document.querySelectorAll('[data-i18n-a11y]').forEach(el => { el.setAttribute('aria-label', t(el.dataset.i18nA11y)); });
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.setAttribute('title', t(el.dataset.i18nTitle)); });
-  const resize = document.getElementById('accountResize');
-  if (resize) { resize.setAttribute('aria-label', t('account_resize')); resize.setAttribute('title', t('account_resize')); }
   // The footer "Contact us" link is a plain mailto: with no order context; keep
   // its href in step with the current language (subject wording localizes).
   const contactLink = document.getElementById('footerContactLink');
   if (contactLink && supportEmail) contactLink.setAttribute('href', contactMailtoHref(''));
+  const headerContact = document.getElementById('headerContactLink');
+  if (headerContact && supportEmail) headerContact.setAttribute('href', contactMailtoHref(''));
   // Keep the document's declared language in sync so screen readers and the
   // browser announce the correct language for the rendered copy.
   if (document.documentElement) document.documentElement.lang = lang;
@@ -928,10 +927,13 @@ function renderCategoryBar() {
   const groups = [...new Set(products.map(p => safeToken(p.group)).filter(Boolean))];
   if (!groups.length) { section.classList.add('hidden'); document.getElementById('categoryBar').innerHTML = ''; return; }
   section.classList.remove('hidden');
+  const buttonClass = active => active
+    ? 'category-btn px-4 py-1.5 bg-slate-900 text-white rounded-full text-sm whitespace-nowrap'
+    : 'category-btn px-4 py-1.5 text-slate-600 rounded-full text-sm whitespace-nowrap hover:bg-slate-100';
   document.getElementById('categoryBar').innerHTML =
-    `<button onclick="filterProducts('all', event)" class="category-btn px-4 py-1.5 bg-slate-900 text-white rounded-full text-sm whitespace-nowrap">${t('cat_all')}</button>` +
+    `<button onclick="filterProducts('all', event)" class="${buttonClass(currentCategory === 'all')}">${t('cat_all')}</button>` +
     groups.map(g =>
-      `<button onclick="filterProducts('${g}', event)" class="category-btn px-4 py-1.5 text-slate-600 rounded-full text-sm whitespace-nowrap hover:bg-slate-100">${safeHtml(g)}</button>`
+      `<button onclick="filterProducts('${g}', event)" class="${buttonClass(currentCategory === g)}">${safeHtml(g)}</button>`
     ).join('');
 }
 
@@ -994,10 +996,11 @@ function renderProducts() {
   }
 
   if (filtered.length === 0) {
+    const emptyShop = products.length === 0;
     grid.innerHTML = `<div class="col-span-full text-center py-12">
-      <i class="fas fa-box-open text-4xl text-slate-200 mb-4"></i>
-      <p class="text-slate-500 mb-1">${products.length === 0 ? t('no_products') : t('no_products_note')}</p>
-      ${products.length === 0 ? `<p class="text-xs text-slate-400">${t('no_products_note')}</p>` : ''}
+      <i class="fas ${emptyShop ? 'fa-box-open' : 'fa-search'} text-4xl text-slate-200 mb-4"></i>
+      <p class="text-slate-500 mb-1">${emptyShop ? t('no_products') : t('no_matches')}</p>
+      <p class="text-xs text-slate-400">${emptyShop ? t('no_products_note') : t('no_matches_note')}</p>
     </div>`;
     loadMore.classList.add('hidden');
     return;
@@ -1018,7 +1021,7 @@ function renderProducts() {
         ${variantPicker(p, `pickCardVariant('${safeToken(p.id)}', this.value)`)}
         <div class="flex items-center justify-between">
           <div>${priceHtml(p)}</div>
-          <button onclick="event.stopPropagation(); addToCart('${safeToken(p.id)}')" ${addable ? '' : 'disabled'} class="w-7 h-7 ${addable ? 'bg-slate-900 hover:bg-slate-700' : 'bg-slate-300 cursor-not-allowed'} text-white rounded flex items-center justify-center" aria-label="${t('add_to_cart')}">
+          <button onclick="event.stopPropagation(); addToCart('${safeToken(p.id)}')" ${addable ? '' : 'disabled'} class="hit ${addable ? 'bg-slate-900 hover:bg-slate-700' : 'bg-slate-300 cursor-not-allowed'} text-white rounded flex items-center justify-center" aria-label="${t('add_to_cart')}">
             <i class="fas fa-plus text-xs"></i>
           </button>
         </div>
@@ -1038,8 +1041,13 @@ function openProduct(id) {
   modalQty = 1;
   renderProductModal();
   document.getElementById('productModal').classList.add('open');
+  syncPageScrollLock();
 }
-function closeProduct() { openProductId = null; document.getElementById('productModal').classList.remove('open'); }
+function closeProduct() {
+  openProductId = null;
+  document.getElementById('productModal').classList.remove('open');
+  syncPageScrollLock();
+}
 
 // Stock hint: "only a few left" only when the shop actually reported a low
 // number. We never invent scarcity the server did not give us.
@@ -1121,13 +1129,23 @@ function setModalQty(delta) {
 
 // ===== Search / filter / sort =====
 let searchTimer;
-function handleSearch() {
+function searchFieldValue(source) {
+  const el = source && typeof source.value === 'string' ? source : document.getElementById('searchInput');
+  return el ? el.value : '';
+}
+function commitSearch(source) {
+  const value = searchFieldValue(source);
+  ['searchInput', 'searchInputMobile'].forEach(id => {
+    const box = document.getElementById(id);
+    if (box && box !== source) box.value = value;
+  });
+  searchQuery = value;
+  displayedProducts = 8;
+  renderProducts();
+}
+function handleSearch(source) {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    searchQuery = document.getElementById('searchInput').value;
-    displayedProducts = 8;
-    renderProducts();
-  }, 300);
+  searchTimer = setTimeout(() => commitSearch(source), 300);
 }
 function loadMore() { displayedProducts += 8; renderProducts(); }
 
@@ -1297,6 +1315,9 @@ function renderCart() {
   const items = cart ? cart.items : [];
   const count = items.reduce((sum, item) => sum + item.quantity, 0);
   document.getElementById('cartCount').textContent = count;
+  const cartBadge = document.getElementById('cartCount');
+  if (count > 0) cartBadge.classList.remove('hidden');
+  else cartBadge.classList.add('hidden');
   document.getElementById('cartItemCount').textContent = `(${count})`;
   // Every figure below comes from the Medusa cart, never recomputed locally.
   document.getElementById('cartSubtotal').textContent = money(cart && cart.subtotal !== null ? cart.subtotal : 0);
@@ -1345,11 +1366,11 @@ function renderCart() {
         <div class="text-sm mb-2">${money(item.unitPrice)} <span class="text-xs text-slate-400">× ${item.quantity}</span>${item.lineTotal === null ? '' : ` <span class="text-xs text-slate-500">= ${money(item.lineTotal)}</span>`}</div>
         <div class="flex items-center justify-between">
           <div class="flex items-center border border-slate-200 rounded">
-            <button onclick="changeQty('${safeToken(item.id)}', -1)" class="w-6 h-6 flex items-center justify-center" aria-label="${t('a11y_decrease')}">-</button>
+            <button onclick="changeQty('${safeToken(item.id)}', -1)" class="hit flex items-center justify-center" aria-label="${t('a11y_decrease')}">-</button>
             <span class="w-8 text-center text-sm">${item.quantity}</span>
-            <button onclick="changeQty('${safeToken(item.id)}', 1)" class="w-6 h-6 flex items-center justify-center" aria-label="${t('a11y_increase')}">+</button>
+            <button onclick="changeQty('${safeToken(item.id)}', 1)" class="hit flex items-center justify-center" aria-label="${t('a11y_increase')}">+</button>
           </div>
-          <button onclick="removeLine('${safeToken(item.id)}')" class="text-slate-400 hover:text-red-500" aria-label="${t('a11y_remove')}">
+          <button onclick="removeLine('${safeToken(item.id)}')" class="hit flex items-center justify-center text-slate-400 hover:text-red-500" aria-label="${t('a11y_remove')}">
             <i class="fas fa-trash text-xs"></i>
           </button>
         </div>
@@ -1358,8 +1379,46 @@ function renderCart() {
   }).join('');
 }
 
-function openCart() { document.getElementById('cartDrawer').classList.add('open'); }
-function closeCart() { document.getElementById('cartDrawer').classList.remove('open'); }
+// One page-scroll lock for the shop overlays. The account window keeps its own
+// lock (it restores the exact scroll position), so this stays out of its way.
+function syncPageScrollLock() {
+  if (accountScrollPosition !== null) return;
+  const open = ['cartDrawer', 'productModal', 'checkoutModal', 'orderModal', 'waitlistModal'].some(id => {
+    const el = document.getElementById(id);
+    return el && el.classList.contains('open');
+  });
+  document.body.style.overflow = open ? 'hidden' : '';
+}
+
+// Escape closes only the front overlay. Later nodes in the page sit on top
+// when several share the same layer, so this list is top-first.
+function closeFrontOverlay() {
+  const order = [
+    ['waitlistModal', closeWaitlist],
+    ['accountModal', closeAccount],
+    ['orderModal', closeOrder],
+    ['checkoutModal', closeCheckout],
+    ['productModal', closeProduct],
+    ['cartDrawer', closeCart],
+  ];
+  for (const [id, close] of order) {
+    const el = document.getElementById(id);
+    if (el && el.classList.contains('open')) { close(); return; }
+  }
+}
+
+function openCart() {
+  document.getElementById('cartDrawer').classList.add('open');
+  const backdrop = document.getElementById('cartBackdrop');
+  if (backdrop) backdrop.classList.remove('hidden');
+  syncPageScrollLock();
+}
+function closeCart() {
+  document.getElementById('cartDrawer').classList.remove('open');
+  const backdrop = document.getElementById('cartBackdrop');
+  if (backdrop) backdrop.classList.add('hidden');
+  syncPageScrollLock();
+}
 
 // ===== Checkout: real cart -> email -> address -> shipping option -> totals -> payment boundary =====
 // Everything the visitor enters is written back to the Medusa cart, and every
@@ -1486,6 +1545,7 @@ async function checkout() {
   }
   renderCheckout();
   document.getElementById('checkoutModal').classList.add('open');
+  syncPageScrollLock();
   await refreshCheckoutShippingOptions();
   renderCheckout();
 }
@@ -1527,7 +1587,10 @@ async function refreshCheckoutShippingOptions() {
   }
 }
 
-function closeCheckout() { document.getElementById('checkoutModal').classList.remove('open'); }
+function closeCheckout() {
+  document.getElementById('checkoutModal').classList.remove('open');
+  syncPageScrollLock();
+}
 
 function fieldErrorHtml(field) {
   const msg = checkoutFieldErrors[field];
@@ -1637,7 +1700,7 @@ function renderCheckout() {
   // a silently empty list.
   const optionsHtml = checkoutShippingOptions.length
     ? checkoutShippingOptions.map(o => `
-      <label class="flex items-center justify-between gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:border-slate-400 ${checkoutSelectedOption === o.id ? 'border-slate-900 ring-1 ring-slate-900' : ''}">
+      <label class="flex items-center justify-between gap-3 p-3 border rounded-lg cursor-pointer ${checkoutSelectedOption === o.id ? 'border-slate-900 ring-1 ring-slate-900' : 'border-slate-200 hover:border-slate-400'}">
         <span class="flex items-center gap-3">
           <input type="radio" name="shippingOption" value="${safeToken(o.id)}" ${checkoutSelectedOption === o.id ? 'checked' : ''} onchange="pickShippingOption('${safeToken(o.id)}')" class="accent-slate-900">
           <span class="text-sm">${safeHtml(o.name)}</span>
@@ -1657,11 +1720,11 @@ function renderCheckout() {
       <h4 class="font-semibold mb-3">${t('co_shipping')}</h4>
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <input id="coFirst" placeholder="${t('co_first')}" value="${safeHtml(d.firstName)}" oninput="setDraft('firstName', this.value); setFieldError('firstName', '')" class="${fieldClass('firstName', 'px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+          <input id="coFirst" placeholder="${t('co_first')}" value="${safeHtml(d.firstName)}" oninput="setDraft('firstName', this.value); setFieldError('firstName', '')" class="${fieldClass('firstName', 'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
           ${fieldErrorHtml('firstName')}
         </div>
         <div>
-          <input id="coLast" placeholder="${t('co_last')}" value="${safeHtml(d.lastName)}" oninput="setDraft('lastName', this.value); setFieldError('lastName', '')" class="${fieldClass('lastName', 'px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+          <input id="coLast" placeholder="${t('co_last')}" value="${safeHtml(d.lastName)}" oninput="setDraft('lastName', this.value); setFieldError('lastName', '')" class="${fieldClass('lastName', 'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
           ${fieldErrorHtml('lastName')}
         </div>
       </div>
@@ -1674,7 +1737,7 @@ function renderCheckout() {
       </div>
       <div class="grid grid-cols-2 gap-3 mt-3">
         <div>
-          <input id="coCity" placeholder="${t('co_city')}" value="${safeHtml(d.city)}" oninput="setDraft('city', this.value); setFieldError('city', '')" class="${fieldClass('city', 'px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+          <input id="coCity" placeholder="${t('co_city')}" value="${safeHtml(d.city)}" oninput="setDraft('city', this.value); setFieldError('city', '')" class="${fieldClass('city', 'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
           ${fieldErrorHtml('city')}
         </div>
         <div>
@@ -1684,7 +1747,7 @@ function renderCheckout() {
       </div>
       <div class="grid grid-cols-2 gap-3 mt-3">
         <div>
-          <input id="coPostal" placeholder="${t('co_postal')}" value="${safeHtml(d.postalCode)}" oninput="setDraft('postalCode', this.value); setFieldError('postalCode', '')" class="${fieldClass('postalCode', 'px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
+          <input id="coPostal" placeholder="${t('co_postal')}" value="${safeHtml(d.postalCode)}" oninput="setDraft('postalCode', this.value); setFieldError('postalCode', '')" class="${fieldClass('postalCode', 'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-slate-300')}">
           ${fieldErrorHtml('postalCode')}
         </div>
         <div>
@@ -1984,10 +2047,12 @@ function quantityOf(item) {
 function closeOrder() {
   if (orderLookupTimer) { clearInterval(orderLookupTimer); orderLookupTimer = null; }
   document.getElementById('orderModal').classList.remove('open');
+  syncPageScrollLock();
 }
 
 function openOrderLookup() {
   document.getElementById('orderModal').classList.add('open');
+  syncPageScrollLock();
   renderOrderLookupForm();
 }
 
@@ -2361,6 +2426,7 @@ async function handlePayPalReturn() {
   const hasPayerID = /[?&]PayerID=/.test(search);
   if (!hasPayerID) {
     document.getElementById('orderModal').classList.add('open');
+    syncPageScrollLock();
     renderPayPalCanceled();
     // The saved cart id stays (so the buyer can retry the same basket), but the
     // return marker is stale — drop it so a later visit is not misread.
@@ -2369,6 +2435,7 @@ async function handlePayPalReturn() {
   }
 
   document.getElementById('orderModal').classList.add('open');
+  syncPageScrollLock();
   const body = document.getElementById('orderBody');
   body.innerHTML = `
     <div class="text-center py-6">
@@ -2414,9 +2481,16 @@ async function handlePayPalReturn() {
 }
 
 // ===== Launch status =====
-function openWaitlist() { document.getElementById('waitlistModal').classList.add('open'); }
-function submitWaitlist() {
+function openWaitlist() {
+  document.getElementById('waitlistModal').classList.add('open');
+  syncPageScrollLock();
+}
+function closeWaitlist() {
   document.getElementById('waitlistModal').classList.remove('open');
+  syncPageScrollLock();
+}
+function submitWaitlist() {
+  closeWaitlist();
   showToast(t('waitlist_closed'));
 }
 
@@ -2430,17 +2504,13 @@ function showToast(message) {
 function toggleMobileMenu() { document.getElementById('mobileMenu').classList.toggle('hidden'); }
 
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape') {
-    closeCart();
-    closeProduct();
-    closeCheckout();
-    closeOrder();
-    closeAccount();
-    document.getElementById('waitlistModal').classList.remove('open');
-  }
+  if (e.key === 'Escape') closeFrontOverlay();
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault();
-    document.getElementById('searchInput')?.focus();
+    const desktop = document.getElementById('searchInput');
+    const mobile = document.getElementById('searchInputMobile');
+    const visible = desktop && desktop.offsetParent !== null ? desktop : mobile;
+    if (visible) visible.focus();
   }
 });
 
@@ -2481,7 +2551,6 @@ function retryBootstrap() { bootstrap(); }
 // enforces ownership on every order read (customer_id === actor_id), so the
 // account view can only ever list this customer's own orders.
 const LS_CUSTOMER_TOKEN = 'pawshop_customer_token';
-const LS_ACCOUNT_WIDTH = 'pawshop_account_width';
 let customerToken = null;
 let customerAccount = null;        // normalized customer profile (or null)
 let accountBodyKind = 'signed_out'; // signed_out | hub | orders | profile | security | order_detail
@@ -2533,12 +2602,8 @@ function openAccount() {
     document.body.style.overflow = 'hidden';
   }
   const panel = document.getElementById('accountPanel');
-  const resize = document.getElementById('accountResize');
-  if (resize) { resize.setAttribute('aria-label', t('account_resize')); resize.setAttribute('title', t('account_resize')); }
-  try {
-    const width = Number(localStorage.getItem(LS_ACCOUNT_WIDTH));
-    if (panel && width >= 680 && width <= 1100) panel.style.width = `${width}px`;
-  } catch (_) { /* local preference is optional */ }
+  if (panel) panel.style.width = '';
+  try { localStorage.removeItem('pawshop_account_width'); } catch (_) { /* old dragged width is no longer used */ }
   document.getElementById('accountModal').classList.add('open');
   renderAccount();
 }
@@ -2561,29 +2626,8 @@ function closeAccount() {
     window.scrollTo(0, previous.y);
     root.style.scrollBehavior = scrollBehavior;
   }
+  syncPageScrollLock();
   if (customerToken) scheduleTokenRefresh();
-}
-
-function startAccountResize(event) {
-  if (!event || event.pointerType === 'touch') return;
-  event.preventDefault();
-  event.stopPropagation();
-  const panel = document.getElementById('accountPanel');
-  if (!panel) return;
-  const startX = event.clientX;
-  const startWidth = panel.getBoundingClientRect().width;
-  const move = (next) => {
-    const max = Math.min(1100, window.innerWidth - 32);
-    const width = Math.round(Math.max(Math.min(680, max), Math.min(max, startWidth + (next.clientX - startX) * 2)));
-    panel.style.width = `${width}px`;
-  };
-  const stop = () => {
-    window.removeEventListener('pointermove', move);
-    window.removeEventListener('pointerup', stop);
-    try { localStorage.setItem(LS_ACCOUNT_WIDTH, String(Math.round(panel.getBoundingClientRect().width))); } catch (_) {}
-  };
-  window.addEventListener('pointermove', move);
-  window.addEventListener('pointerup', stop, { once: true });
 }
 
 // Render the account modal into its current state: signed-out login form, the
@@ -2634,10 +2678,10 @@ function renderAccountAuthForm() {
           <p class="text-sm text-slate-500 mb-3">${t('account_code_enter')}</p>
           <div class="flex justify-center gap-2 mb-3" id="otpCodeInputs"></div>
           <p id="accountOtpError" class="text-xs text-red-600 mb-3 hidden"></p>
-          <button onclick="submitAccountOtp()" id="accountOtpBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700 mb-2">${t('account_code_verify')}</button>
+          <button onclick="submitAccountOtp()" id="accountOtpBtn" class="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700 mb-2">${t('account_code_verify')}</button>
           <button onclick="resendOtp()" id="accountResendBtn" class="w-full py-2 text-sm text-slate-600 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed">${t('account_code_resend')}</button>
         </div>
-        <button onclick="sendOtp()" id="accountSendBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_code_send')}</button>
+        <button onclick="sendOtp()" id="accountSendBtn" class="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700">${t('account_code_send')}</button>
         <p id="accountSendError" class="text-xs text-red-600 mt-2 hidden"></p>
       </div>
       <div class="mt-5 pt-4 border-t border-slate-100 space-y-2">
@@ -2651,7 +2695,7 @@ function renderAccountAuthForm() {
         <input type="email" id="accountEmail" autocomplete="email" placeholder="${t('lookup_email_ph')}" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
         <label class="block text-sm font-medium mb-1" for="accountPassword">${t('account_password')}</label>
         <input type="password" id="accountPassword" autocomplete="current-password" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-slate-300">
-        <button onclick="submitAccountSignIn()" id="accountSignInBtn" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_signin')}</button>
+        <button onclick="submitAccountSignIn()" id="accountSignInBtn" class="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700">${t('account_signin')}</button>
         <p id="accountSignInError" class="text-xs text-red-600 mt-2 hidden"></p>
       </div>
       <div class="mt-5 pt-4 border-t border-slate-100">
@@ -3055,7 +3099,7 @@ async function showAccountSecurity() {
       <input id="securityNewPassword" type="password" autocomplete="new-password" class="w-full px-3 py-2 border rounded-lg">
       <label class="block text-sm" for="securityConfirmPassword">${t('account_confirm_password')}</label>
       <input id="securityConfirmPassword" type="password" autocomplete="new-password" class="w-full px-3 py-2 border rounded-lg">
-      <button id="securitySaveBtn" onclick="saveSecurityPassword(${passwordSet})" class="w-full py-3 bg-slate-900 text-white rounded-lg text-sm">${t('account_save_password')}</button>
+      <button id="securitySaveBtn" onclick="saveSecurityPassword(${passwordSet})" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm">${t('account_save_password')}</button>
       <p id="securityMessage" role="status" class="text-sm text-red-600 hidden"></p>
     </div>`;
 }
@@ -3244,7 +3288,7 @@ function accountOrderDetailHtml(order) {
           </div>
         </div>
       </section>
-      <button onclick="showAccountOrders()" class="w-full py-3 bg-slate-900 text-white text-sm font-medium rounded hover:bg-slate-700">${t('account_back_to_orders')}</button>
+      <button onclick="showAccountOrders()" class="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-700">${t('account_back_to_orders')}</button>
     </div>`;
 }
 

@@ -1521,3 +1521,122 @@ test('OTP sign-in for a NEW email claims the customer then refreshes to an actor
   assert.ok(paths.includes('POST /auth/token/refresh'), 'refreshes to an actor-bound token');
   assert.equal(app.run('customerToken'), 'actor_bound_token', 'the final token is the refreshed actor-bound token');
 });
+
+test('a search miss says nothing matched, instead of claiming the shop is empty', async () => {
+  const app = bootPawShop({
+    routes: { 'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }) },
+  });
+  await app.settle();
+  app.run("document.getElementById('searchInput').value = 'zzzz-not-a-product'");
+  app.run("commitSearch(document.getElementById('searchInput'))");
+  const grid = app.nodes.get('productGrid').innerHTML;
+  assert.ok(grid.includes('No products match.'), grid);
+  assert.ok(!grid.includes('being stocked'), 'a search miss must not say the shop is being stocked');
+  assert.ok(!grid.includes('Cardboard Cat Lounger'));
+});
+
+test('mobile search reads the mobile field and keeps the desktop field in step', async () => {
+  const app = bootPawShop({
+    routes: { 'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }) },
+  });
+  await app.settle();
+  app.run("document.getElementById('searchInput').value = ''");
+  app.run("document.getElementById('searchInputMobile').value = 'Lounger'");
+  assert.equal(app.run("searchFieldValue(document.getElementById('searchInputMobile'))"), 'Lounger');
+  app.run("commitSearch(document.getElementById('searchInputMobile'))");
+  assert.ok(app.nodes.get('productGrid').innerHTML.includes('Cardboard Cat Lounger'));
+  assert.equal(app.run("document.getElementById('searchInput').value"), 'Lounger', 'the desktop box mirrors the mobile query');
+});
+
+test('re-rendering the category bar keeps the active category, not All', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/products': () => ({
+        status: 200,
+        body: { products: [product({ collection: { title: 'Cats' } })], count: 1 },
+      }),
+    },
+  });
+  await app.settle();
+  app.run("currentCategory = 'Cats'; renderCategoryBar();");
+  const html = app.nodes.get('categoryBar').innerHTML;
+  const allBtn = html.slice(0, html.indexOf('</button>'));
+  assert.ok(!allBtn.includes('bg-slate-900'), allBtn);
+  assert.ok(html.includes('Cats'));
+  assert.ok(html.includes('bg-slate-900'));
+});
+
+test('an empty cart hides the count badge but still reports zero', async () => {
+  const app = bootPawShop();
+  await app.settle();
+  assert.equal(app.nodes.get('cartCount').textContent, 0);
+  assert.ok(app.nodes.get('cartCount').classList.contains('hidden'));
+});
+
+test('the cart locks the page, and escape closes only the front overlay', async () => {
+  const app = bootPawShop();
+  await app.settle();
+  app.run('openCart()');
+  assert.equal(app.run('document.body.style.overflow'), 'hidden');
+  assert.ok(!app.nodes.get('cartBackdrop').classList.contains('hidden'));
+  app.run("document.getElementById('checkoutModal').classList.add('open')");
+  app.run('closeFrontOverlay()');
+  assert.ok(!app.nodes.get('checkoutModal').classList.contains('open'), 'escape closes checkout first');
+  assert.ok(app.nodes.get('cartDrawer').classList.contains('open'), 'the cart underneath stays open');
+  app.run('closeFrontOverlay()');
+  assert.ok(!app.nodes.get('cartDrawer').classList.contains('open'));
+  assert.equal(app.run('document.body.style.overflow'), '');
+});
+
+test('checkout columns stretch, and a selected shipping method does not keep the grey border', async () => {
+  const app = bootPawShop({
+    routes: {
+      'GET /store/regions': () => ({ status: 200, body: { regions: [{ id: 'reg_1', countries: [{ code: 'us', name: 'United States' }] }] } }),
+      'GET /store/products': () => ({ status: 200, body: { products: [product()], count: 1 } }),
+      'POST /store/carts': () => ({ status: 200, body: cartPayload() }),
+      'POST /store/carts/cart_1/line-items': () => ({ status: 200, body: cartPayload({ items: [lineItem()], subtotal: 29.9 }) }),
+      'GET /store/shipping-options': () => ({ status: 200, body: { shipping_options: [{ id: 'so_1', name: 'Standard Shipping', amount: 9.9 }] } }),
+    },
+  });
+  await app.settle();
+  await app.run("addToCart('prod_1')");
+  await app.run('checkout()');
+  await app.settle();
+
+  const tagFor = (html, id) => {
+    const i = html.indexOf(`id="${id}"`);
+    return i < 0 ? '' : html.slice(i, html.indexOf('>', i));
+  };
+  const html = app.run("document.getElementById('checkoutBody').innerHTML");
+  for (const id of ['coFirst', 'coLast', 'coCity', 'coPostal']) {
+    assert.ok(/\bw-full\b/.test(tagFor(html, id)), `${id} stretches to its column`);
+  }
+
+  app.run("checkoutSelectedOption = 'so_1'; renderCheckout();");
+  const selectedHtml = app.run("document.getElementById('checkoutBody').innerHTML");
+  const radio = selectedHtml.indexOf('name="shippingOption"');
+  const labelStart = selectedHtml.lastIndexOf('<label', radio);
+  const labelTag = selectedHtml.slice(labelStart, selectedHtml.indexOf('>', labelStart));
+  assert.ok(labelTag.includes('border-slate-900'), labelTag);
+  assert.ok(!labelTag.includes('border-slate-200'), 'the selected method must not also carry the grey border');
+});
+
+test('the signed-out account window stays narrow and its primary buttons wrap their labels', () => {
+  const html = read('PawShop.html');
+  assert.match(
+    html,
+    /#accountPanel\s*\{\s*width:\s*min\(340px,\s*calc\(100vw - 32px\)\);\s*max-width:\s*min\(340px,\s*calc\(100vw - 32px\)\);\s*flex:\s*none;/,
+  );
+  assert.ok(!html.includes('id="accountResize"'), 'the account window has no resize handle');
+  assert.doesNotMatch(html, /(?:getItem|LS_ACCOUNT_WIDTH).*pawshop_account_width|pawshop_account_width.*(?:getItem|LS_ACCOUNT_WIDTH)/);
+
+  const requiredClasses = 'px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg';
+  for (const id of ['accountSendBtn', 'accountOtpBtn', 'accountSignInBtn']) {
+    const start = html.indexOf(`id="${id}"`);
+    assert.ok(start >= 0, `${id} exists`);
+    const tagStart = html.lastIndexOf('<button', start);
+    const tag = html.slice(tagStart, html.indexOf('>', start));
+    assert.ok(tag.includes(requiredClasses), `${id} uses the compact primary-button classes`);
+    assert.doesNotMatch(tag, /\bw-full\b/, `${id} wraps its label instead of filling the modal`);
+  }
+});
