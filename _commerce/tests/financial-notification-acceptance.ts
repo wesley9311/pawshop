@@ -73,6 +73,11 @@ export default async function ({container}:any) {
   await payment.createPayments({amount:25,currency_code:'usd',provider_id:as.provider_id,payment_session:as.id,payment_collection_id:apc.id,data:{...as.data,authorization_id:'AUTH'+as.data.id}})
   await payment.updatePaymentSessions({id:as.id,status:'authorized',authorized_at:new Date()})
   await cancelOrderWorkflow(container).run({input:{order_id:authorized.id}});await handleOrderCancelled(container,logger,authorized.id);assert.match(plain(sink.messages.at(-1).body),/authorization has been voided/)
+  const pendingOrder=await create(),pendingCollection=await payment.createPaymentCollections({amount:25,currency_code:'usd'})
+  await container.resolve(ContainerRegistrationKeys.LINK).create({[Modules.ORDER]:{order_id:pendingOrder.id},[Modules.PAYMENT]:{payment_collection_id:pendingCollection.id}})
+  await payment.createPaymentSession(pendingCollection.id,{provider_id:'pp_paypal_paypal',amount:25,currency_code:'usd',data:{},context:{}})
+  await cancelOrderWorkflow(container).run({input:{order_id:pendingOrder.id}});await handleOrderCancelled(container,logger,pendingOrder.id)
+  assert.match(plain(sink.messages.at(-1).body),/Payment status needs review/);assert.doesNotMatch(plain(sink.messages.at(-1).body),/No payment authorization is recorded/)
   const ambiguous=await create();await cancelOrderWorkflow(container).run({input:{order_id:ambiguous.id}});sink.loseNextAcknowledgement()
   assert.equal(await handleOrderCancelled(container,logger,ambiguous.id),'delivery_unknown');const accepted=sink.messages.length
   await handleOrderCancelled(container,logger,ambiguous.id);assert.equal(sink.messages.length,accepted)

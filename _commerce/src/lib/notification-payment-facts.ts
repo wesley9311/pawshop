@@ -16,7 +16,7 @@ async function paypalRead(path: string) {
 function identifier(id: any) { if (typeof id !== 'string' || !/^[A-Za-z0-9_-]+$/.test(id)) throw Error('notification_payment_relation_invalid'); return id }
 const adapters: Record<string, any> = {
   pp_paypal_paypal: {
-    async payment(payment: Json) {
+    async payment(payment: Json, sessionOnly = false) {
       const order = await paypalRead('/v2/checkout/orders/' + identifier(payment.data?.id))
       if (order.id !== payment.data.id || order.purchase_units?.length !== 1 ||
           order.purchase_units[0].custom_id !== payment.payment_session_id) throw Error('notification_payment_relation_invalid')
@@ -25,7 +25,7 @@ const adapters: Record<string, any> = {
       if (unit.amount?.currency_code !== currency || money(unit.amount.value) !== money(payment.amount)) throw Error('notification_payment_amount_invalid')
       if (captures.length > 1 || authorizations.length > 1) throw Error('notification_payment_relation_invalid')
       const capture = captures[0]
-      if (capture && (capture.id !== payment.data?.capture_id || capture.amount?.currency_code !== currency || money(capture.amount.value) !== money(payment.amount))) throw Error('notification_payment_amount_invalid')
+      if (capture && (((!sessionOnly || payment.data?.capture_id) && capture.id !== payment.data?.capture_id) || capture.amount?.currency_code !== currency || money(capture.amount.value) !== money(payment.amount))) throw Error('notification_payment_amount_invalid')
       return { captureId: capture?.id, captureStatus: capture?.status, authorization: authorizations[0]?.status === 'VOIDED' ? 'voided' : authorizations.length ? 'authorized' : 'none' }
     },
     async refund(payment: Json, externalId: string, amount: any) {
@@ -60,16 +60,19 @@ export async function completedRefundFacts(container: any, id: string) {
   return { verified: true, orderId, amount: money(refund.amount) / 100, currency: String(payment.currency_code).toUpperCase(), state: 'completed' }
 }
 export async function cancellationFacts(container: any, orderId: string) {
-  const result = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order', fields: ['id', 'status', 'currency_code', 'payment_collections.payments.id'], filters: { id: orderId } })
+  const result = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order', fields: ['id', 'status', 'currency_code', 'payment_collections.payments.id', 'payment_collections.payment_sessions.*'], filters: { id: orderId } })
   const order = result.data[0]
   if (order?.status !== 'canceled') throw Error('notification_order_not_cancelled')
   const payments = (order.payment_collections || []).flatMap((c: any) => c.payments || [])
   let captured = 0, refunded = 0, authorization = 'none', unknown = false
+  const seen = new Set<string>()
   for (const row of payments) {
     const p = await paymentForOrder(container, row.id), adapter = adapters[p.provider_id]
     if (p.payment_collection.order.id !== orderId || !adapter) { unknown = true; continue }
+    seen.add(p.payment_session_id)
     const proof = await adapter.payment(p)
-    if (proof.authorization !== 'none') authorization = proof.authorization
+    if (proof.authorization === 'authorized' && !p.captured_at) authorization = 'authorized'
+    else if (proof.authorization === 'voided' && authorization === 'none') authorization = 'voided'
     if (p.captured_at && ['COMPLETED', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(proof.captureStatus)) captured += money(p.amount)
     else if (proof.captureStatus) unknown = true
     for (const r of p.refunds || []) {
@@ -78,6 +81,17 @@ export async function cancellationFacts(container: any, orderId: string) {
       else unknown = true
     }
   }
+  for (const session of (order.payment_collections || []).flatMap((c:any)=>c.payment_sessions||[])) {
+    if (seen.has(session.id)) continue
+    const adapter=adapters[session.provider_id]
+    if(!adapter){unknown=true;continue}
+    const proof=await adapter.payment({...session,payment_session_id:session.id},true)
+    // No Payment row does not prove no provider authorization/capture. A
+    // provider-side fact without its local payment relationship needs review.
+    if(proof.captureStatus || proof.authorization==='authorized')unknown=true
+    else if(proof.authorization==='voided' && authorization==='none')authorization='voided'
+  }
+  if(captured>0 && authorization==='authorized')unknown=true
   return { verified: true, currency: String(order.currency_code).toUpperCase(), captured: captured / 100, refunded: refunded / 100, authorization, unknown }
 }
 export async function reviewRefundFacts(container: any, recordId: string) {
@@ -86,7 +100,7 @@ export async function reviewRefundFacts(container: any, recordId: string) {
   const row = rows[0]
   if (!row || row.status !== 'review' || row.event_type !== 'refund' || !row.order_id || !row.payment_id) throw Error('notification_review_not_current')
   const payment = await paymentForOrder(container, row.payment_id), adapter = adapters[payment.provider_id]
-  if (payment.payment_collection.order.id !== row.order_id || !adapter) throw Error('notification_refund_relation_invalid')
+  if (payment.payment_collection.order.id !== row.order_id || row.capture_id !== payment.data?.capture_id || String(row.currency_code).toUpperCase() !== String(payment.currency_code).toUpperCase() || !adapter) throw Error('notification_refund_relation_invalid')
   await adapter.payment(payment)
   const state = await adapter.refund(payment, row.external_id, row.amount)
   return { verified: true, orderId: row.order_id, amount: money(row.amount) / 100, currency: String(payment.currency_code).toUpperCase(), state: state === 'processing' ? 'processing' : 'review' }

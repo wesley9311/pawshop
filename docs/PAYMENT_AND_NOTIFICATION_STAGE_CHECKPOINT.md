@@ -106,3 +106,18 @@ operator review/fulfillment block are preserved. Unknown SMTP acceptance require
 manual delivery review. SMTP relay acceptance is not proof of inbox receipt.
 No automatic test is OWNER VERIFIED. Production notification acceptance follows
 only after release deployment and real relay audit below.
+
+## Production notification receipt — StageB
+
+Initial code-only candidate `bfa0ca44d84b8508b5aabb9c6fb7dcb8c4f02836` activated
+without schema/credential changes after StageA PASS. The neutral financial recovery
+publisher recovered StageA's two REAL completed refunds. Production audit shows
+`refund_completed: sent2`, attempt_count1 for each. Duplicate scheduled events do
+not resend them. This proves actual relay acceptance, not Owner inbox verification.
+
+Final hardening also checks sessions without local Payment rows: absence of a
+Payment record is not proof of no authorization/capture. Unconverged provider facts
+are reported as needing review. Controlled cancellation case verifies this message
+and rejects the false "no authorization" statement. Fresh proof additionally
+validates review capture and currency mapping. Latest controlled evidence:
+`/var/folders/gc/l9xqtlv13fl5vgf2z46qm1zr0000gn/T/pawshop-payment-acceptance-860DPi`.
