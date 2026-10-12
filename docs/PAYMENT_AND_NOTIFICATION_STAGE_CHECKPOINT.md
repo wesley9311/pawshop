@@ -126,3 +126,30 @@ Late review suppression is also runtime-tested: once the provider refund is
 completed AND its exact local refund identity/amount is confirmed, a still-review
 ledger row cannot cause an obsolete processing/review mail. Latest final controlled
 proof: `/var/folders/gc/l9xqtlv13fl5vgf2z46qm1zr0000gn/T/pawshop-payment-acceptance-mhBGIm`.
+
+## Final runtime checkpoint — 2026-10-12
+
+Both stages completed serially. Active immutable Sandbox commerce release:
+`64429533b426312a774a36da874d7ad6ecd422af`.
+Verified content digest:
+`fedc891613af38c85086a2cfaf51a879a817cc8408bfabeb4151fe55cc24a41e`.
+Production source exact and clean; service active, NRestarts0; loopback health and
+formal site both200; PAYPAL_SANDBOX=true. Three successive60second cycles completed
+for payment convergence, financial notification recovery and order email retry.
+
+Fresh provider read-back: exactly1 capture, REFUNDED; two completed USD refunds
+39.70+0.10=39.80, new transaction net0. Final valid create/ship/deliver requests on
+the fully refunded acceptance order each returned409. Original23 orders, payments,
+captures and refunds exactly unchanged (timestamp instants normalized).
+
+Production refund_completed records remain sent2, each attempt_count1, despite
+repeated recovery events. Existing order/shipped/delivered counts remain7/3/7.
+Private runtime proof: `/root/pawshop-stage-b-final-proof.json`.
+Gate and fresh provider read-back tools reside outside immutable release under
+`/root/pawshop-final-gate.mjs` and `/root/pawshop-final-money.mjs`; no financial
+mutation was performed during final verification.
+
+READY for next defined phase. This is Sandbox/controlled verification, not PayPal
+Live or OWNER VERIFIED. Real cancellation/void mail acceptance is controlled E2E;
+real production Sandbox refund emails prove relay acceptance only. Remaining gaps
+are listed above. This documentation update does not require another runtime release.
