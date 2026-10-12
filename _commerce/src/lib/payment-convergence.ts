@@ -1,5 +1,6 @@
 import { Modules } from '@medusajs/framework/utils'
 import { processPaymentWorkflow } from '@medusajs/core-flows'
+const isolation = require('./paypal-environment.cjs')
 // Existing durable payment sessions are the recovery worklist. Never depend
 // on a browser refresh or on webhook delivery, and never invent payment facts.
 export async function convergePayPalSessions(container: any) {
@@ -13,8 +14,10 @@ export async function convergePayPalSessions(container: any) {
       if (session.data?.auto_capture_policy !== 'pawshop-auto-capture-v1' ||
           ['canceled', 'error'].includes(session.status)) continue
       const p = session.payment
-      if (p?.captured_at && Number(session.payment_collection?.captured_amount) >= Number(session.amount)) continue
       try {
+        isolation.environmentOf(session.data)
+        if(p) isolation.sameEnvironment(session.data,p.data)
+        if (p?.captured_at && Number(session.payment_collection?.captured_amount) >= Number(session.amount)) continue
         if (!await payment.inspectPayPalSession(session.id)) continue
         // authorizePayment always reads PayPal first. Approved -> authorize and
         // capture; already captured -> adopt exact fact using official service.

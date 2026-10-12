@@ -52,5 +52,5 @@ const env = {
 
 const key=join(root,'tls-key.pem'),cert=join(root,'tls-cert.pem');
 const tls=spawnSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',key,'-out',cert,'-days','2','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1'],{stdio:'ignore'});if(tls.status!==0)throw Error('Test TLS certificate failed');
-Object.assign(env,{PAYPAL_SANDBOX:'true',PAYPAL_CLIENT_ID:'controlled',PAYPAL_CLIENT_SECRET:'controlled',NODE_EXTRA_CA_CERTS:cert,PAWSHOP_TEST_TLS_KEY:key,PAWSHOP_SMTP_SINK:join(source,'tests/email-delivery/smtp-sink.mjs')});
+Object.assign(env,{PAYPAL_SANDBOX:'true',PAYPAL_CLIENT_ID:'controlled',PAYPAL_CLIENT_SECRET:'controlled',PAYPAL_WEBHOOK_ID:'controlled',NODE_EXTRA_CA_CERTS:cert,PAWSHOP_TEST_TLS_KEY:key,PAWSHOP_SMTP_SINK:join(source,'tests/email-delivery/smtp-sink.mjs')});
 for(const [label,args]of [['migrate',['db:migrate']],['acceptance',['exec','./src/scripts/acceptance.ts']]]){const r=spawnSync(join(root,'node_modules/.bin/medusa'),args,{cwd:root,env,encoding:'utf8'});writeFileSync(join(root,label+'.log'),r.stdout+r.stderr,{mode:0o600});if(r.status!==0)throw Error(label+' failed; evidence '+root);}console.log('FINANCIAL NOTIFICATION CONTROLLED E2E PASS; evidence:',root);

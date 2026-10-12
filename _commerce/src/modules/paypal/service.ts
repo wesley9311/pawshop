@@ -26,7 +26,7 @@ import {
   WebhookActionResult,
 } from '@medusajs/framework/types'
 import type { Logger } from '@medusajs/framework/types'
-import { createHash } from 'node:crypto'
+const isolation = require('../../lib/paypal-environment.cjs')
 import { externalRefundContext } from '../../lib/paypal-external-refund-context'
 
 // PayPal Orders API v2 — redirect (authorize/capture) integration.
@@ -83,6 +83,7 @@ const WEBHOOK_EVENTS = {
 class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
   static identifier = 'paypal'
 
+  protected readonly contract_: any
   protected readonly logger_: Logger
   protected readonly options_: Options
   protected readonly apiBase_: string
@@ -94,9 +95,12 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
     super(container, options)
     this.logger_ = container.logger
     this.options_ = options
+    this.contract_ = isolation.configuration(process.env, options)
     this.apiBase_ = options.sandbox ? API_BASE.sandbox : API_BASE.live
     this.approvalBase_ = options.sandbox ? APPROVAL_BASE.sandbox : APPROVAL_BASE.live
   }
+
+  activeEnvironment(): 'sandbox' | 'live' { return this.contract_.active }
 
   static validateOptions(options: Record<string, unknown>): void {
     const required = ['client_id', 'client_secret', 'webhook_id', 'return_url', 'cancel_url']
@@ -127,78 +131,13 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
 
   // --- PayPal REST client (zero-dependency) -------------------------------
 
-  private async accessToken(): Promise<string> {
-    if (this.token_ && this.token_.expiresAt > Date.now() + 60_000) {
-      return this.token_.value
-    }
-    const res = await fetch(`${this.apiBase_}/v1/oauth2/token`, {
-      signal: AbortSignal.timeout(10_000),
-      method: 'POST',
-      headers: {
-        'content-type': 'application/x-www-form-urlencoded',
-        authorization: `Basic ${Buffer.from(
-          `${this.options_.client_id}:${this.options_.client_secret}`,
-        ).toString('base64')}`,
-      },
-      body: 'grant_type=client_credentials',
-    })
-    if (!res.ok) {
-      const body = await res.text()
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        `PayPal OAuth failed (${res.status}).`,
-      )
-    }
-    const json = (await res.json()) as { access_token: string; expires_in: number }
-    this.token_ = {
-      value: json.access_token,
-      expiresAt: Date.now() + json.expires_in * 1000,
-    }
-    return this.token_.value
+  private async request<T = any>(method: string, path: string, body?: Record<string, unknown>, headers?: Record<string,string>): Promise<T> {
+    const environment = isolation.environmentContext.getStore()
+    if (!environment) throw Error('paypal_environment_context_missing')
+    return isolation.request(environment, method, path, body, headers, this.contract_)
   }
-
-  private async request<T = any>(
-    method: string,
-    path: string,
-    body?: Record<string, unknown>,
-    headers?: Record<string, string>,
-  ): Promise<T> {
-    const token = await this.accessToken()
-    const res = await fetch(`${this.apiBase_}${path}`, {
-      signal: AbortSignal.timeout(10_000),
-      method,
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-        Prefer: 'return=representation',
-        ...(headers || {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    })
-    const text = await res.text()
-    let json: any = null
-    try {
-      json = text ? JSON.parse(text) : null
-    } catch {
-      json = null
-    }
-    if (!res.ok) {
-      const name = json?.name || `HTTP ${res.status}`
-      const detail = json?.message || json?.details?.[0]?.description || text
-      this.logger_.error(`PayPal ${method} ${path} failed: ${name} — ${detail}`)
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        `PayPal ${method} ${path} failed (${name}).`,
-      )
-    }
-    return json as T
-  }
-
   private requestId(operation: string, providerId: string): string {
-    // PayPal retains PayPal-Request-Id for idempotent POST retries. Keep the
-    // value deterministic across Medusa workflow/callback/webhook retries and
-    // below PayPal's 38-character limit.
-    return createHash('sha256').update(`pawshop:${operation}:${providerId}`).digest('hex').slice(0, 32)
+    return isolation.requestId(isolation.environmentContext.getStore(), operation, providerId)
   }
 
   private expectedPayment(data: Record<string, unknown> | undefined, order: PayPalOrder) {
@@ -295,6 +234,8 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
   // --- Lifecycle methods ---------------------------------------------------
 
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentOutput> {
+    const environment = this.contract_.active
+    return isolation.environmentContext.run(environment, async () => {
     const { amount, currency_code } = input
     // Medusa passes its own payment session id in `input.data.session_id` (and
     // again as `context.idempotency_key`). We must echo it into PayPal's
@@ -339,13 +280,18 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
         status: order.status,
         intent: 'AUTHORIZE',
         auto_capture_policy: 'pawshop-auto-capture-v1',
+        paypal_environment: environment,
         expected_amount: new BigNumber(amount).numeric.toFixed(2),
         currency_code: currency_code.toUpperCase(),
       },
     }
+
+    })
   }
 
   async authorizePayment(input: AuthorizePaymentInput): Promise<AuthorizePaymentOutput> {
+    const environment = isolation.environmentOf(input.data)
+    return isolation.environmentContext.run(environment, async () => {
     const externalId = input.data?.id as string | undefined
     if (!externalId) {
       throw new MedusaError(
@@ -426,9 +372,13 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
         status: order.status,
       },
     }
+
+    })
   }
 
   async capturePayment(input: CapturePaymentInput): Promise<CapturePaymentOutput> {
+    const environment = isolation.environmentOf(input.data)
+    return isolation.environmentContext.run(environment, async () => {
     const externalId = input.data?.id as string | undefined
     const order = externalId
       ? await this.request<PayPalOrder>('GET', `/v2/checkout/orders/${externalId}`)
@@ -484,9 +434,13 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
         status: capture.status,
       },
     }
+
+    })
   }
 
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
+    const environment = isolation.environmentOf(input.data)
+    return isolation.environmentContext.run(environment, async () => {
     const captureId = (input.data?.capture_id as string | undefined) || await this.findCaptureId(input.data?.id as string)
     if (!captureId) {
       throw new MedusaError(
@@ -502,7 +456,7 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
     const amount = new BigNumber(input.amount).numeric.toFixed(2)
     const adoption = externalRefundContext.getStore()
     if (adoption) {
-      if (adoption.captureId !== captureId || adoption.amount !== amount ||
+      if (adoption.environment !== environment || adoption.captureId !== captureId || adoption.amount !== amount ||
           adoption.currency !== String(input.data?.currency_code || '').toUpperCase()) {
         throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'External refund context mismatch.')
       }
@@ -548,9 +502,13 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
         status: refund.status,
       },
     }
+
+    })
   }
 
   async cancelPayment(input: CancelPaymentInput): Promise<CancelPaymentOutput> {
+    const environment = isolation.environmentOf(input.data)
+    return isolation.environmentContext.run(environment, async () => {
     const externalId = input.data?.id as string | undefined
     if (!externalId || input.data?.capture_id) return { data: input.data }
     // A local authorization transaction error can trigger this compensation
@@ -565,21 +523,33 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
       }
     }
     return { data: input.data }
+
+    })
   }
 
   async deletePayment(input: DeletePaymentInput): Promise<DeletePaymentOutput> {
+    const environment = isolation.environmentOf(input.data)
+    return isolation.environmentContext.run(environment, async () => {
     // PayPal has no "delete order" for an un-approved checkout order; nothing to
     // clean up server-side. Return the data unchanged.
     return { data: input.data }
+
+    })
   }
 
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
+    const environment = isolation.environmentOf(input.data)
+    return isolation.environmentContext.run(environment, async () => {
     // The amount is fixed at initiate time for redirect orders; a cart edit
     // re-initiates instead. No-op here.
     return { data: input.data }
+
+    })
   }
 
   async retrievePayment(input: RetrievePaymentInput): Promise<RetrievePaymentOutput> {
+    const environment = isolation.environmentOf(input.data)
+    return isolation.environmentContext.run(environment, async () => {
     const externalId = input.data?.id as string | undefined
     if (!externalId) return { data: input.data }
     const order = await this.request<PayPalOrder>('GET', `/v2/checkout/orders/${externalId}`)
@@ -593,9 +563,13 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
     else if (authorization?.status === 'CREATED') status = 'AUTHORIZED'
     else if (authorization) status = authorization.status
     return { data: { ...(input.data as object), status } }
+
+    })
   }
 
   async getPaymentStatus(input: GetPaymentStatusInput): Promise<GetPaymentStatusOutput> {
+    const environment = isolation.environmentOf(input.data)
+    return isolation.environmentContext.run(environment, async () => {
     const status = input.data?.status as string | undefined
     switch (status) {
       case 'AUTHORIZED':
@@ -612,6 +586,8 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
       default:
         return { status: 'pending' }
     }
+
+    })
   }
 
   // --- Webhook -------------------------------------------------------------
@@ -643,11 +619,12 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
       return noSession
     }
 
+    return isolation.environmentContext.run(verified, async () => {
     switch (eventType) {
       case WEBHOOK_EVENTS.APPROVED:
         // Buyer approved on PayPal. Authorize the session → completes the cart.
         return sessionId
-          ? { action: 'authorized', data: { session_id: sessionId, amount: 0 } }
+          ? { action: 'authorized', data: { session_id: sessionId, amount: 0, paypal_environment: verified } as any }
           : noSession
       case WEBHOOK_EVENTS.COMPLETED: {
         // Re-read the provider order instead of treating a signed notification
@@ -670,11 +647,11 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
         }
         const capture = this.captureFromOrder(order, expected)
         if (!capture || capture.status !== 'COMPLETED' || capture.id !== resource.id) return noSession
-        return { action: 'captured', data: { session_id: sessionId, amount: this.webhookAmount(capture) } }
+        return { action: 'captured', data: { session_id: sessionId, amount: this.webhookAmount(capture), paypal_environment: verified } as any }
       }
       case WEBHOOK_EVENTS.DENIED:
         return sessionId
-          ? { action: 'failed', data: { session_id: sessionId, amount: 0 } }
+          ? { action: 'failed', data: { session_id: sessionId, amount: 0, paypal_environment: verified } as any }
           : noSession
       case WEBHOOK_EVENTS.REFUNDED:
       case WEBHOOK_EVENTS.REVERSED:
@@ -684,6 +661,7 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
       default:
         return noSession
     }
+    })
   }
 
   private webhookAmount(resource: any): number {
@@ -715,72 +693,13 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
   // reimplement the cert fetch and RSA verification (and its pinning/rotation
   // hazards), we ask PayPal to verify the transmission server-to-server: this
   // returns VERIFICATION_STATUS=SUCCESS only for an authentic, unmodified event.
-  private async verifyWebhookSignature(
-    payload: ProviderWebhookPayload['payload'],
-  ): Promise<boolean> {
-    const headers = payload.headers || {}
-    const header = (name: string) => {
-      // HTTP header names are case-insensitive; the framework may normalise or
-      // pass them through verbatim, so match case-insensitively.
-      const lower = name.toLowerCase()
-      for (const key of Object.keys(headers)) {
-        if (String(key).toLowerCase() === lower) {
-          const value = (headers as Record<string, unknown>)[key]
-          if (typeof value === 'string') return value
-          if (Array.isArray(value)) return String(value[0] ?? '')
-        }
-      }
-      return ''
-    }
-
-    const transmissionId = header('paypal-transmission-id')
-    const transmissionTime = header('paypal-transmission-time')
-    const transmissionSig = header('paypal-transmission-sig')
-    const certUrl = header('paypal-cert-url')
-    const authAlgo = header('paypal-auth-algo')
-
-    // Any missing header means the request is not a signed PayPal webhook.
-    if (!transmissionId || !transmissionTime || !transmissionSig || !certUrl || !authAlgo) {
-      return false
-    }
-
-    // The event body must be the raw bytes PayPal signed; `rawData` is the
-    // verbatim request body. If it is missing we cannot verify and must reject.
-    const rawBody = payload.rawData as unknown
-    let eventBody = ''
-    if (typeof rawBody === 'string') {
-      eventBody = rawBody
-    } else if (Buffer.isBuffer(rawBody)) {
-      eventBody = rawBody.toString('utf8')
-    } else if (rawBody && typeof rawBody === 'object') {
-      // The event bus may serialize a Buffer to { type: 'Buffer', data: [...] }
-      // before the subscriber restores it; recover it defensively.
-      const serialized = rawBody as { type?: string; data?: number[] }
-      if (serialized.type === 'Buffer' && Array.isArray(serialized.data)) {
-        eventBody = Buffer.from(serialized.data).toString('utf8')
-      }
-    }
-    if (!eventBody) return false
-
+  private async verifyWebhookSignature(payload: ProviderWebhookPayload['payload']): Promise<string | null> {
+    let raw: any = payload.rawData
+    if (raw?.type === 'Buffer' && Array.isArray(raw.data)) raw = Buffer.from(raw.data)
     try {
-      const result = await this.request<{ verification_status?: string }>(
-        'POST',
-        '/v1/notifications/verify-webhook-signature',
-        {
-          auth_algo: authAlgo,
-          cert_url: certUrl,
-          transmission_id: transmissionId,
-          transmission_sig: transmissionSig,
-          transmission_time: transmissionTime,
-          webhook_id: this.options_.webhook_id,
-          webhook_event: JSON.parse(eventBody),
-        },
-      )
-      return result.verification_status === 'SUCCESS'
-    } catch (err) {
-      this.logger_.warn(`PayPal webhook signature verification failed: ${(err as Error).message}`)
-      return false
-    }
+      if (!raw || JSON.stringify(JSON.parse(Buffer.isBuffer(raw) ? raw.toString('utf8') : raw)) !== JSON.stringify(payload.data)) return null
+      return await isolation.verifyDual(payload.headers, raw, this.contract_)
+    } catch { return null }
   }
 
   private async findAuthorizationId(orderId?: string): Promise<string | null> {

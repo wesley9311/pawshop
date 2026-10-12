@@ -1,3 +1,4 @@
+import { completedRefundFacts } from '../src/lib/notification-payment-facts'
 import { externalRefundContext } from '../src/lib/paypal-external-refund-context'
 import { Modules, ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import { cancelOrderWorkflow, refundPaymentWorkflow } from '@medusajs/core-flows'
@@ -47,6 +48,7 @@ export default async function ({container}:any) {
   const captured=await payment.authorizePaymentSession(session.id,{})
   await refundPaymentWorkflow(container).run({input:{payment_id:captured.id,amount:5}})
   const refunded=await payment.retrievePayment(captured.id,{relations:['refunds']});const refund=refunded.refunds[0]
+  await completedRefundFacts(container,refund.id)
   sink.rejectNextRecipient();assert.equal(await handleRefundCompleted(container,logger,refund.id),'error');const beforeRetry=sink.messages.length
   // Clock travel affects only this isolated notification state machine.
   const realClaim=notification.tryClaim.bind(notification);notification.tryClaim=(input:any)=>realClaim({...input,now:new Date(Date.now()+180000)})
@@ -65,7 +67,7 @@ export default async function ({container}:any) {
   record.refunds.PENDING.status='FAILED';await handleRefundReview(container,logger,review.id);assert.match(plain(sink.messages.at(-1).body),/reviewing the refund/)
   const reviewCount=sink.messages.length;await handleRefundReview(container,logger,review.id);assert.equal(sink.messages.length,reviewCount)
   record.refunds.PENDING.status='COMPLETED'
-  await externalRefundContext.run({refundId:'PENDING',captureId:'CAP'+record.id,amount:'5.00',currency:'USD'},()=>refundPaymentWorkflow(container).run({input:{payment_id:captured.id,amount:5}}))
+  await externalRefundContext.run({environment:'sandbox',refundId:'PENDING',captureId:'CAP'+record.id,amount:'5.00',currency:'USD'},()=>refundPaymentWorkflow(container).run({input:{payment_id:captured.id,amount:5}}))
   assert.equal(await handleRefundReview(container,logger,review.id),'suppressed');assert.equal(sink.messages.length,reviewCount)
   await ledger.updatePaymentReconciliations({id:review.id,status:'applied'})
   // Captured cancellation performs the official remaining refund first.

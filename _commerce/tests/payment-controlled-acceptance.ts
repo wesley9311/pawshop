@@ -60,6 +60,21 @@ export default async function({container}: any) {
  assert.equal(facts.captures.length,1)
  assert.equal(Number(facts.captures[0].amount),25)
  await capturePaymentWorkflow(container).run({input:{payment_id:payment.id}})
+ // Exercise the real payment module's webhook/local environment gate.
+ const provider=(paymentModule as any).paymentProviderService_.retrieveProvider('pp_paypal_paypal')
+ const originalWebhook=provider.getWebhookActionAndData.bind(provider)
+ for(const verified of ['sandbox','live']){
+  provider.getWebhookActionAndData=async()=>({action:'captured',data:{session_id:session.id,amount:25,paypal_environment:verified}})
+  if(verified==='sandbox')assert.equal((await paymentModule.getWebhookActionAndData({provider:'paypal_paypal',payload:{}})).action,'captured')
+  else await assert.rejects(paymentModule.getWebhookActionAndData({provider:'paypal_paypal',payload:{}}),/environment_mismatch/)
+ }
+ const originalRetrieve=paymentModule.retrievePaymentSession.bind(paymentModule)
+ paymentModule.retrievePaymentSession=async()=>({...session,data:{...session.data,paypal_environment:'live',approval_url:'https://www.paypal.com/checkoutnow?token=fixture'}})
+ provider.getWebhookActionAndData=async()=>({action:'captured',data:{session_id:session.id,amount:25,paypal_environment:'sandbox'}})
+ await assert.rejects(paymentModule.getWebhookActionAndData({provider:'paypal_paypal',payload:{}}),/environment_mismatch/)
+ paymentModule.retrievePaymentSession=originalRetrieve
+ provider.getWebhookActionAndData=originalWebhook
+ await assert.rejects(paymentModule.updatePaymentSession({id:session.id,data:{...session.data,paypal_environment:'live'},amount:25,currency_code:'usd'}),/environment/)
  const query=container.resolve(ContainerRegistrationKeys.QUERY)
  let graph=await query.graph({entity:'order',fields:['id','total','raw_total','currency_code','payment_collections.*','payment_collections.payments.*','payment_collections.payments.captures.*','payment_collections.payments.refunds.*'],filters:{id:order.id}})
  assert.equal(paymentGateDecision(graph.data[0]).allowed,true)
@@ -69,7 +84,7 @@ export default async function({container}: any) {
  await assertRoutes(false)
  await ledger.deletePaymentReconciliations(review.id)
  await assertRoutes(true)
- await externalRefundContext.run({refundId:'CONTROLLED-REFUND-'+suffix,captureId:'CONTROLLED-CAP-'+suffix,amount:'5.00',currency:'USD'},()=>refundPaymentWorkflow(container).run({input:{payment_id:payment.id,amount:5,note:'Controlled external refund adoption',metadata:{paypal_refund_id:'CONTROLLED-REFUND-'+suffix}}}))
+ await externalRefundContext.run({environment:'sandbox',refundId:'CONTROLLED-REFUND-'+suffix,captureId:'CONTROLLED-CAP-'+suffix,amount:'5.00',currency:'USD'},()=>refundPaymentWorkflow(container).run({input:{payment_id:payment.id,amount:5,note:'Controlled external refund adoption',metadata:{paypal_refund_id:'CONTROLLED-REFUND-'+suffix}}}))
  const refunded=await paymentModule.retrievePayment(payment.id,{relations:['captures','refunds']})
  assert.equal(refunded.refunds.length,1)
  assert.equal(Number(refunded.refunds[0].amount),5)

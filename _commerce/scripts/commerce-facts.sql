@@ -1,4 +1,4 @@
--- PawShop Commerce Fact Query v1
+-- PawShop Commerce Fact Query v2
 --
 -- Purpose: one read-only, repeatable source for the core commerce metrics used
 -- by operations and future reporting. Run against the PawShop PostgreSQL
@@ -12,13 +12,24 @@
 \set ON_ERROR_STOP on
 \pset pager off
 
+\if :{?payment_environment}
+\else
+\set payment_environment live
+\endif
 BEGIN TRANSACTION READ ONLY;
+SELECT 1 / (:'payment_environment' IN ('live','sandbox'))::int AS valid_environment;
+SELECT :'payment_environment' AS metric_environment;
+-- Default is Live. Sandbox requires --set payment_environment=sandbox.
+-- Unknown/mixed records are excluded from metrics and shown below.
+
 
 SELECT
-  'pawshop_commerce_fact_v1'::text AS fact_version,
+  'pawshop_commerce_fact_v2'::text AS fact_version,
   current_database()::text AS database_name,
   transaction_timestamp() AS observed_at;
 
+-- All definitions below inherit metric_environment and the strict persisted
+-- environment/relationship/capture/refund integrity gate.
 -- Definitions are emitted with every run so exported numbers retain their
 -- meaning. Amounts use the order/payment currency and are never converted.
 SELECT metric, definition
@@ -26,7 +37,7 @@ FROM (VALUES
   ('captured_orders',
    'Distinct non-deleted orders whose linked payment collections have captured_amount > 0.'),
   ('captured_revenue',
-   'Sum of payment_collection.captured_amount for captured orders, before refunds. Authorization alone is excluded. This is financially real only after separately confirming that the payment provider is live rather than sandbox and is reconciled.'),
+   'Sum of payment_collection.captured_amount for captured orders, before refunds. Authorization alone is excluded. Only trusted money facts in the explicitly selected environment are included; default Live.'),
   ('product_revenue',
    'Current-version order item quantity * snapshot unit price, less line-item adjustments, for fully captured orders only; shipping is excluded.'),
   ('shipping',
@@ -67,6 +78,31 @@ base_orders AS (
          o.version
   FROM "order" o
   WHERE o.deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM order_payment_collection opc JOIN payment p ON p.payment_collection_id=opc.payment_collection_id AND p.deleted_at IS NULL
+      WHERE opc.order_id=o.id AND opc.deleted_at IS NULL AND p.provider_id='pp_paypal_paypal'
+        AND p.data->>'paypal_environment'=:'payment_environment' AND p.captured_at IS NOT NULL
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM order_payment_collection opc JOIN payment_collection pc ON pc.id=opc.payment_collection_id
+      WHERE opc.order_id=o.id AND opc.deleted_at IS NULL AND (
+        pc.deleted_at IS NOT NULL OR pc.currency_code IS DISTINCT FROM o.currency_code
+        OR pc.captured_amount IS DISTINCT FROM (SELECT coalesce(sum(c.amount),0) FROM capture c JOIN payment p ON p.id=c.payment_id WHERE p.payment_collection_id=pc.id AND p.deleted_at IS NULL AND c.deleted_at IS NULL)
+        OR pc.refunded_amount IS DISTINCT FROM (SELECT coalesce(sum(r.amount),0) FROM refund r JOIN payment p ON p.id=r.payment_id WHERE p.payment_collection_id=pc.id AND p.deleted_at IS NULL AND r.deleted_at IS NULL)
+        OR EXISTS (SELECT 1 FROM payment_session ps WHERE ps.payment_collection_id=pc.id AND ps.deleted_at IS NULL AND (ps.provider_id<>'pp_paypal_paypal' OR ps.data->>'paypal_environment' IS DISTINCT FROM :'payment_environment' OR (ps.data->>'approval_url' IS NOT NULL AND ps.data->>'approval_url' NOT LIKE CASE WHEN :'payment_environment'='sandbox' THEN 'https://www.sandbox.paypal.com/%' ELSE 'https://www.paypal.com/%' END)))
+        OR EXISTS (SELECT 1 FROM payment p LEFT JOIN payment_session ps ON ps.id=p.payment_session_id WHERE p.payment_collection_id=pc.id AND p.deleted_at IS NULL AND (
+          p.provider_id<>'pp_paypal_paypal' OR p.data->>'paypal_environment' IS DISTINCT FROM :'payment_environment'
+          OR ps.deleted_at IS NOT NULL OR ps.id IS NULL OR ps.provider_id<>'pp_paypal_paypal'
+          OR ps.data->>'paypal_environment' IS DISTINCT FROM p.data->>'paypal_environment'
+          OR (p.data->>'approval_url' IS NOT NULL AND p.data->>'approval_url' NOT LIKE CASE WHEN :'payment_environment'='sandbox' THEN 'https://www.sandbox.paypal.com/%' ELSE 'https://www.paypal.com/%' END)
+          OR EXISTS (SELECT 1 FROM capture c WHERE c.payment_id=p.id AND c.deleted_at IS NULL AND (p.captured_at IS NULL OR p.data->>'capture_id' IS NULL OR c.amount<>p.amount OR c.amount<=0))
+          OR (SELECT count(*) FROM capture c WHERE c.payment_id=p.id AND c.deleted_at IS NULL)>1
+          OR (p.captured_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM capture c WHERE c.payment_id=p.id AND c.deleted_at IS NULL))
+          OR coalesce((SELECT sum(r.amount) FROM refund r WHERE r.payment_id=p.id AND r.deleted_at IS NULL),0)>coalesce((SELECT sum(c.amount) FROM capture c WHERE c.payment_id=p.id AND c.deleted_at IS NULL),0)
+          OR EXISTS (SELECT 1 FROM refund r WHERE r.payment_id=p.id AND r.deleted_at IS NULL AND (r.amount<=0 OR NOT EXISTS(SELECT 1 FROM jsonb_each_text(coalesce(p.data->'refund_map','{}')) m WHERE m.value=r.id)))
+        ))
+      )
+    )
 ),
 payment_by_order AS (
   SELECT bo.id AS order_id,
@@ -230,6 +266,31 @@ base_orders AS (
   SELECT o.id, o.version, o.currency_code
   FROM "order" o
   WHERE o.deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM order_payment_collection opc JOIN payment p ON p.payment_collection_id=opc.payment_collection_id AND p.deleted_at IS NULL
+      WHERE opc.order_id=o.id AND opc.deleted_at IS NULL AND p.provider_id='pp_paypal_paypal'
+        AND p.data->>'paypal_environment'=:'payment_environment' AND p.captured_at IS NOT NULL
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM order_payment_collection opc JOIN payment_collection pc ON pc.id=opc.payment_collection_id
+      WHERE opc.order_id=o.id AND opc.deleted_at IS NULL AND (
+        pc.deleted_at IS NOT NULL OR pc.currency_code IS DISTINCT FROM o.currency_code
+        OR pc.captured_amount IS DISTINCT FROM (SELECT coalesce(sum(c.amount),0) FROM capture c JOIN payment p ON p.id=c.payment_id WHERE p.payment_collection_id=pc.id AND p.deleted_at IS NULL AND c.deleted_at IS NULL)
+        OR pc.refunded_amount IS DISTINCT FROM (SELECT coalesce(sum(r.amount),0) FROM refund r JOIN payment p ON p.id=r.payment_id WHERE p.payment_collection_id=pc.id AND p.deleted_at IS NULL AND r.deleted_at IS NULL)
+        OR EXISTS (SELECT 1 FROM payment_session ps WHERE ps.payment_collection_id=pc.id AND ps.deleted_at IS NULL AND (ps.provider_id<>'pp_paypal_paypal' OR ps.data->>'paypal_environment' IS DISTINCT FROM :'payment_environment' OR (ps.data->>'approval_url' IS NOT NULL AND ps.data->>'approval_url' NOT LIKE CASE WHEN :'payment_environment'='sandbox' THEN 'https://www.sandbox.paypal.com/%' ELSE 'https://www.paypal.com/%' END)))
+        OR EXISTS (SELECT 1 FROM payment p LEFT JOIN payment_session ps ON ps.id=p.payment_session_id WHERE p.payment_collection_id=pc.id AND p.deleted_at IS NULL AND (
+          p.provider_id<>'pp_paypal_paypal' OR p.data->>'paypal_environment' IS DISTINCT FROM :'payment_environment'
+          OR ps.deleted_at IS NOT NULL OR ps.id IS NULL OR ps.provider_id<>'pp_paypal_paypal'
+          OR ps.data->>'paypal_environment' IS DISTINCT FROM p.data->>'paypal_environment'
+          OR (p.data->>'approval_url' IS NOT NULL AND p.data->>'approval_url' NOT LIKE CASE WHEN :'payment_environment'='sandbox' THEN 'https://www.sandbox.paypal.com/%' ELSE 'https://www.paypal.com/%' END)
+          OR EXISTS (SELECT 1 FROM capture c WHERE c.payment_id=p.id AND c.deleted_at IS NULL AND (p.captured_at IS NULL OR p.data->>'capture_id' IS NULL OR c.amount<>p.amount OR c.amount<=0))
+          OR (SELECT count(*) FROM capture c WHERE c.payment_id=p.id AND c.deleted_at IS NULL)>1
+          OR (p.captured_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM capture c WHERE c.payment_id=p.id AND c.deleted_at IS NULL))
+          OR coalesce((SELECT sum(r.amount) FROM refund r WHERE r.payment_id=p.id AND r.deleted_at IS NULL),0)>coalesce((SELECT sum(c.amount) FROM capture c WHERE c.payment_id=p.id AND c.deleted_at IS NULL),0)
+          OR EXISTS (SELECT 1 FROM refund r WHERE r.payment_id=p.id AND r.deleted_at IS NULL AND (r.amount<=0 OR NOT EXISTS(SELECT 1 FROM jsonb_each_text(coalesce(p.data->'refund_map','{}')) m WHERE m.value=r.id)))
+        ))
+      )
+    )
 ),
 payment_by_order AS (
   SELECT bo.id AS order_id,
@@ -660,5 +721,21 @@ SELECT check_name, issue_count,
        CASE WHEN issue_count = 0 THEN 'PASS' ELSE 'REVIEW' END AS result
 FROM checks
 ORDER BY check_name;
+
+
+-- Environment integrity is always audited across ALL data, regardless of metric scope.
+SELECT 'paypal_environment_missing' AS check_name,count(*) AS issue_count FROM payment_session s WHERE s.provider_id='pp_paypal_paypal' AND s.deleted_at IS NULL AND coalesce(s.data->>'paypal_environment','') NOT IN ('sandbox','live')
+UNION ALL SELECT 'paypal_payment_session_environment_conflict',count(*) FROM payment p LEFT JOIN payment_session s ON s.id=p.payment_session_id WHERE p.provider_id='pp_paypal_paypal' AND p.deleted_at IS NULL AND (s.id IS NULL OR s.deleted_at IS NOT NULL OR p.data->>'paypal_environment' IS DISTINCT FROM s.data->>'paypal_environment' OR coalesce(p.data->>'paypal_environment','') NOT IN ('sandbox','live'))
+UNION ALL SELECT 'paypal_collection_mixed_environment',count(*) FROM (SELECT payment_collection_id FROM payment_session WHERE provider_id='pp_paypal_paypal' AND deleted_at IS NULL GROUP BY payment_collection_id HAVING count(DISTINCT data->>'paypal_environment')>1) mixed;
+
+-- Audit-only Sandbox / Live separation. These totals are core-row observations,
+-- not trusted business metrics; metric CTEs above apply the stricter integrity gate.
+SELECT environment, count(DISTINCT p.id) FILTER(WHERE p.captured_at IS NOT NULL) captured_payments,
+       coalesce(sum(c.amount),0) observed_capture_amount,coalesce(sum(r.amount),0) observed_refund_amount
+FROM (VALUES ('live'),('sandbox'),('unknown')) env(environment)
+LEFT JOIN payment p ON (CASE WHEN p.data->>'paypal_environment' IN ('live','sandbox') THEN p.data->>'paypal_environment' ELSE 'unknown' END)=env.environment AND p.provider_id='pp_paypal_paypal' AND p.deleted_at IS NULL
+LEFT JOIN LATERAL (SELECT sum(amount) amount FROM capture WHERE payment_id=p.id AND deleted_at IS NULL)c ON true
+LEFT JOIN LATERAL (SELECT sum(amount) amount FROM refund WHERE payment_id=p.id AND deleted_at IS NULL)r ON true
+GROUP BY environment ORDER BY environment;
 
 COMMIT;

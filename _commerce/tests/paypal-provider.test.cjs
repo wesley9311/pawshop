@@ -13,6 +13,7 @@ const path = require('node:path');
 const servicePath = path.join(__dirname, '..', 'src', 'modules', 'paypal', 'service.ts');
 const indexPath = path.join(__dirname, '..', 'src', 'modules', 'paypal', 'index.ts');
 const source = fs.readFileSync(servicePath, 'utf8');
+const isolationSource = fs.readFileSync(path.join(__dirname,'../src/lib/paypal-environment.cjs'),'utf8');
 const moduleIndex = fs.readFileSync(indexPath, 'utf8');
 
 test('the PayPal provider extends AbstractPaymentProvider with identifier "paypal"', () => {
@@ -96,12 +97,12 @@ test('the webhook verifies the PayPal transmission signature before acting', () 
   // The provider must ask PayPal to verify the transmission (server-to-server)
   // and treat a failed/missing signature exactly like an unmatchable session.
   assert.match(source, /verifyWebhookSignature/);
-  assert.match(source, /paypal-transmission-id/);
-  assert.match(source, /paypal-transmission-sig/);
-  assert.match(source, /paypal-cert-url/);
-  assert.match(source, /paypal-auth-algo/);
-  assert.match(source, /\/v1\/notifications\/verify-webhook-signature/);
-  assert.match(source, /verification_status === 'SUCCESS'/);
+  assert.match(isolationSource, /paypal-transmission-id/);
+  assert.match(isolationSource, /paypal-transmission-sig/);
+  assert.match(isolationSource, /paypal-cert-url/);
+  assert.match(isolationSource, /paypal-auth-algo/);
+  assert.match(isolationSource, /\/v1\/notifications\/verify-webhook-signature/);
+  assert.match(isolationSource, /verification_status==='SUCCESS'/);
   // The gate is consulted inside getWebhookActionAndData before any event map.
   assert.match(source, /const verified = await this\.verifyWebhookSignature\(payload\)/);
   assert.match(source, /if \(!verified\)/);

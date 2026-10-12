@@ -1,5 +1,6 @@
 'use strict';
 
+const isolation = require('./paypal-environment.cjs');
 const { ContainerRegistrationKeys } = require('@medusajs/framework/utils');
 const { acquireOrderPaymentLock, releaseAfterResponse } = require('./order-payment-lock.cjs');
 const { refetchEntities } = require('@medusajs/framework/http');
@@ -60,6 +61,10 @@ function paymentGateDecision(order) {
   )) {
     return { allowed: false, reason: 'payment_capture_unconfirmed' };
   }
+  try {
+    const paypal = payments.filter(p=>p.provider_id==='pp_paypal_paypal');
+    if(paypal.length) isolation.sameEnvironment(...paypal.map(p=>p.data), ...collections.flatMap(c=>c.payment_sessions||[]).filter(s=>s.provider_id==='pp_paypal_paypal').map(s=>s.data));
+  } catch { return {allowed:false,reason:'payment_environment_unverified'}; }
   const captured = payments.reduce((value, payment) => value + sum(payment.captures, 'amount'), 0);
   const refunded = payments.reduce((value, payment) => value + sum(payment.refunds, 'amount'), 0);
   const collectionAmount = collections.reduce((value, collection) => {
@@ -136,6 +141,10 @@ async function fetchOrderPaymentFacts(req, orderId) {
       'payment_collections.amount',
       'payment_collections.currency_code',
       'payment_collections.raw_amount',
+      'payment_collections.payment_sessions.provider_id',
+      'payment_collections.payment_sessions.data',
+      'payment_collections.payments.provider_id',
+      'payment_collections.payments.data',
       'payment_collections.payments.id',
       'payment_collections.payments.currency_code',
       'payment_collections.payments.captured_at',

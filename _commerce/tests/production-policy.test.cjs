@@ -196,12 +196,12 @@ test('PayPal is optional but a partial credential set fails closed', () => {
   for (const key of keys) {
     const partial = { ...fullPayPal };
     delete partial[key];
-    assert.throws(() => validateProductionEnvironment({ ...valid(), ...partial }), /must be provided together/);
+    assert.throws(() => validateProductionEnvironment({ ...valid(), ...partial }), /paypal_|absolute https/);
   }
 
   // A non-boolean sandbox flag, a non-https return URL, and a return URL that
   // escapes the storefront origin are each refused.
-  assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_SANDBOX: 'yes' }), /PAYPAL_SANDBOX/);
+  assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_SANDBOX: 'yes' }), /paypal_active_environment_required/);
   assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_RETURN_URL: 'http://insecure.example.com/x' }), /absolute https/);
   assert.throws(() => validateProductionEnvironment({ ...valid(), ...fullPayPal, PAYPAL_RETURN_URL: 'https://evil.example.com/order/complete' }), /storefront origin/);
 });

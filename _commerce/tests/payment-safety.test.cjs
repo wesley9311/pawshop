@@ -35,7 +35,7 @@ function order({ status = 'COMPLETED', authorization = 'AUTH-1', capture = null 
 }
 
 function paymentData() {
-  return { id: 'ORDER-1', expected_amount: '25.00', currency_code: 'USD' };
+  return { paypal_environment: 'sandbox', id: 'ORDER-1', expected_amount: '25.00', currency_code: 'USD' };
 }
 
 test('backend authorization performs one exact full capture with a stable PayPal request id', async (t) => {
@@ -234,7 +234,8 @@ test('verified Medusa refund webhook recognizes exact mapping and duplicate deli
   const payment = {
     id: 'pay_1', provider_id: 'pp_paypal_paypal', currency_code: 'usd',
     amount: 25, payment_session_id: 'payses_1',
-    data: { id: 'ORDER-1', capture_id: 'CAP-1', refund_map: { 'REFUND-1': 'refund_local_1' } },
+    payment_session: {data:{paypal_environment:'sandbox'}},
+    data: { paypal_environment:'sandbox', id: 'ORDER-1', capture_id: 'CAP-1', refund_map: { 'REFUND-1': 'refund_local_1' } },
     captures: [{ amount: 25 }], refunds: [{ id: 'refund_local_1', amount: 5 }],
     payment_collection: { id: 'paycol_1', order: { id: 'order_1' } },
   };
@@ -347,11 +348,11 @@ test('trusted external refund adoption reads the completed fact without issuing 
       : jsonResponse({id:'REF-EXTERNAL',status:'COMPLETED',amount:{value:'5.00',currency_code:'USD'}});
   };
   const provider = new Provider({logger}, options);
-  const result = await externalRefundContext.run({refundId:'REF-EXTERNAL',captureId:'CAP-1',amount:'5.00',currency:'USD'},
+  const result = await externalRefundContext.run({environment:'sandbox',refundId:'REF-EXTERNAL',captureId:'CAP-1',amount:'5.00',currency:'USD'},
     () => provider.refundPayment({data:{...paymentData(),capture_id:'CAP-1'},amount:5,context:{idempotency_key:'refund_local'}}));
   assert.equal(result.data.refund_map['REF-EXTERNAL'],'refund_local');
   assert.equal(calls.filter((call)=>call.url.includes('/payments/')&&call.method==='POST').length,0);
-  await assert.rejects(externalRefundContext.run({refundId:'REF-EXTERNAL',captureId:'OTHER-CAP',amount:'5.00',currency:'USD'},
+  await assert.rejects(externalRefundContext.run({environment:'sandbox',refundId:'REF-EXTERNAL',captureId:'OTHER-CAP',amount:'5.00',currency:'USD'},
     () => provider.refundPayment({data:{...paymentData(),capture_id:'CAP-1'},amount:5,context:{idempotency_key:'refund_local'}})),/context mismatch/);
 });
 
@@ -413,7 +414,8 @@ test('reversal event enters durable review, alerts and never records a refund', 
   const payment = {
     id: 'pay_1', provider_id: 'pp_paypal_paypal', currency_code: 'usd',
     amount: 25, payment_session_id: 'payses_1',
-    data: { id: 'ORDER-1', capture_id: 'CAP-1', refund_map: {} },
+    payment_session: {data:{paypal_environment:'sandbox'}},
+    data: { paypal_environment:'sandbox', id: 'ORDER-1', capture_id: 'CAP-1', refund_map: {} },
     captures: [{ amount: 25 }], refunds: [],
     payment_collection: { id: 'paycol_1', order: { id: 'order_1' } },
   };

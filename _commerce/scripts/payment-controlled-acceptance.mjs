@@ -54,20 +54,23 @@ for (const [label, args] of [['migrate', ['db:migrate']], ['acceptance', ['exec'
   writeFileSync(join(root, label + '.log'), (result.stdout || '') + (result.stderr || ''), { mode: 0o600 });
   if (result.status !== 0) throw new Error(`${label} failed; evidence retained at ${root}`);
 }
-const facts = spawnSync(join(pgBin, 'psql'), ['--no-psqlrc', '-h', database.hostname, '-p', database.port, '-U', decodeURIComponent(database.username), '-d', name, '-f', join(source, 'scripts/commerce-facts.sql')], {
-  env: { PATH: env.PATH, PGPASSWORD: decodeURIComponent(database.password) }, encoding: 'utf8',
-});
-writeFileSync(join(root, 'commerce-facts.log'), (facts.stdout || '') + (facts.stderr || ''), { mode: 0o600 });
-if (facts.status !== 0) throw new Error(`Commerce facts failed; evidence retained at ${root}`);
-const lines = facts.stdout.split('\n');
-const header = lines.findIndex((line) => line.includes('captured_orders') && line.includes('net_revenue'));
-const columns = lines[header].split('|').map((value) => value.trim());
-const values = lines[header + 2].split('|').map((value) => value.trim());
-const metrics = Object.fromEntries(columns.map((column, index) => [column, values[index]]));
-assert.equal(Number(metrics.captured_orders), 1);
-assert.equal(Number(metrics.captured_revenue), 25);
-assert.equal(Number(metrics.refund), 5);
-assert.equal(Number(metrics.net_revenue), 20);
-console.log('CONTROLLED VERIFIED: Medusa capture, five route gates, reconciliation hold, external refund adoption.');
-console.log('Evidence:', root);
-console.log('Isolated database retained:', name);
+function query(text) {
+ const r=spawnSync(join(pgBin,'psql'),['--no-psqlrc','-h',database.hostname,'-p',database.port,'-U',decodeURIComponent(database.username),'-d',name,'-v','ON_ERROR_STOP=1','-c',text],{env:{PATH:env.PATH,PGPASSWORD:decodeURIComponent(database.password)},encoding:'utf8'});
+ if(r.status!==0)throw Error('Scratch query failed');return r.stdout;
+}
+function runFacts(environment, expected) {
+ const r=spawnSync(join(pgBin,'psql'),['--no-psqlrc','-h',database.hostname,'-p',database.port,'-U',decodeURIComponent(database.username),'-d',name,'-v','ON_ERROR_STOP=1',...(environment?['-v','payment_environment='+environment]:[]),'-f',join(source,'scripts/commerce-facts.sql')],{env:{PATH:env.PATH,PGPASSWORD:decodeURIComponent(database.password)},encoding:'utf8'});
+ writeFileSync(join(root,'commerce-facts-'+(environment||'default-live')+'-'+expected+'.log'),r.stdout+r.stderr,{mode:0o600});if(r.status!==0)throw Error('Commerce fact SQL failed');
+ const lines=r.stdout.split('\n'),h=lines.findIndex(l=>l.includes('captured_orders')&&l.includes('net_revenue'));
+ if(expected===0){assert.match(lines[h+2],/^\(0 /);assert.match(r.stdout,/dimension_type/);return;}
+ const cols=lines[h].split('|').map(x=>x.trim()),vals=lines[h+2].split('|').map(x=>x.trim()),m=Object.fromEntries(cols.map((k,i)=>[k,vals[i]]));
+ assert.equal(Number(m.captured_orders),1);assert.equal(Number(m.captured_revenue),25);assert.equal(Number(m.refund),5);assert.equal(Number(m.net_revenue),20);
+}
+runFacts(undefined,0);runFacts('sandbox',1);
+// Only this newly created loopback fixture DB. No remote APIs run after these changes.
+query(`BEGIN; UPDATE payment_session SET data=data||'{"paypal_environment":"live"}'::jsonb||jsonb_build_object('approval_url','https://www.paypal.com/checkoutnow?token='||(data->>'id')) WHERE provider_id='pp_paypal_paypal'; UPDATE payment SET data=data||'{"paypal_environment":"live"}'::jsonb||jsonb_build_object('approval_url','https://www.paypal.com/checkoutnow?token='||(data->>'id')) WHERE provider_id='pp_paypal_paypal'; COMMIT;`);
+runFacts(undefined,1);runFacts('sandbox',0);
+query(`UPDATE payment SET data=data||'{"paypal_environment":"sandbox"}'::jsonb WHERE provider_id='pp_paypal_paypal';`);runFacts(undefined,0);runFacts('sandbox',0);
+query(`UPDATE payment SET data=data-'paypal_environment' WHERE provider_id='pp_paypal_paypal';`);runFacts(undefined,0);
+console.log('CONTROLLED VERIFIED: capture, five fulfillment gates, external refund adoption, real module webhook environment checks, immutable session update, SQL Live/Sandbox/mixed/unknown isolation.');
+console.log('Evidence:',root);

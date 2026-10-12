@@ -208,46 +208,19 @@ function validateProductionEnvironment(env) {
   // which never takes money). A partial set is a configuration error, not a
   // feature toggle — it must fail startup rather than register a half-wired
   // provider that would expose `pp_paypal_paypal` without valid credentials.
-  const paypalEnv = {
-    client_id: env.PAYPAL_CLIENT_ID || '',
-    client_secret: env.PAYPAL_CLIENT_SECRET || '',
-    sandbox: env.PAYPAL_SANDBOX,
-    webhook_id: env.PAYPAL_WEBHOOK_ID || '',
-    return_url: env.PAYPAL_RETURN_URL || '',
-    cancel_url: env.PAYPAL_CANCEL_URL || '',
-  };
-  const paypalPresent = [
-    paypalEnv.client_id,
-    paypalEnv.client_secret,
-    paypalEnv.sandbox,
-    paypalEnv.webhook_id,
-    paypalEnv.return_url,
-    paypalEnv.cancel_url,
-  ].filter(Boolean).length;
+  const paypalPresent = Object.keys(env).some(k => k.startsWith('PAYPAL_') && env[k]);
   let paypal = null;
-  if (paypalPresent > 0) {
-    if (paypalPresent !== 6) {
-      throw new Error('PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_SANDBOX, PAYPAL_WEBHOOK_ID, PAYPAL_RETURN_URL and PAYPAL_CANCEL_URL must be provided together.');
+  if (paypalPresent) {
+    const contract = require('./paypal-environment.cjs').configuration(env);
+    const active = contract.clients[contract.active];
+    if (!/^https:\/\//.test(env.PAYPAL_RETURN_URL || '') || !/^https:\/\//.test(env.PAYPAL_CANCEL_URL || '')) {
+      throw new Error('PayPal return/cancel URLs must be absolute https URLs.');
     }
-    if (!['true', 'false'].includes(paypalEnv.sandbox)) {
-      throw new Error('PAYPAL_SANDBOX must be "true" or "false".');
-    }
-    if (!/^https:\/\//.test(paypalEnv.return_url) || !/^https:\/\//.test(paypalEnv.cancel_url)) {
-      throw new Error('PAYPAL_RETURN_URL and PAYPAL_CANCEL_URL must be absolute https URLs.');
-    }
-    // The return URL must live on the storefront origin, so a PayPal redirect can
-    // never bounce a buyer to an unrelated host.
-    if (!paypalEnv.return_url.startsWith(storeCors + '/') && paypalEnv.return_url !== storeCors) {
-      throw new Error('PAYPAL_RETURN_URL must live on the storefront origin.');
-    }
-    paypal = {
-      client_id: paypalEnv.client_id,
-      client_secret: paypalEnv.client_secret,
-      sandbox: paypalEnv.sandbox === 'true',
-      webhook_id: paypalEnv.webhook_id,
-      return_url: paypalEnv.return_url,
-      cancel_url: paypalEnv.cancel_url,
-    };
+    if (!env.PAYPAL_RETURN_URL.startsWith(storeCors + '/') && env.PAYPAL_RETURN_URL !== storeCors) throw new Error('PAYPAL_RETURN_URL must live on the storefront origin.');
+    if (!env.PAYPAL_CANCEL_URL.startsWith(storeCors + '/') && env.PAYPAL_CANCEL_URL !== storeCors) throw new Error('PAYPAL_CANCEL_URL must live on the storefront origin.');
+    paypal = { client_id: active.client_id, client_secret: active.client_secret,
+      sandbox: contract.active === 'sandbox', webhook_id: active.webhook_id,
+      return_url: env.PAYPAL_RETURN_URL, cancel_url: env.PAYPAL_CANCEL_URL };
   }
 
   return {
