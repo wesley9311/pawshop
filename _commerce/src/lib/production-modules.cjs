@@ -117,7 +117,7 @@ function productionModules({ redisUrl, fileStorage, googleAuth, paypal, jwtSecre
     // exposed to a customer-facing region.
     ...(paypal
       ? [{
-          resolve: '@medusajs/medusa/payment',
+          resolve: './src/modules/pawshop-payment',
           options: {
             providers: [{
               resolve: './src/modules/paypal',

@@ -26,6 +26,8 @@ import {
   WebhookActionResult,
 } from '@medusajs/framework/types'
 import type { Logger } from '@medusajs/framework/types'
+import { createHash } from 'node:crypto'
+import { externalRefundContext } from '../../lib/paypal-external-refund-context'
 
 // PayPal Orders API v2 — redirect (authorize/capture) integration.
 //
@@ -35,8 +37,9 @@ import type { Logger } from '@medusajs/framework/types'
 // buyer approves on PayPal, PayPal redirects back to the storefront's return
 // URL, and then either the webhook (CHECKOUT.ORDER.APPROVED → authorized) or
 // the storefront's completion request authorizes the order inside Medusa.
-// Capturing is a separate, explicit step (capturePayment) so funds are only
-// taken once the order is confirmed, never on authorization alone.
+// PawShop keeps AUTHORIZE intent, then captures server-side as part of the
+// authorization call. Returning `captured` lets Medusa create its Payment and
+// Capture facts atomically after PayPal confirms the full amount.
 
 type Options = {
   // Sandbox or live client credentials from developer.paypal.com.
@@ -129,6 +132,7 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
       return this.token_.value
     }
     const res = await fetch(`${this.apiBase_}/v1/oauth2/token`, {
+      signal: AbortSignal.timeout(10_000),
       method: 'POST',
       headers: {
         'content-type': 'application/x-www-form-urlencoded',
@@ -157,13 +161,17 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
     method: string,
     path: string,
     body?: Record<string, unknown>,
+    headers?: Record<string, string>,
   ): Promise<T> {
     const token = await this.accessToken()
     const res = await fetch(`${this.apiBase_}${path}`, {
+      signal: AbortSignal.timeout(10_000),
       method,
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${token}`,
+        Prefer: 'return=representation',
+        ...(headers || {}),
       },
       body: body ? JSON.stringify(body) : undefined,
     })
@@ -184,6 +192,104 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
       )
     }
     return json as T
+  }
+
+  private requestId(operation: string, providerId: string): string {
+    // PayPal retains PayPal-Request-Id for idempotent POST retries. Keep the
+    // value deterministic across Medusa workflow/callback/webhook retries and
+    // below PayPal's 38-character limit.
+    return createHash('sha256').update(`pawshop:${operation}:${providerId}`).digest('hex').slice(0, 32)
+  }
+
+  private expectedPayment(data: Record<string, unknown> | undefined, order: PayPalOrder) {
+    const unitAmount = order.purchase_units?.[0]?.amount
+    const value = data?.expected_amount ?? unitAmount?.value
+    const currency = data?.currency_code ?? unitAmount?.currency_code
+    if ((typeof value !== 'string' && typeof value !== 'number') || typeof currency !== 'string') {
+      throw new MedusaError(
+        MedusaError.Types.UNEXPECTED_STATE,
+        'PayPal payment is missing its expected amount or currency.',
+      )
+    }
+    const amount = new BigNumber(value as any).numeric.toFixed(2)
+    const currencyCode = typeof currency === 'string' ? currency.toUpperCase() : ''
+    if (!currencyCode || !/^\d+\.\d{2}$/.test(amount)) {
+      throw new MedusaError(
+        MedusaError.Types.UNEXPECTED_STATE,
+        'PayPal payment is missing its expected amount or currency.',
+      )
+    }
+    return { amount, currencyCode }
+  }
+
+  private captureFromOrder(
+    order: PayPalOrder,
+    expected: { amount: string; currencyCode: string },
+  ): PayPalCapture | null {
+    const captures = order.purchase_units?.flatMap((unit) => unit.payments?.captures || []) || []
+    if (!captures.length) return null
+    if (captures.length !== 1) {
+      throw new MedusaError(
+        MedusaError.Types.UNEXPECTED_STATE,
+        'PayPal returned an ambiguous set of captures; reconciliation is required.',
+      )
+    }
+    this.assertExactCapture(captures[0], expected)
+    if (!['COMPLETED', 'PENDING'].includes(captures[0].status)) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `PayPal capture cannot be adopted (${captures[0].status || 'UNKNOWN'}).`,
+      )
+    }
+    return captures[0]
+  }
+
+  private assertExactCapture(
+    capture: PayPalCapture,
+    expected: { amount: string; currencyCode: string },
+  ): void {
+    const captureAmount = capture.amount?.value
+    const captureCurrency = capture.amount?.currency_code?.toUpperCase()
+    if (typeof capture.id !== 'string' || !capture.id || typeof captureAmount !== 'string') {
+      throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, 'PayPal capture is missing its id or amount.')
+    }
+    const normalizedAmount = new BigNumber(captureAmount as any).numeric.toFixed(2)
+    if (normalizedAmount !== expected.amount || captureCurrency !== expected.currencyCode) {
+      throw new MedusaError(
+        MedusaError.Types.UNEXPECTED_STATE,
+        'PayPal capture amount or currency does not match the authorized payment.',
+      )
+    }
+  }
+
+  private capturedOutput(
+    externalId: string,
+    authorizationId: string | null,
+    capture: PayPalCapture,
+    baseData: Record<string, unknown>,
+  ): AuthorizePaymentOutput {
+    if (capture.status !== 'COMPLETED') {
+      return {
+        status: 'pending_authorization',
+        data: {
+          ...baseData,
+          id: externalId,
+          status: capture.status,
+          authorization_id: authorizationId,
+          capture_id: capture.id,
+        },
+      }
+    }
+    return {
+      status: 'captured',
+      data: {
+        ...baseData,
+        id: externalId,
+        status: capture.status,
+        authorization_id: authorizationId,
+        capture_id: capture.id,
+      },
+    }
   }
 
   // --- Lifecycle methods ---------------------------------------------------
@@ -232,6 +338,9 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
         approval_url: approvalUrl,
         status: order.status,
         intent: 'AUTHORIZE',
+        auto_capture_policy: 'pawshop-auto-capture-v1',
+        expected_amount: new BigNumber(amount).numeric.toFixed(2),
+        currency_code: currency_code.toUpperCase(),
       },
     }
   }
@@ -253,6 +362,10 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
     // the cart into an order) while PayPal holds no authorization — and the
     // later capture has nothing to capture.
     let order = await this.request<PayPalOrder>('GET', `/v2/checkout/orders/${externalId}`)
+    const sessionId = input.context?.idempotency_key
+    if (sessionId && this.resolveSessionId(order) !== sessionId) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'PayPal order/session relation mismatch.')
+    }
 
     if (order.status === 'APPROVED') {
       // First approval: perform the authorization and read back the new
@@ -261,20 +374,45 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
         'POST',
         `/v2/checkout/orders/${externalId}/authorize`,
         {},
+        { 'PayPal-Request-Id': this.requestId('authorize', externalId) },
       )
     }
 
     if (order.status === 'COMPLETED') {
       const authorization = order.purchase_units?.[0]?.payments?.authorizations?.[0]
       const authorizationId = authorization?.id ?? await this.findAuthorizationId(externalId)
-      return {
-        status: 'authorized',
-        data: {
-          id: externalId,
-          status: order.status,
-          authorization_id: authorizationId,
-        },
+      const expected = this.expectedPayment(input.data as Record<string, unknown>, order)
+      const existingCapture = this.captureFromOrder(order, expected)
+      if (existingCapture) {
+        return this.capturedOutput(externalId, authorizationId, existingCapture, input.data as Record<string, unknown>)
       }
+
+      if (!authorizationId) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          'PayPal authorization completed without an authorization id.',
+        )
+      }
+
+      // PawShop keeps AUTHORIZE intent, but normal checkout is auto-captured on
+      // the backend immediately after authorization. This method is invoked by
+      // both cart completion and the signed APPROVED webhook path, so capture
+      // never depends on a browser callback. The deterministic request id makes
+      // concurrent/retried calls the same PayPal operation.
+      const capture = await this.request<PayPalCapture>(
+        'POST',
+        `/v2/payments/authorizations/${authorizationId}/capture`,
+        {},
+        { 'PayPal-Request-Id': this.requestId('capture', authorizationId) },
+      )
+      this.assertExactCapture(capture, expected)
+      if (!['COMPLETED', 'PENDING'].includes(capture.status)) {
+        throw new MedusaError(
+          MedusaError.Types.NOT_ALLOWED,
+          `PayPal automatic capture did not complete (${capture.status || 'UNKNOWN'}).`,
+        )
+      }
+      return this.capturedOutput(externalId, authorizationId, capture, input.data as Record<string, unknown>)
     }
 
     // The buyer has not approved yet (or canceled). This is not an error from
@@ -283,6 +421,7 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
     return {
       status: 'pending',
       data: {
+        ...input.data,
         id: externalId,
         status: order.status,
       },
@@ -291,8 +430,32 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
 
   async capturePayment(input: CapturePaymentInput): Promise<CapturePaymentOutput> {
     const externalId = input.data?.id as string | undefined
+    const order = externalId
+      ? await this.request<PayPalOrder>('GET', `/v2/checkout/orders/${externalId}`)
+      : null
+    if (!order) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, 'PayPal capture requires the order id.')
+    }
+    const expected = this.expectedPayment(input.data as Record<string, unknown>, order)
+    const existingCapture = this.captureFromOrder(order, expected)
+    if (existingCapture?.status === 'COMPLETED') {
+      return {
+        data: {
+          ...(input.data as object),
+          capture_id: existingCapture.id,
+          status: existingCapture.status,
+        },
+      }
+    }
+    if (existingCapture?.status === 'PENDING') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'PayPal capture is still pending; Medusa capture fact was not recorded.',
+      )
+    }
     const authorizationId =
       (input.data?.authorization_id as string | undefined) ||
+      order?.purchase_units?.[0]?.payments?.authorizations?.[0]?.id ||
       await this.findAuthorizationId(externalId)
     if (!authorizationId) {
       throw new MedusaError(
@@ -304,9 +467,18 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
       'POST',
       `/v2/payments/authorizations/${authorizationId}/capture`,
       {},
+      { 'PayPal-Request-Id': this.requestId('capture', authorizationId) },
     )
+    this.assertExactCapture(capture, expected)
+    if (capture.status !== 'COMPLETED') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `PayPal capture was not completed (${capture.status || 'UNKNOWN'}); Medusa capture fact was not recorded.`,
+      )
+    }
     return {
       data: {
+        ...(input.data as object),
         id: externalId,
         capture_id: capture.id,
         status: capture.status,
@@ -328,15 +500,51 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
     // INVALID_REQUEST. Coerce through BigNumber so any BigNumberInput shape
     // (raw object, BigNumber instance, string, or number) resolves correctly.
     const amount = new BigNumber(input.amount).numeric.toFixed(2)
+    const adoption = externalRefundContext.getStore()
+    if (adoption) {
+      if (adoption.captureId !== captureId || adoption.amount !== amount ||
+          adoption.currency !== String(input.data?.currency_code || '').toUpperCase()) {
+        throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'External refund context mismatch.')
+      }
+      const existing = await this.request<PayPalRefund>(
+        'GET', `/v2/payments/refunds/${encodeURIComponent(adoption.refundId)}`,
+      )
+      if (existing.id !== adoption.refundId || existing.status !== 'COMPLETED' ||
+          existing.amount?.value !== amount || existing.amount?.currency_code !== adoption.currency) {
+        throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'External refund fact changed.')
+      }
+      return { data: { ...input.data, refund_id: existing.id,
+        refund_map: { ...(input.data?.refund_map as object || {}), [existing.id]: input.context?.idempotency_key } } }
+    }
+    if (!input.context?.idempotency_key) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, 'PayPal refund requires a Medusa refund id.')
+    }
     const refund = await this.request<PayPalRefund>(
       'POST',
       `/v2/payments/captures/${captureId}/refund`,
       { amount: { value: amount, currency_code: (input.data?.currency_code as string) || 'USD' } },
+      {
+        'PayPal-Request-Id': this.requestId(
+          'refund',
+          String(input.context.idempotency_key),
+        ),
+      },
     )
+    const refundAmount = new BigNumber(refund.amount?.value as any).numeric.toFixed(2)
+    const refundCurrency = refund.amount?.currency_code?.toUpperCase()
+    if (refund.status !== 'COMPLETED' || refundAmount !== amount ||
+        refundCurrency !== String(input.data?.currency_code || 'USD').toUpperCase()) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'PayPal refund was not completed for the exact requested amount and currency.',
+      )
+    }
     return {
       data: {
+        ...(input.data as object),
         id: input.data?.id,
         refund_id: refund.id,
+        refund_map: { ...(input.data?.refund_map as object || {}), [refund.id]: input.context.idempotency_key },
         status: refund.status,
       },
     }
@@ -344,7 +552,9 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
 
   async cancelPayment(input: CancelPaymentInput): Promise<CancelPaymentOutput> {
     const externalId = input.data?.id as string | undefined
-    if (!externalId) return { data: input.data }
+    if (!externalId || input.data?.capture_id) return { data: input.data }
+    // A local authorization transaction error can trigger this compensation
+    // after PayPal has already captured. Never void that captured operation.
     // Void an un-captured authorization if one exists.
     const authorizationId = await this.findAuthorizationId(externalId)
     if (authorizationId) {
@@ -373,16 +583,27 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
     const externalId = input.data?.id as string | undefined
     if (!externalId) return { data: input.data }
     const order = await this.request<PayPalOrder>('GET', `/v2/checkout/orders/${externalId}`)
-    return { data: { ...(input.data as object), status: order.status } }
+    const expected = this.expectedPayment(input.data as Record<string, unknown>, order)
+    const capture = this.captureFromOrder(order, expected)
+    const authorization = order.purchase_units?.flatMap((unit) => unit.payments?.authorizations || [])[0]
+    let status = order.status === 'APPROVED' ? 'APPROVED' : 'PENDING'
+    if (capture?.status === 'COMPLETED') status = 'CAPTURED'
+    else if (capture?.status === 'PENDING') status = 'PENDING_CAPTURE'
+    else if (capture) status = capture.status
+    else if (authorization?.status === 'CREATED') status = 'AUTHORIZED'
+    else if (authorization) status = authorization.status
+    return { data: { ...(input.data as object), status } }
   }
 
   async getPaymentStatus(input: GetPaymentStatusInput): Promise<GetPaymentStatusOutput> {
     const status = input.data?.status as string | undefined
     switch (status) {
-      case 'APPROVED':
+      case 'AUTHORIZED':
         return { status: 'authorized' }
-      case 'COMPLETED':
+      case 'CAPTURED':
         return { status: 'captured' }
+      case 'PENDING_CAPTURE':
+        return { status: 'pending_authorization' }
       case 'VOIDED':
       case 'CANCELED':
         return { status: 'canceled' }
@@ -428,23 +649,47 @@ class PayPalPaymentProviderService extends AbstractPaymentProvider<Options> {
         return sessionId
           ? { action: 'authorized', data: { session_id: sessionId, amount: 0 } }
           : noSession
-      case WEBHOOK_EVENTS.COMPLETED:
-        // A capture completed (either our explicit capture or a direct capture).
-        return sessionId
-          ? { action: 'captured', data: { session_id: sessionId, amount: 0 } }
-          : noSession
+      case WEBHOOK_EVENTS.COMPLETED: {
+        // Re-read the provider order instead of treating a signed notification
+        // as proof of a complete capture. Partial/mismatched facts fail closed.
+        const orderId = (resource as any)?.supplementary_data?.related_ids?.order_id
+        if (!sessionId || typeof orderId !== 'string') return noSession
+        const order = await this.request<PayPalOrder>(
+          'GET', `/v2/checkout/orders/${encodeURIComponent(orderId)}`,
+        )
+        if (order.id !== orderId || this.resolveSessionId(order) !== sessionId) return noSession
+        const expected = this.expectedPayment({}, order)
+        const captures = order.purchase_units?.flatMap((unit) => unit.payments?.captures || []) || []
+        // A delayed COMPLETED event must not undo a later provider refund or
+        // perpetually retry capture. Validate the original capture relationship
+        // and ignore the obsolete action; reconciliation owns the refund facts.
+        if (captures.length === 1 && captures[0].id === resource.id &&
+            ['REFUNDED', 'PARTIALLY_REFUNDED'].includes(captures[0].status)) {
+          this.assertExactCapture(captures[0], expected)
+          return noSession
+        }
+        const capture = this.captureFromOrder(order, expected)
+        if (!capture || capture.status !== 'COMPLETED' || capture.id !== resource.id) return noSession
+        return { action: 'captured', data: { session_id: sessionId, amount: this.webhookAmount(capture) } }
+      }
       case WEBHOOK_EVENTS.DENIED:
         return sessionId
           ? { action: 'failed', data: { session_id: sessionId, amount: 0 } }
           : noSession
       case WEBHOOK_EVENTS.REFUNDED:
       case WEBHOOK_EVENTS.REVERSED:
-        // Refunds are driven from Medusa (refundPayment), not reconciled from
-        // PayPal, so these are informational and must not re-trigger completion.
+        // The PawShop reconciliation middleware handles these with a durable
+        // ledger and the official refund workflow; never re-trigger checkout.
         return noSession
       default:
         return noSession
     }
+  }
+
+  private webhookAmount(resource: any): number {
+    const value = resource?.amount?.value
+    const amount = typeof value === 'string' || typeof value === 'number' ? Number(value) : NaN
+    return Number.isFinite(amount) && amount > 0 ? amount : 0
   }
 
   private resolveSessionId(resource: any): string {
@@ -557,9 +802,11 @@ interface PayPalOrder {
   intent: string
   links?: Array<{ href: string; rel: string; method: string }>
   purchase_units?: Array<{
+    custom_id?: string
+    amount?: { currency_code?: string; value?: string }
     payments?: {
       authorizations?: Array<{ id: string; status: string }>
-      captures?: Array<{ id: string; status: string }>
+      captures?: PayPalCapture[]
     }
   }>
 }
@@ -567,11 +814,13 @@ interface PayPalOrder {
 interface PayPalCapture {
   id: string
   status: string
+  amount?: { currency_code?: string; value?: string }
 }
 
 interface PayPalRefund {
   id: string
   status: string
+  amount?: { currency_code?: string; value?: string }
 }
 
 interface PayPalWebhookEvent {

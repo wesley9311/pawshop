@@ -39,6 +39,9 @@ module.exports = defineConfig({
     // acceptance exercises the same module graph the host runs. It owns a single
     // table and never touches commerce data.
     { resolve: './src/modules/pawshop-customer-auth' },
+    // PayPal refund/reversal events need a durable idempotency and exception
+    // ledger because Medusa 2.21 has no refund webhook action.
+    { resolve: './src/modules/pawshop-payment-reconciliation' },
   ],
   ...(productionMode
     ? {

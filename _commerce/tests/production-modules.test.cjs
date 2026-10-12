@@ -73,7 +73,7 @@ test('the payment module (and PayPal provider) is registered only when credentia
     endpoint: 'https://s3.example.com', prefix: 'products/',
   };
   const payment = (paypal) => productionModules({ redisUrl, fileStorage, paypal, jwtSecret: JWT_SECRET })
-    .find(m => m.resolve === '@medusajs/medusa/payment');
+    .find(m => m.resolve === './src/modules/pawshop-payment');
 
   // Absent / null -> no payment module: the framework default (system provider
   // alone) stays in place and nothing money-capable is exposed.

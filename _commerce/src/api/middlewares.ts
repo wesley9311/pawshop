@@ -3,6 +3,9 @@ import { commerceIsOpen } from '../lib/production-modes.cjs'
 import { validateCartShippingAddress } from '../lib/address-structure.cjs'
 import { verificationRateLimit } from '../lib/verification-rate-limit-middleware.cjs'
 import { normalizeAuthEmail } from '../lib/normalize-auth-email.cjs'
+import { serializeAdminRefund } from '../lib/order-payment-lock.cjs'
+import { requireCapturedPayment } from '../lib/fulfillment-payment-gate.cjs'
+import { reconcilePayPalExternalPayment } from '../lib/paypal-reconciliation'
 
 const unavailable = (_req: any, res: any) => {
   res.status(503).json({ type: 'not_allowed', message: 'PawShop storefront APIs are not open.' })
@@ -99,6 +102,22 @@ export default defineMiddlewares({
           },
         ]
       : []),
+    // PawShop's fulfillment invariant is stronger than Medusa's default: a
+    // non-zero order must have complete, non-refunded capture facts before any
+    // fulfillment lifecycle mutation. Cover both generic and order-scoped Admin
+    // routes so a different dashboard/API path cannot bypass the server gate.
+    { matcher: '/admin/payments/:id/refund', method: 'POST' as const, middlewares: [serializeAdminRefund] },
+    { matcher: '/admin/fulfillments', method: 'POST' as const, middlewares: [requireCapturedPayment] },
+    { matcher: '/admin/orders/:id/fulfillments', method: 'POST' as const, middlewares: [requireCapturedPayment] },
+    { matcher: '/admin/fulfillments/:id/shipment', method: 'POST' as const, middlewares: [requireCapturedPayment] },
+    { matcher: '/admin/orders/:id/fulfillments/:fulfillment_id/shipments', method: 'POST' as const, middlewares: [requireCapturedPayment] },
+    { matcher: '/admin/orders/:id/fulfillments/:fulfillment_id/mark-as-delivered', method: 'POST' as const, middlewares: [requireCapturedPayment] },
+    {
+      matcher: '/hooks/payment/paypal_paypal',
+      method: 'POST' as const,
+      bodyParser: { preserveRawBody: true },
+      middlewares: [reconcilePayPalExternalPayment],
+    },
     { matcher: '/connector/v1', ...connectorBodyParser },
     { matcher: '/connector/v1/*', ...connectorBodyParser },
   ],
