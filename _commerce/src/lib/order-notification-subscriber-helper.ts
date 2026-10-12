@@ -412,7 +412,14 @@ export async function handleRefundCompleted(container:Container,logger:Logger,re
 export async function handleRefundReview(container:Container,logger:Logger,recordId:string,expectedType?:string){
  const rows=await(container.resolve('pawshopPaymentReconciliation') as any).listPaymentReconciliations({id:recordId})
  if(!rows[0]?.order_id||rows[0].event_type!=='refund'||rows[0].status!=='review')return 'suppressed'
- const initial=await reviewRefundFacts(container,recordId)
+ let initial
+ try{initial=await reviewRefundFacts(container,recordId)}catch(error){
+  if((error as Error).message==='notification_review_not_current'){
+   if(expectedType)await(container.resolve(PAWSHOP_NOTIFICATION_MODULE) as any).markTerminal({idempotencyKey:buildIdempotencyKey(expectedType,recordId),errorCategory:'superseded',now:new Date()})
+   return 'suppressed'
+  }
+  throw error
+ }
  const type=expectedType||(initial.state==='processing'?NOTIFICATION_TYPES.REFUND_PROCESSING:NOTIFICATION_TYPES.REFUND_REVIEW)
  return sendOnce(container,logger,type,recordId,rows[0].order_id,undefined,async()=>{
   const fresh=await reviewRefundFacts(container,recordId)

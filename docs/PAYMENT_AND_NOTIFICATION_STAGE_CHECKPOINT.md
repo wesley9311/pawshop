@@ -121,3 +121,8 @@ are reported as needing review. Controlled cancellation case verifies this messa
 and rejects the false "no authorization" statement. Fresh proof additionally
 validates review capture and currency mapping. Latest controlled evidence:
 `/var/folders/gc/l9xqtlv13fl5vgf2z46qm1zr0000gn/T/pawshop-payment-acceptance-860DPi`.
+
+Late review suppression is also runtime-tested: once the provider refund is
+completed AND its exact local refund identity/amount is confirmed, a still-review
+ledger row cannot cause an obsolete processing/review mail. Latest final controlled
+proof: `/var/folders/gc/l9xqtlv13fl5vgf2z46qm1zr0000gn/T/pawshop-payment-acceptance-mhBGIm`.

@@ -1,3 +1,4 @@
+import { externalRefundContext } from '../src/lib/paypal-external-refund-context'
 import { Modules, ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import { cancelOrderWorkflow, refundPaymentWorkflow } from '@medusajs/core-flows'
 import { handleOrderCancelled, handleRefundCompleted, handleRefundReview, retryOnce } from '../src/lib/order-notification-subscriber-helper'
@@ -63,6 +64,9 @@ export default async function ({container}:any) {
   await handleRefundReview(container,logger,review.id);assert.match(plain(sink.messages.at(-1).body),/still being processed/)
   record.refunds.PENDING.status='FAILED';await handleRefundReview(container,logger,review.id);assert.match(plain(sink.messages.at(-1).body),/reviewing the refund/)
   const reviewCount=sink.messages.length;await handleRefundReview(container,logger,review.id);assert.equal(sink.messages.length,reviewCount)
+  record.refunds.PENDING.status='COMPLETED'
+  await externalRefundContext.run({refundId:'PENDING',captureId:'CAP'+record.id,amount:'5.00',currency:'USD'},()=>refundPaymentWorkflow(container).run({input:{payment_id:captured.id,amount:5}}))
+  assert.equal(await handleRefundReview(container,logger,review.id),'suppressed');assert.equal(sink.messages.length,reviewCount)
   await ledger.updatePaymentReconciliations({id:review.id,status:'applied'})
   // Captured cancellation performs the official remaining refund first.
   await cancelOrderWorkflow(container).run({input:{order_id:paid.id}});await handleOrderCancelled(container,logger,paid.id)

@@ -103,5 +103,7 @@ export async function reviewRefundFacts(container: any, recordId: string) {
   if (payment.payment_collection.order.id !== row.order_id || row.capture_id !== payment.data?.capture_id || String(row.currency_code).toUpperCase() !== String(payment.currency_code).toUpperCase() || !adapter) throw Error('notification_refund_relation_invalid')
   await adapter.payment(payment)
   const state = await adapter.refund(payment, row.external_id, row.amount)
+  const local=payment.data?.refund_map?.[row.external_id]
+  if(state==='completed' && (payment.refunds||[]).some((r:any)=>r.id===local && money(r.amount)===money(row.amount)))throw Error('notification_review_not_current')
   return { verified: true, orderId: row.order_id, amount: money(row.amount) / 100, currency: String(payment.currency_code).toUpperCase(), state: state === 'processing' ? 'processing' : 'review' }
 }
