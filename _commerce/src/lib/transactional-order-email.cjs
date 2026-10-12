@@ -15,7 +15,7 @@
 // that is not there, and a "delivered" email never names a carrier state that
 // Medusa does not store.
 
-const { randomBytes } = require('node:crypto');
+const { randomBytes, createHash } = require('node:crypto');
 const { SmtpError, buildMessage, sendMessage } = require('./smtp-client.cjs');
 
 // ---------------------------------------------------------------------------
@@ -205,6 +205,10 @@ const NOTIFICATION_TYPES = {
   ORDER_CONFIRMED: 'order_confirmed',
   ORDER_SHIPPED: 'shipped',
   ORDER_DELIVERED: 'delivered',
+  ORDER_CANCELLED: 'order_cancelled',
+  REFUND_COMPLETED: 'refund_completed',
+  REFUND_REVIEW: 'refund_review',
+  REFUND_PROCESSING: 'refund_processing',
 };
 
 // Idempotency keys. The key is the entire deduplication mechanism upstream: the
@@ -222,6 +226,14 @@ function buildIdempotencyKey(type, id) {
   switch (type) {
     case NOTIFICATION_TYPES.ORDER_CONFIRMED:
       return `order:${raw}:order_confirmed`;
+    case NOTIFICATION_TYPES.ORDER_CANCELLED:
+      return `order:${raw}:order_cancelled`;
+    case NOTIFICATION_TYPES.REFUND_COMPLETED:
+      return `refund:${raw}:completed`;
+    case NOTIFICATION_TYPES.REFUND_PROCESSING:
+      return `refund-review:${raw}:processing`;
+    case NOTIFICATION_TYPES.REFUND_REVIEW:
+      return `refund-review:${raw}:review`;
     case NOTIFICATION_TYPES.ORDER_SHIPPED:
       return `fulfillment:${raw}:shipped`;
     case NOTIFICATION_TYPES.ORDER_DELIVERED:
@@ -614,7 +626,44 @@ const SUBJECTS = {
   [NOTIFICATION_TYPES.ORDER_CONFIRMED]: 'Your Pawlivora order is confirmed',
   [NOTIFICATION_TYPES.ORDER_SHIPPED]: 'Your Pawlivora order has shipped',
   [NOTIFICATION_TYPES.ORDER_DELIVERED]: 'Your Pawlivora order has been delivered',
+  [NOTIFICATION_TYPES.ORDER_CANCELLED]: 'Your Pawlivora order has been cancelled',
+  [NOTIFICATION_TYPES.REFUND_COMPLETED]: 'Your Pawlivora refund is confirmed',
+  [NOTIFICATION_TYPES.REFUND_REVIEW]: 'An update on your Pawlivora refund',
+  [NOTIFICATION_TYPES.REFUND_PROCESSING]: 'Your Pawlivora refund is processing',
 };
+
+function financialCopy(type, order, facts, supportEmail) {
+  if (!facts?.verified || facts.currency !== order.currency) return null;
+  const lines = [`Order number: ${order.publicOrderNumber}`];
+  let title;
+  if (type === NOTIFICATION_TYPES.ORDER_CANCELLED) {
+    title = 'Order cancelled'; lines.unshift('Your order has been cancelled.');
+    if (facts.unknown) lines.push('Payment status needs review. We have not confirmed the final payment or refund outcome.');
+    else if (facts.captured > 0) {
+      lines.push(`Payment captured: ${formatMoney(facts.captured, facts.currency)}`);
+      if (facts.refunded > 0) lines.push(`Refund confirmed: ${formatMoney(facts.refunded, facts.currency)}`);
+      if (Math.round(facts.refunded * 100) < Math.round(facts.captured * 100)) lines.push('A refund for the remaining captured amount is not yet confirmed. Please contact us for the next step.');
+      else lines.push('The captured payment has been refunded. Your bank may take additional time to show the credit.');
+    } else {
+      lines.push('No completed payment capture is recorded for this order.');
+      if (facts.authorization === 'voided') lines.push('The payment authorization has been voided. Your bank may take time to remove a pending hold.');
+      else if (facts.authorization === 'authorized') lines.push('Release of the payment authorization is not yet confirmed. Please contact us if a pending hold remains.');
+      else lines.push('No payment authorization is recorded.');
+    }
+    lines.push('You do not need to make another payment for this cancelled order.');
+  } else if (type === NOTIFICATION_TYPES.REFUND_COMPLETED && facts.state === 'completed' && Number.isFinite(facts.amount) && facts.amount > 0) {
+    title = 'Refund confirmed';lines.unshift('Your refund has been confirmed.');
+    lines.push(`Refund amount: ${formatMoney(facts.amount, facts.currency)}`);
+    lines.push('Your bank may take additional time to show the credit. You do not need to submit another refund request.');
+  } else if ([NOTIFICATION_TYPES.REFUND_REVIEW,NOTIFICATION_TYPES.REFUND_PROCESSING].includes(type) && ['processing','review'].includes(facts.state) && Number.isFinite(facts.amount) && facts.amount > 0) {
+    title = facts.state === 'processing' ? 'Refund processing' : 'Refund needs review';
+    lines.unshift(facts.state === 'processing' ? 'Your refund is still being processed.' : 'We are reviewing the refund for your order.');
+    lines.push(`Refund amount under review: ${formatMoney(facts.amount, facts.currency)}`);
+    lines.push('Completion has not been confirmed in our records. You do not need to submit another refund request; contact us with your order number for an update.');
+  } else return null;
+  lines.push(`Need help? Contact ${supportEmail}`);
+  return {title,body:lines.join('\n'),html:htmlPage({title,subtitle:'',bodyHtml:lines.map(line=>`<p style="font-size:14px;line-height:1.6">${escapeHtml(line)}</p>`).join(''),supportEmail})};
+}
 
 // Assemble the full RFC 5322 message for one notification. Returns null when the
 // order lacks the minimum the message needs (an address and a public number).
@@ -623,11 +672,12 @@ const SUBJECTS = {
 // human-readable display name put on the "From:" header. They are kept apart so
 // the operator can brand the sender ("Pawlivora") without ever touching the SMTP
 // account that actually authenticates and sends.
-function buildOrderMessage({ type, order, tracking = {}, from, fromName = FROM_NAME_DEFAULT, supportEmail = SUPPORT_EMAIL_DEFAULT, now = new Date() }) {
+function buildOrderMessage({ type, order, tracking = {}, from, fromName = FROM_NAME_DEFAULT, supportEmail = SUPPORT_EMAIL_DEFAULT, now = new Date(), facts = /** @type {any} */ (null), messageKey = /** @type {string|null} */ (null) }) {
   if (!order || !order.email || !order.publicOrderNumber) return null;
 
+  const financial = financialCopy(type, order, facts, supportEmail);
   let body;
-  if (type === NOTIFICATION_TYPES.ORDER_CONFIRMED) {
+  if (financial) { body = financial.body; } else if (type === NOTIFICATION_TYPES.ORDER_CONFIRMED) {
     body = buildConfirmedBody(order, supportEmail);
   } else if (type === NOTIFICATION_TYPES.ORDER_SHIPPED) {
     body = buildShippedBody(order, tracking, supportEmail);
@@ -640,7 +690,7 @@ function buildOrderMessage({ type, order, tracking = {}, from, fromName = FROM_N
   // The plain-text body is always produced; the HTML part is a richer
   // alternative for capable clients. If HTML cannot be built (it always can for
   // a valid type), the message still falls back to text/plain.
-  const html = buildOrderHtml(type, order, tracking, supportEmail);
+  const html = financial?.html || buildOrderHtml(type, order, tracking, supportEmail);
 
   // Brand the display name without changing the envelope sender. The `fromName`
   // is already validated to contain no line break, so this is a safe header.
@@ -652,7 +702,7 @@ function buildOrderMessage({ type, order, tracking = {}, from, fromName = FROM_N
     subject: SUBJECTS[type],
     body,
     html,
-    messageId: `<${randomBytes(16).toString('hex')}@pawlivora.com>`,
+    messageId: `<${messageKey ? createHash('sha256').update(messageKey).digest('hex') : randomBytes(16).toString('hex')}@pawlivora.com>`,
     date: now.toUTCString(),
   });
 }
@@ -671,11 +721,13 @@ async function deliverOrderEmail({
   supportEmail = SUPPORT_EMAIL_DEFAULT,
   send = sendMessage,
   sendOptions = {},
+  facts = /** @type {any} */ (null),
+  messageKey = /** @type {string|null} */ (null),
 }) {
   if (!credentials) return { sent: false, reason: 'no email relay is configured' };
   if (!order || !order.email) return { sent: false, reason: 'order has no customer email' };
 
-  const message = buildOrderMessage({ type, order, tracking, from: credentials.from, fromName, supportEmail });
+  const message = buildOrderMessage({ type, order, tracking, from: credentials.from, fromName, supportEmail, facts, messageKey });
   if (!message) return { sent: false, reason: 'order cannot be rendered for email' };
 
   try {

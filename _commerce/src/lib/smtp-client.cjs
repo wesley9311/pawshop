@@ -255,6 +255,7 @@ async function sendMessage({ host, port, secure, user, password, from, to, messa
 
   let socket = await connect({ host, port, secure: secure === true, timeoutMs, ca });
   let reader = createReader(socket);
+  let submitted = false, accepted = false;
   try {
     await expect(reader, 'greeting', ['220']);
     writeCommand(socket, 'EHLO pawlivora.com');
@@ -279,8 +280,10 @@ async function sendMessage({ host, port, secure, user, password, from, to, messa
     await expect(reader, 'RCPT TO', ['250', '251']);
     writeCommand(socket, 'DATA');
     await expect(reader, 'DATA', ['354']);
+    submitted = true;
     socket.write(`${dotStuff(message)}\r\n.\r\n`);
     await expect(reader, 'message body', ['250']);
+    accepted = true;
 
     writeCommand(socket, 'QUIT');
     // A relay that accepts the message but stalls on QUIT has still delivered it,
@@ -290,6 +293,10 @@ async function sendMessage({ host, port, secure, user, password, from, to, messa
       new Promise((resolve) => socket.once('close', resolve)),
     ]);
     return { delivered: true };
+  } catch (error) {
+    // Once DATA was submitted, a lost response cannot prove non-delivery.
+    if (submitted && !accepted && !(error instanceof SmtpError && error.stage === 'message body' && /^[45]\d\d$/.test(error.code || ''))) error.deliveryUncertain = true;
+    throw error;
   } finally {
     reader.stop();
     socket.destroy();

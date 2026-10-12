@@ -17,6 +17,7 @@ import {
   shouldSendNotification,
 } from './transactional-order-email.cjs'
 import { readEmailCredentials } from './email-channel.cjs'
+import { cancellationFacts, completedRefundFacts, resolveRefundOrder, reviewRefundFacts } from './notification-payment-facts'
 import { buildPublicOrderNumber } from './order-lookup.cjs'
 import type { SendClaim } from '../modules/pawshop-notification/service'
 
@@ -157,6 +158,7 @@ async function sendOnce(
   entityId: string,
   orderId: string,
   fulfillmentId?: string,
+  factsResolver?: () => Promise<any>,
 ): Promise<string> {
   const key = buildIdempotencyKey(type, entityId)
   if (!key) {
@@ -171,6 +173,15 @@ async function sendOnce(
     markTerminal: (input: { idempotencyKey: string; errorCategory: string; now: Date }) => Promise<void>
   }
 
+  const financial = Boolean(factsResolver)
+  if (financial) {
+    const prior = (await (notification as any).listTransactionalEmailSents({idempotency_key:key}))[0]
+    if (prior?.status === 'sending' && new Date(prior.lease_expires_at).getTime() < Date.now()) {
+      await notification.markTerminal({idempotencyKey:key,errorCategory:'delivery_unknown',now:new Date()})
+      logger.error(`order email: delivery needs review - ${type}`)
+      return 'delivery_unknown'
+    }
+  }
   let claim: SendClaim
   try {
     claim = await notification.tryClaim({ idempotencyKey: key, notificationType: type, entityId, now: new Date() })
@@ -193,7 +204,13 @@ async function sendOnce(
   }
 
   // claim.state === 'claim': this worker owns the lease and must attempt the send.
-  const order = await fetchOrder(container, orderId)
+  let order
+  try { order = await fetchOrder(container,orderId) } catch {
+    const next=computeNextAttemptAt(await readAttemptCount(container,key),new Date())
+    if(next)await notification.markFailed({idempotencyKey:key,errorCategory:'query',retryable:true,nextAttemptAt:next,now:new Date()})
+    else await notification.markTerminal({idempotencyKey:key,errorCategory:'max_attempts',now:new Date()})
+    return 'error'
+  }
   if (!order) {
     logger.warn(`order email: skipped - order not found for ${type}`)
     // The order is gone and will not come back — a permanent, non-retryable
@@ -207,10 +224,25 @@ async function sendOnce(
     logger.warn(`order email: skipped - order has no customer email for ${type}`)
     // No address means this event can never be delivered; mark sent so a
     // redelivery does not keep retrying a mail that has no destination.
-    await notification.markSent({ idempotencyKey: key, now: new Date() }).catch(() => undefined)
+    if(financial)await notification.markTerminal({idempotencyKey:key,errorCategory:'missing_recipient',now:new Date()}).catch(()=>undefined)
+    else await notification.markSent({idempotencyKey:key,now:new Date()}).catch(()=>undefined)
     return 'skipped'
   }
 
+  let facts: any = null
+  if (factsResolver) {
+    try {
+      facts = await factsResolver()
+      if (facts?.orderId && facts.orderId !== orderId) throw Error('notification_payment_relation_invalid')
+    } catch (error) {
+      const category = error instanceof Error && error.message === 'notification_review_not_current' ? 'superseded' : 'payment_unverified'
+      const next = computeNextAttemptAt(await readAttemptCount(container,key),new Date())
+      if (!next || category === 'superseded') await notification.markTerminal({idempotencyKey:key,errorCategory:category,now:new Date()})
+      else await notification.markFailed({idempotencyKey:key,errorCategory:category,retryable:true,nextAttemptAt:next,now:new Date()})
+      logger.warn(`order email: business fact unverified - ${type}`)
+      return 'unverified'
+    }
+  }
   let credentials
   try {
     credentials = readEmailCredentials(undefined, { serviceGid: typeof process.getgid === 'function' ? process.getgid() : null })
@@ -229,12 +261,19 @@ async function sendOnce(
     type,
     order: normalized,
     tracking,
+    facts,
+    messageKey: financial ? key : null,
     credentials,
     fromName: readFromName(process.env),
     supportEmail: readSupportEmail(process.env),
   })
 
   if (!result.sent) {
+    if (financial && (result.error as any)?.deliveryUncertain) {
+      await notification.markTerminal({idempotencyKey:key,errorCategory:'delivery_unknown',now:new Date()})
+      logger.error(`order email: delivery needs review - ${type}`)
+      return 'delivery_unknown'
+    }
     const category = classifySmtpError(result.error)
     const retryable = isRetryable(category, result.error)
     logger.error(`order email: failed for ${type} - ${result.reason}`)
@@ -255,7 +294,9 @@ async function sendOnce(
     return 'error'
   }
 
-  await notification.markSent({ idempotencyKey: key, now: new Date() }).catch(() => undefined)
+  try { await notification.markSent({idempotencyKey:key,now:new Date()}) } catch {
+    if(financial){await notification.markTerminal({idempotencyKey:key,errorCategory:'delivery_unknown',now:new Date()}).catch(()=>undefined);logger.error(`order email: relay accepted, audit needs review - ${type}`);return 'delivery_unknown'}
+  }
   logger.info(`order email: sent - ${type}`)
   return 'sent'
 }
@@ -329,6 +370,9 @@ export async function retryOnce(
   notificationType: string,
   entityId: string,
 ): Promise<string> {
+  if (notificationType === NOTIFICATION_TYPES.ORDER_CANCELLED) return handleOrderCancelled(container,logger,entityId)
+  if (notificationType === NOTIFICATION_TYPES.REFUND_COMPLETED) return handleRefundCompleted(container,logger,entityId)
+  if ([NOTIFICATION_TYPES.REFUND_REVIEW,NOTIFICATION_TYPES.REFUND_PROCESSING].includes(notificationType)) return handleRefundReview(container,logger,entityId,notificationType)
   if (notificationType === NOTIFICATION_TYPES.ORDER_CONFIRMED) {
     return sendOnce(container, logger, notificationType, entityId, entityId)
   }
@@ -350,4 +394,29 @@ export async function retryOnce(
   }
   logger.warn(`order email: recovery skipped - unknown notification type ${notificationType}`)
   return 'skipped'
+}
+
+export async function handleOrderCancelled(container:Container,logger:Logger,orderId:string){return sendOnce(container,logger,NOTIFICATION_TYPES.ORDER_CANCELLED,orderId,orderId,undefined,()=>cancellationFacts(container,orderId))}
+export async function handleRefundCompleted(container:Container,logger:Logger,refundId:string){
+ let source
+ try{source=await resolveRefundOrder(container,refundId)}catch(error){
+  if((error as any)?.type==='not_found'){
+   const key=buildIdempotencyKey(NOTIFICATION_TYPES.REFUND_COMPLETED,refundId)
+   await(container.resolve(PAWSHOP_NOTIFICATION_MODULE) as any).markTerminal({idempotencyKey:key,errorCategory:'missing_refund',now:new Date()})
+   return 'suppressed'
+  }
+  throw error
+ }
+ return sendOnce(container,logger,NOTIFICATION_TYPES.REFUND_COMPLETED,refundId,source.orderId,undefined,()=>completedRefundFacts(container,refundId))
+}
+export async function handleRefundReview(container:Container,logger:Logger,recordId:string,expectedType?:string){
+ const rows=await(container.resolve('pawshopPaymentReconciliation') as any).listPaymentReconciliations({id:recordId})
+ if(!rows[0]?.order_id||rows[0].event_type!=='refund'||rows[0].status!=='review')return 'suppressed'
+ const initial=await reviewRefundFacts(container,recordId)
+ const type=expectedType||(initial.state==='processing'?NOTIFICATION_TYPES.REFUND_PROCESSING:NOTIFICATION_TYPES.REFUND_REVIEW)
+ return sendOnce(container,logger,type,recordId,rows[0].order_id,undefined,async()=>{
+  const fresh=await reviewRefundFacts(container,recordId)
+  if((type===NOTIFICATION_TYPES.REFUND_PROCESSING)!==(fresh.state==='processing'))throw Error('notification_review_not_current')
+  return fresh
+ })
 }

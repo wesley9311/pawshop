@@ -29,6 +29,7 @@ export async function startSmtpSink({
 } = {}) {
   const secureContext = createSecureContext({ key, cert });
   const messages = [];
+  let transientRejections = 0, lostAcknowledgements = 0;
   const sockets = new Set();
 
   const onConnection = (initialSocket) => {
@@ -56,6 +57,7 @@ export async function startSmtpSink({
         authenticated,
       });
       to = '';
+      if (lostAcknowledgements > 0) {lostAcknowledgements--;socket.destroy();return;}
       write('250 2.0.0 Ok: queued as SINK1\r\n');
     };
 
@@ -105,6 +107,7 @@ export async function startSmtpSink({
           write('250 2.1.0 Ok\r\n');
           return;
         case 'RCPT':
+          if (transientRejections > 0) {transientRejections--;write('450 4.2.0 Temporary refusal\r\n');return;}
           if (rejectRecipient) { write('550 5.1.1 No such user here\r\n'); return; }
           to = argument.replace(/^TO:</i, '').replace(/>$/, '');
           write('250 2.1.5 Ok\r\n');
@@ -172,6 +175,8 @@ export async function startSmtpSink({
   return {
     port: server.address().port,
     messages,
+    rejectNextRecipient: () => {transientRejections++;},
+    loseNextAcknowledgement: () => {lostAcknowledgements++;},
     // A client that finished by writing QUIT leaves a half-closed socket behind;
     // closing the listener alone would wait on it, so the sink ends its own side.
     close: () => new Promise((resolve) => {
