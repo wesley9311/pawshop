@@ -115,7 +115,7 @@ export default defineMiddlewares({
     {
       matcher: '/hooks/payment/paypal_paypal',
       method: 'POST' as const,
-      bodyParser: { preserveRawBody: true },
+      // Medusa's built-in hook parser already preserves raw bytes.
       middlewares: [reconcilePayPalExternalPayment],
     },
     { matcher: '/connector/v1', ...connectorBodyParser },
